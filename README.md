@@ -86,7 +86,23 @@ metadata:
     - ../common/test-prerequisites.md
 ```
 
-Markdown files listed in `guides` are embedded at the top of the test suite, and their H2 headings also appear as navigation entries.
+Markdown files listed in `guides` are embedded at the top of the test suite, collapsed by
+default. Their H2 headings are searchable from the command palette along with the prose under
+each one.
+
+### Ordering sections (`category_order`)
+
+Sections are ordered by first appearance unless `category_order` lists them explicitly. Any
+category not listed sorts after the listed ones.
+
+```yaml
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+  category_order:
+    - Basic flow
+    - Error handling
+```
 
 ### Parameterized tests (`parameterized_tests`)
 
@@ -106,6 +122,35 @@ parameterized_tests:
       steps:
         - action: "Enter {{input}} into the password field"
           expected: "An error message is displayed"
+```
+
+Each pattern's `id` is appended to `id_prefix` to form the test case ID (`LOGIN-INVALID-01`).
+Any other key on a pattern is substituted wherever `{{key}}` appears in the template.
+
+Steps and postconditions can be made conditional with `when`, which supports `key == 'value'`
+combined with `&&` and `||`. A `postconditions` entry is appended to the last step's expected
+result:
+
+```yaml
+    template:
+      name: "Login as {{role}}"
+      steps:
+        - action: "Log in"
+          expected: "The dashboard is shown"
+        - action: "Open the admin menu"
+          expected: "Admin settings are listed"
+          when: "role == 'admin'"
+      postconditions:
+        - text: "An audit log entry is recorded"
+          when: "role == 'admin' || role == 'auditor'"
+```
+
+When a placeholder value is an object, `format` controls how it renders:
+
+```yaml
+    format:
+      key_labels: { email: "Email address" }
+      value_labels: { "true": "Enabled" }
 ```
 
 ## License
