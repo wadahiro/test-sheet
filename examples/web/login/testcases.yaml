@@ -1,0 +1,97 @@
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+test_cases:
+  - name: Can log in with a valid ID and password
+    category: Basic flow
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Enter ID/password on the login screen
+        expected: Redirected to the dashboard
+  - name: A session is issued after login
+    category: Basic flow
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Log in
+        expected: A session cookie is issued
+  - name: Session is invalidated on logout
+    category: Basic flow
+    preconditions:
+      - Already logged in
+    steps:
+      - action: Click the logout button
+        expected: Returns to the login screen and invalidates the session
+  - name: Visiting the top page while logged in redirects to the dashboard
+    category: Basic flow
+    preconditions:
+      - Already logged in
+    steps:
+      - action: Visit the top page (/)
+        expected: Redirected to the dashboard
+  - name: Login fails with an incorrect password
+    category: Error handling
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Enter an incorrect password
+        expected: An error message is displayed
+  - name: Login fails with a nonexistent ID
+    category: Error handling
+    preconditions: []
+    steps:
+      - action: Attempt to log in with a nonexistent ID
+        expected: '"Invalid ID or password" is displayed'
+  - name: Submitting the login form with empty fields shows a validation error
+    category: Error handling
+    preconditions: []
+    steps:
+      - action: Click the login button with ID/password left empty
+        expected: A required-field validation error is displayed
+  - name: A locked account cannot log in
+    category: Error handling
+    preconditions:
+      - The account is locked
+    steps:
+      - action: Attempt to log in with a locked account
+        expected: '"This account is locked" is displayed'
+  - name: 5 consecutive failed logins locks the account
+    category: Security
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Attempt to log in with the wrong password 5 times in a row
+        expected: The account is locked and further login attempts are rejected
+  - name: The login page is only accessible over HTTPS
+    category: Security
+    preconditions: []
+    steps:
+      - action: Access the login page over HTTP
+        expected: Redirected to HTTPS
+  - name: The password field is masked
+    category: Security
+    preconditions: []
+    steps:
+      - action: Type into the password field
+        expected: Input is displayed as masked characters
+  - name: A login request without a CSRF token is rejected
+    category: Security
+    preconditions: []
+    steps:
+      - action: Submit a login request without a CSRF token
+        expected: The request is rejected
+  - name: '"Keep me signed in" skips login on the next visit'
+    category: Convenience
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Log in with "Keep me signed in" checked
+        expected: The session persists after closing and reopening the browser
+  - name: Concurrent login from a different browser is allowed
+    category: Convenience
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Log in to the same account from two different browsers
+        expected: Both sessions remain valid

@@ -1,0 +1,59 @@
+metadata:
+  type_name: Password Reset
+  id_prefix: PWRESET
+test_cases:
+  - name: A reset link is sent to a registered email address
+    category: Basic flow
+    preconditions:
+      - A valid user account exists
+    steps:
+      - action: Enter an email address on the password reset screen
+        expected: An email containing a reset link is sent
+  - name: A new password can be set from the reset link
+    category: Basic flow
+    preconditions:
+      - A reset link has been issued
+    steps:
+      - action: Open the reset link and enter a new password
+        expected: The password is updated and the user is redirected to the login screen
+  - name: The old password no longer works after a password change
+    category: Basic flow
+    preconditions:
+      - The password has already been changed
+    steps:
+      - action: Attempt to log in with the old password
+        expected: Login fails
+  - name: No reset email is sent for an unregistered email address
+    category: Error handling
+    preconditions: []
+    steps:
+      - action: Request a reset for an unregistered email address
+        expected: No email is sent, but the screen shows the same success message (to avoid leaking account existence)
+  - name: An expired reset link is invalid
+    category: Error handling
+    preconditions:
+      - The reset link has expired
+    steps:
+      - action: Open the expired reset link
+        expected: '"This link has expired" is displayed'
+  - name: A used reset link cannot be reused
+    category: Error handling
+    preconditions:
+      - The reset link has already been used once
+    steps:
+      - action: Open the already-used reset link again
+        expected: '"This link has already been used" is displayed'
+  - name: A weak password cannot be set
+    category: Validation
+    preconditions:
+      - A reset link has been issued
+    steps:
+      - action: Enter a password shorter than 8 characters
+        expected: '"Password must be at least 8 characters" is displayed'
+  - name: The current password cannot be reused as the new password
+    category: Validation
+    preconditions:
+      - A reset link has been issued
+    steps:
+      - action: Enter the current password as the new password
+        expected: '"Please choose a different password" is displayed'

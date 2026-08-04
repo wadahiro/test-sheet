@@ -1,0 +1,53 @@
+metadata:
+  type_name: API Rate Limiting
+  id_prefix: RATELIMIT
+test_cases:
+  - name: Requests within the limit are processed normally
+    category: Basic flow
+    preconditions:
+      - A valid API key has been issued
+    steps:
+      - action: Send an API request within the rate limit
+        expected: Returns 200 OK
+  - name: The response headers include the remaining request count
+    category: Basic flow
+    preconditions:
+      - A valid API key has been issued
+    steps:
+      - action: Send an API request
+        expected: The X-RateLimit-Remaining header contains the remaining count
+  - name: Requests over the limit are rejected with 429
+    category: Error handling
+    preconditions:
+      - A valid API key has been issued
+    steps:
+      - action: Send API requests exceeding the rate limit
+        expected: Returns 429 Too Many Requests
+  - name: A Retry-After header is returned when the limit is exceeded
+    category: Error handling
+    preconditions:
+      - The rate limit has been reached
+    steps:
+      - action: Send an API request while over the rate limit
+        expected: The Retry-After header contains the number of seconds until retry is allowed
+  - name: Requests are accepted again after the limit window elapses
+    category: Error handling
+    preconditions:
+      - The rate limit has been reached
+    steps:
+      - action: Wait for the limit window to elapse, then send another request
+        expected: Returns 200 OK and the count has reset
+  - name: The limit is counted independently per API key
+    category: Boundary values
+    preconditions:
+      - Multiple valid API keys have been issued
+    steps:
+      - action: Send requests up to the limit using each of several API keys
+        expected: Each API key is processed independently until it reaches its own limit
+  - name: A request exactly at the limit is allowed
+    category: Boundary values
+    preconditions:
+      - A valid API key has been issued
+    steps:
+      - action: Send requests up to exactly the limit
+        expected: All requests return 200 OK

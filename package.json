@@ -1,0 +1,22 @@
+{
+  "name": "test-sheet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "test-sheet": "src/cli.ts"
+  },
+  "scripts": {
+    "serve": "bun run src/cli.ts",
+    "build": "bun run src/cli.ts --out test-cases.html"
+  },
+  "dependencies": {
+    "preact": "^10.29.2",
+    "htm": "^3.1.1",
+    "yaml": "^2.8.2",
+    "marked": "^14.1.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
