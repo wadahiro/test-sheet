@@ -33,6 +33,18 @@ If the root directory is omitted, the current directory is scanned recursively. 
 bun run src/cli.ts [root directory] --out <file>
 ```
 
+### Excluding paths
+
+Use `--exclude` (`-e`) to skip `testcases.yaml` files whose path matches a glob — useful for
+template scaffolding that would otherwise show up as a test suite full of placeholders. The
+pattern is matched against the path relative to the root directory, and the option may be
+repeated.
+
+```bash
+bun run src/cli.ts ./tests --exclude "**/_template/**"
+bun run src/cli.ts ./tests -e "**/_template/**" -e "**/drafts/**"
+```
+
 ## `testcases.yaml` structure
 
 ```yaml

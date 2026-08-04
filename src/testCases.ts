@@ -271,13 +271,19 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
 }
 
 /**
- * Recursively finds every testcases.yaml under rootDir.
+ * Recursively finds every testcases.yaml under rootDir, skipping any whose path matches an
+ * `exclude` glob (e.g. `**\/_template/**` to leave scaffolding out of the page).
  */
-export async function findAllTestCaseFiles(rootDir: string): Promise<string[]> {
+export async function findAllTestCaseFiles(rootDir: string, exclude: string[] = []): Promise<string[]> {
   const glob = new Bun.Glob("**/testcases.yaml");
+  const excluded = exclude.map((pattern) => new Bun.Glob(pattern));
   const found: string[] = [];
-  for await (const file of glob.scan({ cwd: rootDir, absolute: true })) {
-    found.push(file);
+  for await (const relativePath of glob.scan({ cwd: rootDir })) {
+    // Matched relative to rootDir, so a pattern cannot accidentally hit a directory name
+    // that only appears in the absolute path above the scan root
+    const normalized = relativePath.replaceAll("\\", "/");
+    if (excluded.some((pattern) => pattern.match(normalized))) continue;
+    found.push(resolve(rootDir, relativePath));
   }
   return found.sort();
 }
@@ -320,8 +326,8 @@ function readReadmeTitle(dir: string): string | null {
  * Loads every testcases.yaml under rootDir. A failure in one file is logged and skipped so it
  * doesn't prevent the other test suites from rendering.
  */
-export async function loadAllTestSuites(rootDir: string): Promise<TestSuiteTestCases[]> {
-  const files = await findAllTestCaseFiles(rootDir);
+export async function loadAllTestSuites(rootDir: string, exclude: string[] = []): Promise<TestSuiteTestCases[]> {
+  const files = await findAllTestCaseFiles(rootDir, exclude);
   const results: TestSuiteTestCases[] = [];
   for (const file of files) {
     try {

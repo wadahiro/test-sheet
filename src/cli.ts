@@ -2,7 +2,7 @@
 // CLI that previews all testcases.yaml files, found across a directory tree, in a browser.
 //
 // Usage:
-//   bun run src/cli.ts [root directory] [--port <port>]
+//   bun run src/cli.ts [root directory] [--port <port>] [--exclude <glob>]
 //   bun run src/cli.ts [root directory] --out <file>
 //
 // Recursively scans the root directory and renders every testcases.yaml found as a single
@@ -23,18 +23,27 @@ interface CliArgs {
   rootDir: string;
   port: number;
   outFile: string | null;
+  exclude: string[];
 }
 
 function parseArgs(argv: string[]): CliArgs {
   let rootDir = resolve(process.cwd());
   let port = 4300;
   let outFile: string | null = null;
+  const exclude: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
       port = Number(argv[++i]);
     } else if (argv[i] === "--out" || argv[i] === "-o") {
       outFile = argv[++i];
+    } else if (argv[i] === "--exclude" || argv[i] === "-e") {
+      const pattern = argv[++i];
+      if (!pattern) {
+        console.error("Error: --exclude requires a glob pattern");
+        process.exit(1);
+      }
+      exclude.push(pattern);
     } else if (argv[i] === "-h" || argv[i] === "--help") {
       console.log(`
 Usage: bun run src/cli.ts [root directory] [options]
@@ -42,13 +51,16 @@ Usage: bun run src/cli.ts [root directory] [options]
 If the root directory is omitted, the current directory is scanned.
 
 Options:
-  --port, -p <port>  Server port (default: 4300)
-  --out, -o <file>    Skip the server and write a single HTML file instead
+  --port, -p <port>      Server port (default: 4300)
+  --out, -o <file>       Skip the server and write a single HTML file instead
+  --exclude, -e <glob>   Skip testcases.yaml files whose path matches the glob.
+                         Matched relative to the root directory; repeatable.
 
 Examples:
   bun run src/cli.ts
   bun run src/cli.ts ./tests
   bun run src/cli.ts ./tests --out test-cases.html
+  bun run src/cli.ts ./tests --exclude "**/_template/**"
 `);
       process.exit(0);
     } else {
@@ -56,17 +68,17 @@ Examples:
     }
   }
 
-  return { rootDir, port, outFile };
+  return { rootDir, port, outFile, exclude };
 }
 
-async function generateStatic(rootDir: string, outFile: string) {
-  const suites = await loadAllTestSuites(rootDir);
+async function generateStatic(rootDir: string, outFile: string, exclude: string[]) {
+  const suites = await loadAllTestSuites(rootDir, exclude);
   const html = await generateHtml(suites, { liveReload: false });
   await Bun.write(outFile, html);
   console.log(`Generated: ${outFile}`);
 }
 
-function serve(rootDir: string, port: number) {
+function serve(rootDir: string, port: number, exclude: string[]) {
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
   const server = Bun.serve({
@@ -83,7 +95,7 @@ function serve(rootDir: string, port: number) {
 
       if (url.pathname === "/" || url.pathname === "/index.html") {
         try {
-          const suites = await loadAllTestSuites(rootDir);
+          const suites = await loadAllTestSuites(rootDir, exclude);
           const html = await generateHtml(suites, { liveReload: true });
           return new Response(html, {
             headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -113,6 +125,9 @@ function serve(rootDir: string, port: number) {
   });
 
   console.log(`test-sheet serving: ${rootDir}`);
+  if (exclude.length > 0) {
+    console.log(`  excluding: ${exclude.join(", ")}`);
+  }
   console.log(`  http://localhost:${server.port}`);
 
   // Recursively watch the root directory and notify the browser to reload on any change.
@@ -133,14 +148,14 @@ function serve(rootDir: string, port: number) {
 }
 
 async function main() {
-  const { rootDir, port, outFile } = parseArgs(process.argv.slice(2));
+  const { rootDir, port, outFile, exclude } = parseArgs(process.argv.slice(2));
 
   if (outFile) {
-    await generateStatic(rootDir, outFile);
+    await generateStatic(rootDir, outFile, exclude);
     return;
   }
 
-  serve(rootDir, port);
+  serve(rootDir, port, exclude);
 }
 
 main();

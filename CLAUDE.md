@@ -57,6 +57,7 @@ The dark values live in `DARK_THEME_VARS` (a plain constant in `styles.ts`) and 
 bun install                              # install dependencies
 bun run serve [dir] [--port <port>]      # local server with live reload
 bun run src/cli.ts [dir] --out <file>    # generate a single static HTML file
+bun run src/cli.ts [dir] -e "<glob>"     # skip matching testcases.yaml files (repeatable)
 bunx tsc --noEmit -p tsconfig.json       # type-check (there is no separate build/test script)
 ```
 
