@@ -1,10 +1,38 @@
 export const STYLES = `
 :root {
   color-scheme: light dark;
-  --border: #d0d7de;
+  --fg: #1f2328;
+  --fg-muted: #57606a;
+  --fg-faint: #b6bec7;
+  /* Sticky headers repaint the page background to cover the content scrolling under them,
+     so --bg must match body's background exactly rather than relying on the Canvas keyword */
+  --bg: #ffffff;
   --bg-subtle: #f6f8fa;
+  --bg-hover: #eaeef2;
+  --border: #d0d7de;
   --accent: #0969da;
+  --accent-bg: #ddebfa;
+  --success: #1a7f37;
+  --overlay: rgba(15, 23, 42, 0.45);
+  --flash: #fff2ba;
   --sticky-h: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6edf3;
+    --fg-muted: #9198a1;
+    --fg-faint: #4a525c;
+    --bg: #0d1117;
+    --bg-subtle: #161b22;
+    --bg-hover: #21262d;
+    --border: #3d444d;
+    --accent: #4493f8;
+    --accent-bg: #1f3a5f;
+    --success: #3fb950;
+    --overlay: rgba(1, 4, 9, 0.7);
+    --flash: #4d3800;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -14,7 +42,8 @@ body {
   line-height: 1.6;
   margin: 0;
   padding: 0;
-  color: #1f2328;
+  color: var(--fg);
+  background: var(--bg);
 }
 
 .layout {
@@ -34,10 +63,41 @@ body {
   background: var(--bg-subtle);
 }
 
+.view-toggle {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 14px;
+  padding: 3px;
+  background: var(--bg-hover);
+  border-radius: 6px;
+}
+
+.view-toggle-btn {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.view-toggle-btn:hover {
+  color: var(--fg);
+}
+
+.view-toggle-btn.view-toggle-active {
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .nav-outline-title {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #57606a;
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0 8px 8px;
@@ -51,6 +111,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .nav-search:focus {
@@ -59,7 +121,7 @@ body {
 }
 
 .nav-empty {
-  color: #57606a;
+  color: var(--fg-muted);
   font-size: 0.85rem;
   padding: 6px 8px;
 }
@@ -80,21 +142,21 @@ body {
   border-radius: 6px;
   font-size: 0.85rem;
   cursor: pointer;
-  color: #1f2328;
+  color: var(--fg);
 }
 
 .nav-outline-item:hover {
-  background: #eaeef2;
+  background: var(--bg-hover);
 }
 
 .nav-outline-item.nav-outline-current {
-  background: #ddebfa;
+  background: var(--accent-bg);
   color: var(--accent);
   font-weight: 600;
 }
 
 .nav-outline-item .count {
-  color: #57606a;
+  color: var(--fg-muted);
   font-weight: normal;
 }
 
@@ -130,7 +192,7 @@ body {
 .nav-outline-guide .nav-outline-item {
   padding-left: 36px;
   font-style: italic;
-  color: #57606a;
+  color: var(--fg-muted);
 }
 
 .nav-outline-category .nav-outline-item {
@@ -141,7 +203,7 @@ body {
 .nav-outline-testcase .nav-outline-item {
   padding-left: 48px;
   font-size: 0.8rem;
-  color: #57606a;
+  color: var(--fg-muted);
 }
 
 .app {
@@ -163,7 +225,7 @@ body {
   height: var(--sticky-h);
   display: flex;
   align-items: center;
-  background: Canvas;
+  background: var(--bg);
   margin-left: -32px;
   margin-right: -32px;
   padding-left: 32px;
@@ -198,7 +260,7 @@ body {
 
 .feature-title {
   font-size: 1.3rem;
-  color: #57606a;
+  color: var(--fg-muted);
   border-bottom: 2px solid var(--border);
   margin: 0 0 16px;
   padding-left: 0;
@@ -232,7 +294,7 @@ body {
 }
 
 .suite-title-count {
-  color: #57606a;
+  color: var(--fg-muted);
   font-weight: normal;
   font-size: 0.85rem;
   white-space: nowrap;
@@ -249,8 +311,105 @@ body {
 }
 
 .empty {
-  color: #57606a;
+  color: var(--fg-muted);
   padding: 24px;
+}
+
+/* Overview: a flat table of every test case, so it needs no sticky stacking beyond its own header */
+
+.overview-title {
+  font-size: 1.6rem;
+  border-bottom: 4px solid var(--accent);
+  margin: 0 0 24px;
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.overview-search {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.overview-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.overview-table {
+  width: 100%;
+  /* Not \`collapse\`: collapsed borders are painted by the table, so they scroll away from a sticky thead */
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.overview-table th,
+.overview-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.overview-table th + th,
+.overview-table td + td {
+  border-left: 1px solid var(--border);
+}
+
+.overview-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.overview-table thead th {
+  position: sticky;
+  top: var(--sticky-h);
+  z-index: 9;
+  background: var(--bg-subtle);
+}
+
+.overview-row {
+  cursor: pointer;
+}
+
+.overview-row:hover {
+  background: var(--bg-subtle);
+}
+
+.overview-id {
+  white-space: nowrap;
+}
+
+.overview-hier {
+  white-space: nowrap;
+}
+
+/* Repeated hierarchy values are kept (not merged) so each row reads standalone, but dimmed
+   far enough that the eye still picks out where a group starts */
+.overview-repeat {
+  color: var(--fg-faint);
+}
+
+.overview-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.overview-link:hover {
+  text-decoration: underline;
 }
 
 .guide {
@@ -279,18 +438,18 @@ body {
 }
 
 .guide th {
-  background: #eaeef2;
+  background: var(--bg-hover);
 }
 
 .guide code {
-  background: #eaeef2;
+  background: var(--bg-hover);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.9em;
 }
 
 .guide pre {
-  background: #eaeef2;
+  background: var(--bg-hover);
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
@@ -333,7 +492,7 @@ body {
 }
 
 .category-header .count {
-  color: #57606a;
+  color: var(--fg-muted);
   font-weight: normal;
   font-size: 0.85rem;
   white-space: nowrap;
@@ -349,17 +508,17 @@ body {
   padding: 5px 10px;
   cursor: pointer;
   font-size: 0.8rem;
-  color: #57606a;
+  color: var(--fg-muted);
   white-space: nowrap;
 }
 
 .copy-btn:hover {
-  background: #eaeef2;
-  color: #1f2328;
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 .copy-btn-copied {
-  color: #1a7f37;
+  color: var(--success);
 }
 
 .test-case {
@@ -413,7 +572,7 @@ body {
 .notes {
   margin-top: 12px;
   font-size: 0.85rem;
-  color: #57606a;
+  color: var(--fg-muted);
 }
 
 /* Command palette (Cmd+K / Ctrl+K) */
@@ -421,7 +580,7 @@ body {
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--overlay);
   z-index: 1100;
   display: flex;
   justify-content: center;
@@ -431,7 +590,7 @@ body {
 .palette {
   width: min(40rem, 92vw);
   max-height: 70vh;
-  background: Canvas;
+  background: var(--bg);
   border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
   display: flex;
@@ -445,6 +604,8 @@ body {
   padding: 14px 16px;
   font-size: 1rem;
   outline: none;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .palette-results {
@@ -466,16 +627,16 @@ body {
   border-radius: 6px;
   font-size: 0.9rem;
   cursor: pointer;
-  color: #1f2328;
+  color: var(--fg);
 }
 
 .palette-item.palette-sel {
-  background: #ddebfa;
+  background: var(--accent-bg);
   color: var(--accent);
 }
 
 .palette-item .count {
-  color: #57606a;
+  color: var(--fg-muted);
   font-weight: normal;
 }
 
@@ -485,12 +646,12 @@ body {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--bg-subtle);
-  color: #57606a;
+  color: var(--fg-muted);
   white-space: nowrap;
 }
 
 .palette-item.palette-sel .palette-kind-badge {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--bg);
 }
 
 .palette-item-body {
@@ -501,7 +662,7 @@ body {
 
 .palette-breadcrumb {
   font-size: 0.72rem;
-  color: #57606a;
+  color: var(--fg-muted);
 }
 
 .palette-label {
@@ -512,7 +673,7 @@ body {
 
 /* Temporary highlight when landing on a jump target */
 @keyframes jump-flash {
-  0% { background: #fff2ba; }
+  0% { background: var(--flash); }
   100% { background: transparent; }
 }
 

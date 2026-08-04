@@ -30,6 +30,23 @@ Test cases nest five levels deep: **domain → feature → test suite → sectio
 
 Sticky header stacking (`sticky-level-0` through `sticky-level-4` in `styles.ts`) mirrors this hierarchy — each level's `top` offset is `--sticky-h * level`. If you add a new hierarchy level, add a matching `sticky-level-N` rule and update `--sticky-h` math accordingly.
 
+### Views and routing
+
+The page has two views, switched by the toggle at the top of `NavOutline`:
+
+- **Overview** (`#/overview`, filterable via `#/overview?q=<query>`) — one flat table row per test case, hierarchy levels as columns. Being flat, it needs no sticky stacking beyond its own `sticky-level-0` heading plus a sticky `thead`. The command palette offers a "Filter Overview by …" entry that hands its query off through that route; typing in the overview's own box filters locally without touching the hash, so it does not push a history entry per keystroke.
+- **Test Cases** (`#/`, the default) — the nested `DomainSection` tree described above. `#/tc/<anchorId>` deep-links to a single test case.
+
+Routing is hash-based (`parseRoute` in `app.ts`), **not** the History API: `--out` builds must work over `file://`, where `pushState` throws and a real path would not resolve. Routes are namespaced under `#/` so they can never collide with an element ID and trigger the browser's native anchor jump.
+
+`OverviewRow` stores per-level `keys` rather than precomputed "same as the row above" flags: the dimming of repeated hierarchy values is resolved at render time against the previous *visible* row, because filtering changes which row precedes which.
+
+`jumpToId` compensates for the sticky stack by nudging down by the target's own sticky header `top`; without it a jump target lands underneath the stacked headers.
+
+### Theming
+
+Every color is a CSS variable on `:root` with a `@media (prefers-color-scheme: dark)` override — never hardcode a color in a rule. `--bg` must stay in sync with `body`'s background because `.sticky-header` repaints it to cover content scrolling underneath.
+
 ## Development commands
 
 ```bash
@@ -39,7 +56,7 @@ bun run src/cli.ts [dir] --out <file>    # generate a single static HTML file
 bunx tsc --noEmit -p tsconfig.json       # type-check (there is no separate build/test script)
 ```
 
-There is no test suite yet — verification is manual: run `bun run serve examples`, load the page, and check the console/network tab. When changing layout or CSS, prefer visually verifying in a real browser (`playwright-cli` — `bunx playwright cli open/goto/eval/screenshot` — works well for scripted checks: computed styles, element positions, and DOM structure) over reasoning from CSS alone. Box-model bugs here have repeatedly turned out to require real measurement, not inference.
+There is no test suite yet — verification is manual: run `bun run serve examples`, load the page, and check the console/network tab. Note that `--serve` watches only the scanned data directory, not `src/` — restart the server after editing source. Check both color schemes, and verify `--out` over `file://` for anything touching routing. When changing layout or CSS, prefer visually verifying in a real browser (`playwright-cli` — `bunx playwright cli open/goto/eval/screenshot` — works well for scripted checks: computed styles, element positions, and DOM structure) over reasoning from CSS alone. Box-model bugs here have repeatedly turned out to require real measurement, not inference.
 
 ## Code conventions
 

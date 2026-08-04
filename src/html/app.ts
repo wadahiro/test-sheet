@@ -140,10 +140,14 @@ function formatStepsAsMarkdownTable(steps: Step[]): string {
   return lines.join("\n");
 }
 
-/** Renders a single test case as Markdown (for pasting into a PR/issue comment) */
-function testCaseToMarkdown(tc: TestCase): string {
+/**
+ * Renders a single test case as Markdown (for pasting into a PR/issue comment).
+ * headingLevel is threaded down from whichever level was copied, so a domain-level copy
+ * still nests its sections and test cases below the domain heading.
+ */
+function testCaseToMarkdown(tc: TestCase, headingLevel = 3): string {
   const lines: string[] = [];
-  lines.push(`### ${tc._tcId}`, "", `**${tc.name}**`, "");
+  lines.push(`${"#".repeat(headingLevel)} ${tc._tcId}`, "", `**${tc.name}**`, "");
 
   if (tc.preconditions && tc.preconditions.length > 0) {
     lines.push("**Preconditions:**", formatPreconditions(tc.preconditions), "");
@@ -166,19 +170,24 @@ function testCaseToMarkdown(tc: TestCase): string {
 }
 
 /** Renders every test case in a section as a single Markdown document */
-function categoryToMarkdown(category: string, testCases: TestCase[]): string {
-  const lines = [`## Section: ${category}`, ""];
+function categoryToMarkdown(category: string, testCases: TestCase[], headingLevel = 2): string {
+  const lines = [`${"#".repeat(headingLevel)} Section: ${category}`, ""];
   for (const tc of testCases) {
-    lines.push(testCaseToMarkdown(tc), "---", "");
+    lines.push(testCaseToMarkdown(tc, headingLevel + 1), "---", "");
   }
   return lines.join("\n");
 }
 
-function allTestCasesToMarkdown(suite: SuitePageData): string {
+function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string {
   const grouped = groupByCategory(suite.testCases);
-  const lines = [`# ${suite.idPrefix}: ${suite.typeName} Test Procedure`, "", `> ${suite.testCases.length} test case(s)`, ""];
+  const lines = [
+    `${"#".repeat(headingLevel)} ${suite.idPrefix}: ${suite.typeName} Test Procedure`,
+    "",
+    `> ${suite.testCases.length} test case(s)`,
+    "",
+  ];
   for (const [category, cases] of grouped) {
-    lines.push(categoryToMarkdown(category, cases));
+    lines.push(categoryToMarkdown(category, cases, headingLevel + 1));
   }
   return lines.join("\n");
 }
@@ -324,6 +333,185 @@ function domainAnchorId(domain: string): string {
   return `domain-${encodeURIComponent(domain)}`;
 }
 
+/** The hierarchy levels shown as their own columns in the overview, outermost first */
+const OVERVIEW_LEVELS = ["domain", "feature", "suite", "category"] as const;
+
+type OverviewLevel = (typeof OVERVIEW_LEVELS)[number];
+
+interface OverviewRow {
+  tcId: string;
+  anchorId: string;
+  name: string;
+  labels: Record<OverviewLevel, string>;
+  /**
+   * Full-path identity per level. Compared against the previous *visible* row to decide
+   * dimming, which is why it is stored rather than resolved up front: filtering changes
+   * which row precedes which.
+   */
+  keys: Record<OverviewLevel, string>;
+}
+
+/** Flattens every test suite into one row per test case, in document order. */
+function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
+  const rows: OverviewRow[] = [];
+
+  for (const d of groupByDomainAndFeature(suites)) {
+    for (const f of d.features) {
+      for (const suite of f.suites) {
+        for (const [category, cases] of groupByCategory(suite.testCases)) {
+          const labels: Record<OverviewLevel, string> = {
+            domain: d.domainLabel,
+            feature: f.featureLabel,
+            suite: suite.typeName,
+            category,
+          };
+          // Keyed by the full path, so an identically named feature under a different
+          // domain still counts as new rather than a repeat
+          const keys: Record<OverviewLevel, string> = {
+            domain: d.domain,
+            feature: `${d.domain}\u0000${f.feature}`,
+            suite: `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}`,
+            category: `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}\u0000${category}`,
+          };
+
+          for (const tc of cases) {
+            rows.push({
+              tcId: tc._tcId,
+              anchorId: testCaseAnchorId(tc._tcId),
+              name: tc.name,
+              labels,
+              keys,
+            });
+          }
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+/** Everything shown in the row, so the filter matches exactly what the reader can see */
+function overviewRowSearchText(row: OverviewRow): string {
+  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name].join(" ");
+}
+
+function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((row) => overviewRowSearchText(row).toLowerCase().includes(q));
+}
+
+/** Column headings, shared by the rendered table and the Markdown export so they cannot drift */
+const OVERVIEW_COLUMNS = ["ID", "Domain", "Feature", "Test Suite", "Section", "Name"];
+
+function escapeMarkdownCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+
+/** Renders the overview as a Markdown table. Repeated values are written out in full, since
+ *  the dimming that stands in for them on screen has no Markdown equivalent. */
+function overviewToMarkdown(rows: OverviewRow[]): string {
+  const lines = [
+    "# Overview",
+    "",
+    `> ${rows.length} test case(s)`,
+    "",
+    `| ${OVERVIEW_COLUMNS.join(" | ")} |`,
+    `|${OVERVIEW_COLUMNS.map(() => "---").join("|")}|`,
+  ];
+  for (const row of rows) {
+    const cells = [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name];
+    lines.push(`| ${cells.map(escapeMarkdownCell).join(" | ")} |`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Flat table of every test case across all suites. Selecting a row jumps to it in the detail view.
+ * The filter is seeded from `#/overview?q=…` so the command palette can hand off a query.
+ */
+function OverviewTable({
+  rows,
+  query,
+  onQueryChange,
+  onSelect,
+}: {
+  rows: OverviewRow[];
+  query: string;
+  onQueryChange: (query: string) => void;
+  onSelect: (anchorId: string) => void;
+}) {
+  if (rows.length === 0) {
+    return html`<p class="empty">No testcases.yaml files found.</p>`;
+  }
+
+  const trimmedQuery = query.trim();
+  const visibleRows = filterOverviewRows(rows, trimmedQuery);
+
+  return html`
+    <section class="overview">
+      <h2 class="overview-title sticky-header sticky-level-0">
+        <span class="suite-title-text">Overview</span>
+        <span class="suite-title-right">
+          <span class="suite-title-count">
+            ${trimmedQuery ? `${visibleRows.length} / ${rows.length}` : rows.length} test case(s)
+          </span>
+          <${CopyButton}
+            title="Copy the listed test cases as Markdown"
+            getText=${() => overviewToMarkdown(visibleRows)}
+          />
+        </span>
+      </h2>
+      <input
+        class="overview-search"
+        type="search"
+        placeholder="🔍 Filter by ID, name, domain, feature, test suite, or section"
+        value=${query}
+        onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
+      />
+      ${visibleRows.length === 0
+        ? html`<p class="empty">No matches</p>`
+        : html`<table class="overview-table">
+        <thead>
+          <tr>
+            ${OVERVIEW_COLUMNS.map((column) => html`<th key=${column}>${column}</th>`)}
+          </tr>
+        </thead>
+        <tbody>
+          ${visibleRows.map(
+            (row, i) => html`
+              <tr key=${row.tcId} class="overview-row" onClick=${() => onSelect(row.anchorId)}>
+                <td class="overview-id">
+                  <button
+                    class="overview-link"
+                    onClick=${(e: Event) => {
+                      e.stopPropagation();
+                      onSelect(row.anchorId);
+                    }}
+                  >
+                    ${row.tcId}
+                  </button>
+                </td>
+                ${OVERVIEW_LEVELS.map((level) => {
+                  // Compared against the previous *visible* row, so filtering never leaves a
+                  // dimmed value with nothing above it to repeat
+                  const repeated = i > 0 && visibleRows[i - 1].keys[level] === row.keys[level];
+                  return html`
+                    <td key=${level} class=${"overview-hier" + (repeated ? " overview-repeat" : "")}>
+                      ${row.labels[level]}
+                    </td>
+                  `;
+                })}
+                <td>${row.name}</td>
+              </tr>
+            `
+          )}
+        </tbody>
+      </table>`}
+    </section>
+  `;
+}
+
 function featureAnchorId(domain: string, feature: string): string {
   return `domain-${encodeURIComponent(domain)}-feature-${encodeURIComponent(feature)}`;
 }
@@ -356,12 +544,31 @@ function domainTestCaseCount(group: DomainGroup): number {
   return group.features.reduce((sum, f) => sum + featureTestCaseCount(f), 0);
 }
 
+function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
+  const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${featureTestCaseCount(group)} test case(s)`, ""];
+  for (const suite of group.suites) {
+    lines.push(allTestCasesToMarkdown(suite, headingLevel + 1));
+  }
+  return lines.join("\n");
+}
+
+function domainToMarkdown(group: DomainGroup): string {
+  const lines = [`# ${group.domainLabel}`, "", `> ${domainTestCaseCount(group)} test case(s)`, ""];
+  for (const feature of group.features) {
+    lines.push(featureToMarkdown(feature, 2));
+  }
+  return lines.join("\n");
+}
+
 function FeatureSection({ domain, group }: { domain: string; group: FeatureGroup }) {
   return html`
     <div class="feature-section" id=${featureAnchorId(domain, group.feature)}>
       <h2 class="feature-title sticky-header sticky-level-1">
         <span class="suite-title-text">${group.featureLabel}</span>
-        <span class="suite-title-count">${featureTestCaseCount(group)}</span>
+        <span class="suite-title-right">
+          <span class="suite-title-count">${featureTestCaseCount(group)}</span>
+          <${CopyButton} title="Copy this feature as Markdown" getText=${() => featureToMarkdown(group)} />
+        </span>
       </h2>
       ${group.suites.map((suite) => html`<${SuiteSection} key=${suite.idPrefix} suite=${suite} />`)}
     </div>
@@ -373,7 +580,10 @@ function DomainSection({ group }: { group: DomainGroup }) {
     <div class="domain-section" id=${domainAnchorId(group.domain)}>
       <h2 class="domain-title sticky-header sticky-level-0">
         <span class="suite-title-text">${group.domainLabel}</span>
-        <span class="suite-title-count">${domainTestCaseCount(group)}</span>
+        <span class="suite-title-right">
+          <span class="suite-title-count">${domainTestCaseCount(group)}</span>
+          <${CopyButton} title="Copy this domain as Markdown" getText=${() => domainToMarkdown(group)} />
+        </span>
       </h2>
       ${group.features.map((f) => html`<${FeatureSection} key=${f.feature} domain=${group.domain} group=${f} />`)}
     </div>
@@ -381,7 +591,8 @@ function DomainSection({ group }: { group: DomainGroup }) {
 }
 
 interface NavEntry {
-  kind: "domain" | "feature" | "suite" | "guide" | "category" | "testcase";
+  kind: "view" | "domain" | "feature" | "suite" | "guide" | "category" | "testcase";
+  /** An element ID to scroll to — except for `view` entries, where it is the route hash */
   id: string;
   label: string;
   /** Search text. Kept separate from the display label so terms not shown (like idPrefix) still match. */
@@ -392,6 +603,7 @@ interface NavEntry {
 }
 
 const KIND_LABEL: Record<NavEntry["kind"], string> = {
+  view: "View",
   domain: "Domain",
   feature: "Feature",
   suite: "Test Suite",
@@ -411,6 +623,7 @@ function buildNavEntries(suites: SuitePageData[]): NavEntry[] {
       id: domainAnchorId(d.domain),
       label: d.domainLabel,
       searchText: `${d.domain} ${d.domainLabel}`,
+      count: domainTestCaseCount(d),
     });
     for (const f of d.features) {
       entries.push({
@@ -419,6 +632,7 @@ function buildNavEntries(suites: SuitePageData[]): NavEntry[] {
         label: f.featureLabel,
         searchText: `${f.feature} ${f.featureLabel}`,
         breadcrumb: d.domainLabel,
+        count: featureTestCaseCount(f),
       });
       for (const suite of f.suites) {
         entries.push({
@@ -466,6 +680,7 @@ function buildNavEntries(suites: SuitePageData[]): NavEntry[] {
 }
 
 function entryKindClass(kind: NavEntry["kind"]): string {
+  if (kind === "view") return "nav-outline-view";
   if (kind === "domain") return "nav-outline-domain";
   if (kind === "feature") return "nav-outline-feature";
   if (kind === "suite") return "nav-outline-suite";
@@ -483,7 +698,17 @@ function matchesQuery(entry: NavEntry, query: string): boolean {
  * - Click to jump; the current position is highlighted based on scroll position.
  * - Typing in the search box filters to matching entries (suite/section/test case).
  */
-function NavOutline({ suites }: { suites: SuitePageData[] }) {
+function NavOutline({
+  suites,
+  view,
+  onNavigate,
+  onSetView,
+}: {
+  suites: SuitePageData[];
+  view: RouteView;
+  onNavigate: (id: string, kind: NavEntry["kind"]) => void;
+  onSetView: (view: RouteView) => void;
+}) {
   const entries = buildNavEntries(suites);
   const [currentId, setCurrentId] = useState<string | null>(entries[0]?.id ?? null);
   const [query, setQuery] = useState("");
@@ -491,6 +716,8 @@ function NavOutline({ suites }: { suites: SuitePageData[] }) {
 
   useEffect(() => {
     function compute() {
+      // The overview view has none of these anchors, so there is nothing to track
+      if (view !== "detail") return;
       if (Date.now() < suppressUntil.current) return;
       const threshold = window.innerHeight * 0.25;
       let current: string | null = null;
@@ -511,22 +738,37 @@ function NavOutline({ suites }: { suites: SuitePageData[] }) {
       window.removeEventListener("scroll", compute, { capture: true } as EventListenerOptions);
       window.removeEventListener("resize", compute);
     };
-  }, [suites]);
+  }, [suites, view]);
 
-  const onJump = useCallback((id: string) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    setCurrentId(id);
-    // Suppress scroll-spy briefly after a jump so it doesn't immediately switch to another entry
-    suppressUntil.current = Date.now() + 700;
-    el.scrollIntoView({ block: "start" });
-  }, []);
+  const onJump = useCallback(
+    (entry: NavEntry) => {
+      setCurrentId(entry.id);
+      // Suppress scroll-spy briefly after a jump so it doesn't immediately switch to another entry
+      suppressUntil.current = Date.now() + 700;
+      onNavigate(entry.id, entry.kind);
+    },
+    [onNavigate]
+  );
 
   const trimmedQuery = query.trim();
   const visibleEntries = trimmedQuery ? entries.filter((e) => matchesQuery(e, trimmedQuery)) : entries;
 
   return html`
     <nav class="nav-outline">
+      <div class="view-toggle">
+        <button
+          class=${"view-toggle-btn" + (view === "overview" ? " view-toggle-active" : "")}
+          onClick=${() => onSetView("overview")}
+        >
+          Overview
+        </button>
+        <button
+          class=${"view-toggle-btn" + (view === "detail" ? " view-toggle-active" : "")}
+          onClick=${() => onSetView("detail")}
+        >
+          Test Cases
+        </button>
+      </div>
       <div class="nav-outline-title">Test Cases</div>
       <input
         class="nav-search"
@@ -540,8 +782,8 @@ function NavOutline({ suites }: { suites: SuitePageData[] }) {
           (entry) => html`
             <li key=${entry.id} class=${entryKindClass(entry.kind)}>
               <button
-                class=${"nav-outline-item" + (entry.id === currentId ? " nav-outline-current" : "")}
-                onClick=${() => onJump(entry.id)}
+                class=${"nav-outline-item" + (view === "detail" && entry.id === currentId ? " nav-outline-current" : "")}
+                onClick=${() => onJump(entry)}
               >
                 ${entry.label}${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
               </button>
@@ -554,11 +796,65 @@ function NavOutline({ suites }: { suites: SuitePageData[] }) {
   `;
 }
 
+type RouteView = "overview" | "detail";
+
+interface Route {
+  view: RouteView;
+  /** Deep-link target from `#/tc/<id>`; null when the hash names no test case */
+  testCaseId: string | null;
+  /** Overview filter seeded from `#/overview?q=<query>`; empty when unfiltered */
+  query: string;
+}
+
+const OVERVIEW_HASH = "#/overview";
+const DETAIL_HASH = "#/";
+
+/**
+ * Command-palette-only entry, so the overview is reachable without going for the sidebar
+ * toggle. The sidebar itself has that toggle, so this is not part of buildNavEntries.
+ */
+const OVERVIEW_ENTRY: NavEntry = {
+  kind: "view",
+  id: OVERVIEW_HASH,
+  label: "Overview",
+  searchText: "overview index list table all test cases",
+};
+
+/**
+ * Hash routing, not the History API: the `--out` build has to work when opened over
+ * file://, where pushState throws and a real path would not resolve at all.
+ * Routes are namespaced under `#/` so they can never collide with an element ID and
+ * trigger the browser's own anchor jump.
+ */
+function parseRoute(hash: string): Route {
+  const path = hash.replace(/^#/, "");
+  const overview = /^\/overview(?:\?q=(.*))?$/.exec(path);
+  if (overview) {
+    return { view: "overview", testCaseId: null, query: overview[1] ? decodeURIComponent(overview[1]) : "" };
+  }
+  const testCase = /^\/tc\/(.+)$/.exec(path);
+  if (testCase) return { view: "detail", testCaseId: decodeURIComponent(testCase[1]), query: "" };
+  return { view: "detail", testCaseId: null, query: "" };
+}
+
+function overviewHash(query: string): string {
+  const trimmed = query.trim();
+  return trimmed ? `${OVERVIEW_HASH}?q=${encodeURIComponent(trimmed)}` : OVERVIEW_HASH;
+}
+
 /** Shared jump-to-ID logic, used by both NavOutline and CommandPalette. */
 function jumpToId(id: string, onDone?: () => void) {
   const el = document.getElementById(id);
   if (!el) return;
   el.scrollIntoView({ block: "start" });
+  // scrollIntoView aligns the target with the viewport top, where the stacked sticky headers
+  // would cover it. The target's own sticky header already knows where that stack ends, so
+  // nudge back down by exactly its `top`.
+  const header = el.querySelector(".sticky-header");
+  if (header) {
+    const offset = parseFloat(getComputedStyle(header).top);
+    if (offset > 0) window.scrollBy(0, -offset);
+  }
   el.classList.add("jump-flash");
   setTimeout(() => el.classList.remove("jump-flash"), 1200);
   onDone?.();
@@ -568,7 +864,17 @@ function jumpToId(id: string, onDone?: () => void) {
  * Command palette opened with Cmd+K / Ctrl+K. Incremental search filters test
  * suites, sections, and test cases; arrow keys + Enter jump to the selected entry.
  */
-function CommandPalette({ entries, onClose }: { entries: NavEntry[]; onClose: () => void }) {
+function CommandPalette({
+  entries,
+  overviewRows,
+  onClose,
+  onJump,
+}: {
+  entries: NavEntry[];
+  overviewRows: OverviewRow[];
+  onClose: () => void;
+  onJump: (id: string, kind: NavEntry["kind"]) => void;
+}) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -577,8 +883,27 @@ function CommandPalette({ entries, onClose }: { entries: NavEntry[]; onClose: ()
     inputRef.current?.focus();
   }, []);
 
-  const q = query.trim().toLowerCase();
-  const results = (q ? entries.filter((e) => e.searchText.toLowerCase().includes(q)) : entries).slice(0, 50);
+  const trimmed = query.trim();
+  const q = trimmed.toLowerCase();
+  const matched = trimmed ? filterOverviewRows(overviewRows, trimmed).length : 0;
+  // Offered first, so the same typing that finds a single test case can instead open the
+  // overview narrowed to everything that matched
+  const overviewEntry: NavEntry[] =
+    matched > 0
+      ? [
+          {
+            kind: "view",
+            id: overviewHash(trimmed),
+            label: `Filter Overview by "${trimmed}"`,
+            searchText: "",
+            count: matched,
+          },
+        ]
+      : [];
+  const results = [
+    ...overviewEntry,
+    ...(q ? entries.filter((e) => e.searchText.toLowerCase().includes(q)) : entries),
+  ].slice(0, 50);
   const clampedSelected = Math.min(selected, Math.max(0, results.length - 1));
 
   const onInput = useCallback((e: Event) => {
@@ -598,13 +923,16 @@ function CommandPalette({ entries, onClose }: { entries: NavEntry[]; onClose: ()
       } else if (e.key === "Enter") {
         e.preventDefault();
         const target = results[clampedSelected];
-        if (target) jumpToId(target.id, onClose);
+        if (target) {
+          onJump(target.id, target.kind);
+          onClose();
+        }
       } else if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       }
     },
-    [results, clampedSelected, onClose]
+    [results, clampedSelected, onClose, onJump]
   );
 
   return html`
@@ -626,7 +954,10 @@ function CommandPalette({ entries, onClose }: { entries: NavEntry[]; onClose: ()
                 <button
                   class=${"palette-item " + entryKindClass(entry.kind) + (i === clampedSelected ? " palette-sel" : "")}
                   onMouseEnter=${() => setSelected(i)}
-                  onClick=${() => jumpToId(entry.id, onClose)}
+                  onClick=${() => {
+                    onJump(entry.id, entry.kind);
+                    onClose();
+                  }}
                 >
                   <span class="palette-kind-badge">${KIND_LABEL[entry.kind]}</span>
                   <span class="palette-item-body">
@@ -649,7 +980,66 @@ function CommandPalette({ entries, onClose }: { entries: NavEntry[]; onClose: ()
 function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const entries = buildNavEntries(suites);
+  const overviewRows = buildOverviewRows(suites);
+  /**
+   * Local so typing in the overview's filter box does not push a history entry per keystroke.
+   * The route only seeds it — see the effect below.
+   */
+  const [overviewQuery, setOverviewQuery] = useState(route.query);
+  /** Anchor to scroll to once the detail view has rendered (set when jumping out of the overview) */
+  const pendingScroll = useRef<string | null>(null);
+
+  useEffect(() => {
+    setOverviewQuery(route.query);
+  }, [route.query]);
+
+  useEffect(() => {
+    function onHashChange() {
+      setRoute(parseRoute(location.hash));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Runs after the detail view is in the DOM, so the target element exists
+  useEffect(() => {
+    if (route.view !== "detail") return;
+    const target = pendingScroll.current ?? route.testCaseId;
+    pendingScroll.current = null;
+    if (target) jumpToId(target);
+  }, [route]);
+
+  const navigate = useCallback(
+    (id: string, kind: NavEntry["kind"]) => {
+      if (kind === "view") {
+        // Same hash fires no hashchange, so apply the query the entry carries directly
+        if (location.hash === id) setOverviewQuery(parseRoute(id).query);
+        else location.hash = id;
+        return;
+      }
+      if (kind === "testcase") {
+        const next = `#/tc/${id}`;
+        // Re-selecting the current target fires no hashchange, so jump directly
+        if (location.hash === next) jumpToId(id);
+        else location.hash = next;
+        return;
+      }
+      // Only test cases get their own route; other anchors just scroll, switching views first if needed
+      if (route.view === "detail") {
+        jumpToId(id);
+      } else {
+        pendingScroll.current = id;
+        location.hash = DETAIL_HASH;
+      }
+    },
+    [route.view]
+  );
+
+  const setView = useCallback((view: RouteView) => {
+    location.hash = view === "overview" ? OVERVIEW_HASH : DETAIL_HASH;
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -668,13 +1058,27 @@ function App() {
 
   return html`
     <div class="layout">
-      <${NavOutline} suites=${suites} />
+      <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} />
       <div class="app">
-        ${domains.length === 0
-          ? html`<p class="empty">No testcases.yaml files found.</p>`
-          : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
+        ${route.view === "overview"
+          ? html`<${OverviewTable}
+              rows=${overviewRows}
+              query=${overviewQuery}
+              onQueryChange=${setOverviewQuery}
+              onSelect=${(id: string) => navigate(id, "testcase")}
+            />`
+          : domains.length === 0
+            ? html`<p class="empty">No testcases.yaml files found.</p>`
+            : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
       </div>
-      ${paletteOpen ? html`<${CommandPalette} entries=${entries} onClose=${() => setPaletteOpen(false)} />` : null}
+      ${paletteOpen
+        ? html`<${CommandPalette}
+            entries=${route.view === "overview" ? entries : [OVERVIEW_ENTRY, ...entries]}
+            overviewRows=${overviewRows}
+            onClose=${() => setPaletteOpen(false)}
+            onJump=${navigate}
+          />`
+        : null}
     </div>
   `;
 }
