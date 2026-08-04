@@ -25,6 +25,8 @@ interface TestCase {
 interface GuideHeading {
   id: string;
   text: string;
+  /** Markdown of this heading's own section, so search matches guide prose, not just titles */
+  body: string;
 }
 
 interface SuitePageData {
@@ -41,6 +43,8 @@ interface SuitePageData {
   testCases: TestCase[];
   guideHtml: string;
   guideHeadings: GuideHeading[];
+  /** Raw Markdown of the whole guide, used only for search */
+  guideText: string;
 }
 
 declare global {
@@ -622,6 +626,17 @@ const KIND_LABEL: Record<NavEntry["kind"], string> = {
   testcase: "Test Case",
 };
 
+/** Everything inside a case, so searching matches step and precondition wording too */
+function testCaseSearchText(tc: TestCase): string {
+  const parts = [tc._tcId, tc.name];
+  if (tc.category) parts.push(tc.category);
+  if (tc.preconditions) parts.push(formatPreconditions(tc.preconditions));
+  if (tc.test_data) parts.push(formatTestData(tc.test_data));
+  for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
+  if (tc.notes) parts.push(tc.notes);
+  return parts.join(" ");
+}
+
 /**
  * How guides are represented, which differs by surface: the outline is a structure map, where
  * one entry per guide heading buries the test cases it is supposed to introduce, while the
@@ -669,7 +684,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               kind: "guide",
               id: guideAnchorId(suite.idPrefix),
               label: "Guide",
-              searchText: `${suite.idPrefix} guide ${suite.guideHeadings.map((h) => h.text).join(" ")}`,
+              searchText: `${suite.idPrefix} guide ${suite.guideText}`,
               breadcrumb: guideBreadcrumb,
             });
           }
@@ -679,7 +694,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               kind: "guide",
               id: heading.id,
               label: heading.text,
-              searchText: `${suite.idPrefix} ${heading.text}`,
+              searchText: `${suite.idPrefix} ${heading.text} ${heading.body}`,
               breadcrumb: guideBreadcrumb,
             });
           }
@@ -699,7 +714,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               kind: "testcase",
               id: testCaseAnchorId(tc._tcId),
               label: `${tc._tcId}: ${tc.name}`,
-              searchText: `${tc._tcId} ${tc.name}`,
+              searchText: testCaseSearchText(tc),
               breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName} › ${category}`,
             });
           }
@@ -859,13 +874,19 @@ const OVERVIEW_ENTRY: NavEntry = {
  */
 function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "");
-  const overview = /^\/overview(?:\?q=(.*))?$/.exec(path);
-  if (overview) {
-    return { view: "overview", testCaseId: null, query: overview[1] ? decodeURIComponent(overview[1]) : "" };
-  }
+  if (path === DETAIL_HASH.slice(1)) return { view: "detail", testCaseId: null, query: "" };
+
   const testCase = /^\/tc\/(.+)$/.exec(path);
   if (testCase) return { view: "detail", testCaseId: decodeURIComponent(testCase[1]), query: "" };
-  return { view: "detail", testCaseId: null, query: "" };
+
+  // Overview is the landing view: opening the file with no hash should show what is in it
+  // before dropping the reader into one suite's test cases.
+  const overview = /^\/overview(?:\?q=(.*))?$/.exec(path);
+  return {
+    view: "overview",
+    testCaseId: null,
+    query: overview?.[1] ? decodeURIComponent(overview[1]) : "",
+  };
 }
 
 function overviewHash(query: string): string {

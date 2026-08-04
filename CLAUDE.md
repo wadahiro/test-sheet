@@ -32,10 +32,12 @@ Sticky header stacking (`sticky-level-0` through `sticky-level-4` in `styles.ts`
 
 ### Views and routing
 
-The page has two views, switched by the toggle at the top of `NavOutline`:
+The page has two views, switched by the toggle at the top of `NavOutline`. Overview is the landing view — anything the hash does not name resolves to it, so opening the file shows what is in it rather than dropping the reader into one suite:
 
 - **Overview** (`#/overview`, filterable via `#/overview?q=<query>`) — one flat table row per test case, hierarchy levels as columns. Being flat, it needs no sticky stacking beyond its own `sticky-level-0` heading plus a sticky `thead`. The command palette offers a "Filter Overview by …" entry that hands its query off through that route; typing in the overview's own box filters locally without touching the hash, so it does not push a history entry per keystroke.
-- **Test Cases** (`#/`, the default) — the nested `DomainSection` tree described above. `#/tc/<anchorId>` deep-links to a single test case.
+- **Test Cases** (`#/`) — the nested `DomainSection` tree described above. `#/tc/<anchorId>` deep-links to a single test case.
+
+`NavEntry.searchText` is full-text, and deliberately wider than the label an entry displays: a test case carries its steps, preconditions, test data and notes (`testCaseSearchText`), and a guide heading carries its own section's Markdown (`GuideHeading.body`, split at H2 by `splitByH2` in `generate.ts`). Keep new content types indexed there — a search surface that only matches titles reads as broken. The overview's filter is the exception: it matches only the visible columns, since its result is a table the reader is looking at.
 
 Routing is hash-based (`parseRoute` in `app.ts`), **not** the History API: `--out` builds must work over `file://`, where `pushState` throws and a real path would not resolve. Routes are namespaced under `#/` so they can never collide with an element ID and trigger the browser's native anchor jump.
 

@@ -33,6 +33,29 @@ async function bundleApp(): Promise<string> {
 export interface GuideHeading {
   id: string;
   text: string;
+  /** Markdown of this heading's own section, so search can match guide prose, not just titles */
+  body: string;
+}
+
+/**
+ * Splits Markdown at its H2 headings, returning one entry per heading in document order.
+ * Goes through the lexer rather than a regex so a `##` line inside a fenced code block is
+ * not mistaken for a heading.
+ */
+function splitByH2(markdown: string, marked: Marked): string[] {
+  const sections: string[] = [];
+  let current: string | null = null;
+
+  for (const token of marked.lexer(markdown)) {
+    if (token.type === "heading" && token.depth === 2) {
+      if (current !== null) sections.push(current);
+      current = "";
+    } else if (current !== null) {
+      current += token.raw;
+    }
+  }
+  if (current !== null) sections.push(current);
+  return sections;
 }
 
 /**
@@ -52,7 +75,7 @@ async function renderGuideWithHeadings(
         const text = this.parser.parseInline(token.tokens);
         if (token.depth === 2) {
           const id = `suite-${idPrefix}-guide-${h2Index++}`;
-          headings.push({ id, text: token.text });
+          headings.push({ id, text: token.text, body: "" });
           return `<h2 id="${id}">${text}</h2>\n`;
         }
         return `<h${token.depth}>${text}</h${token.depth}>\n`;
@@ -61,6 +84,12 @@ async function renderGuideWithHeadings(
   });
 
   const html = await marked.parse(markdown);
+  // Both walks visit H2s in document order, so the nth section belongs to the nth heading
+  const sections = splitByH2(markdown, marked);
+  headings.forEach((heading, i) => {
+    heading.body = sections[i] ?? "";
+  });
+
   return { html, headings };
 }
 
@@ -90,6 +119,8 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         testCases: suite.testCases,
         guideHtml,
         guideHeadings,
+        /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */
+        guideText: suite.guideContent,
       };
     })
   );
