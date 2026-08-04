@@ -1,6 +1,9 @@
 metadata:
   type_name: API Rate Limiting
   id_prefix: RATELIMIT
+  guides:
+    - ../../common/test-prerequisites.md
+    - ../../common/api-testing.md
 test_cases:
   - name: Requests within the limit are processed normally
     category: Basic flow

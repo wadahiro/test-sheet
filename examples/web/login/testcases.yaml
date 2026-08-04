@@ -1,6 +1,8 @@
 metadata:
   type_name: Login
   id_prefix: LOGIN
+  guides:
+    - ../../common/test-prerequisites.md
 test_cases:
   - name: Can log in with a valid ID and password
     category: Basic flow

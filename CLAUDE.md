@@ -39,6 +39,10 @@ The page has two views, switched by the toggle at the top of `NavOutline`:
 
 Routing is hash-based (`parseRoute` in `app.ts`), **not** the History API: `--out` builds must work over `file://`, where `pushState` throws and a real path would not resolve. Routes are namespaced under `#/` so they can never collide with an element ID and trigger the browser's native anchor jump.
 
+### Guides
+
+`metadata.guides` Markdown renders into a `<details class="guide">` at the top of its test suite, collapsed by default — a guide is prerequisite reading, not the main content. `buildNavEntries` takes a `GuideDetail` argument that splits the two surfaces: the outline (`"collapsed"`) gets one "Guide" entry per suite, while the command palette (`"headings"`) keeps one entry per guide h2, since granularity is what a search surface is for. Guides have no sticky header of their own, so their landing offset comes from `scroll-margin-top` in `styles.ts` rather than `jumpToId`'s offset trick; `jumpToId` opens any ancestor `<details>` before measuring.
+
 `OverviewRow` stores per-level `keys` rather than precomputed "same as the row above" flags: the dimming of repeated hierarchy values is resolved at render time against the previous *visible* row, because filtering changes which row precedes which.
 
 `jumpToId` compensates for the sticky stack by nudging down by the target's own sticky header `top`; without it a jump target lands underneath the stacked headers.

@@ -498,12 +498,42 @@ body {
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 16px 20px;
+  padding: 12px 20px;
   margin-bottom: 24px;
+}
+
+/*
+ * Guides carry no sticky header of their own, so jumpToId's offset trick does not apply to
+ * them. scroll-margin-top does the same job declaratively: clear the menu bar plus the three
+ * levels (domain, feature, test suite) that stay stuck above a guide.
+ */
+.guide,
+.guide h2 {
+  scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * 3);
+}
+
+.guide-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  list-style-position: outside;
+}
+
+.guide-summary:hover {
+  color: var(--fg);
+}
+
+.guide[open] .guide-summary {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
 .guide h2 { font-size: 1.2rem; }
 .guide h3 { font-size: 1.05rem; }
+.guide-body > :first-child { margin-top: 0; }
+.guide-body > :last-child { margin-bottom: 0; }
 
 .guide table {
   border-collapse: collapse;

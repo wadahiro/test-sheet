@@ -279,6 +279,11 @@ function suiteAnchorId(idPrefix: string): string {
   return `suite-${idPrefix}`;
 }
 
+/** The guide block as a whole. Individual guide headings get `suite-<idPrefix>-guide-<n>` from generate.ts. */
+function guideAnchorId(idPrefix: string): string {
+  return `suite-${idPrefix}-guide`;
+}
+
 function groupByCategory(testCases: TestCase[]): Array<[string, TestCase[]]> {
   const grouped = new Map<string, TestCase[]>();
   for (const tc of testCases) {
@@ -528,7 +533,12 @@ function SuiteSection({ suite }: { suite: SuitePageData }) {
           <${CopyButton} title="Copy all test cases as Markdown" getText=${() => allTestCasesToMarkdown(suite)} />
         </span>
       </h1>
-      ${suite.guideHtml ? html`<div class="guide" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />` : null}
+      ${suite.guideHtml
+        ? html`<details class="guide" id=${guideAnchorId(suite.idPrefix)}>
+            <summary class="guide-summary">📖 Guide</summary>
+            <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
+          </details>`
+        : null}
       <main>
         ${grouped.map(([category, cases]) => html`<${CategorySection} key=${category} idPrefix=${suite.idPrefix} category=${category} testCases=${cases} />`)}
       </main>
@@ -612,8 +622,15 @@ const KIND_LABEL: Record<NavEntry["kind"], string> = {
   testcase: "Test Case",
 };
 
-/** Flattens every test suite into domain -> feature -> suite -> guide heading -> section -> test case navigation entries */
-function buildNavEntries(suites: SuitePageData[]): NavEntry[] {
+/**
+ * How guides are represented, which differs by surface: the outline is a structure map, where
+ * one entry per guide heading buries the test cases it is supposed to introduce, while the
+ * palette is a search surface, where that same granularity is the point.
+ */
+type GuideDetail = "collapsed" | "headings";
+
+/** Flattens every test suite into domain -> feature -> suite -> guide -> section -> test case navigation entries */
+function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): NavEntry[] {
   const entries: NavEntry[] = [];
   const domains = groupByDomainAndFeature(suites);
 
@@ -644,14 +661,28 @@ function buildNavEntries(suites: SuitePageData[]): NavEntry[] {
           breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
           count: suite.testCases.length,
         });
-        for (const heading of suite.guideHeadings) {
-          entries.push({
-            kind: "guide",
-            id: heading.id,
-            label: heading.text,
-            searchText: `${suite.idPrefix} ${heading.text}`,
-            breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`,
-          });
+        const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
+        if (guideDetail === "collapsed") {
+          // Keyed off guideHtml, not guideHeadings: a guide with no h2 still needs an entry
+          if (suite.guideHtml) {
+            entries.push({
+              kind: "guide",
+              id: guideAnchorId(suite.idPrefix),
+              label: "Guide",
+              searchText: `${suite.idPrefix} guide ${suite.guideHeadings.map((h) => h.text).join(" ")}`,
+              breadcrumb: guideBreadcrumb,
+            });
+          }
+        } else {
+          for (const heading of suite.guideHeadings) {
+            entries.push({
+              kind: "guide",
+              id: heading.id,
+              label: heading.text,
+              searchText: `${suite.idPrefix} ${heading.text}`,
+              breadcrumb: guideBreadcrumb,
+            });
+          }
         }
         const grouped = groupByCategory(suite.testCases);
         for (const [category, cases] of grouped) {
@@ -709,7 +740,7 @@ function NavOutline({
   onNavigate: (id: string, kind: NavEntry["kind"]) => void;
   onSetView: (view: RouteView) => void;
 }) {
-  const entries = buildNavEntries(suites);
+  const entries = buildNavEntries(suites, "collapsed");
   const [currentId, setCurrentId] = useState<string | null>(entries[0]?.id ?? null);
   const [query, setQuery] = useState("");
   const suppressUntil = useRef(0);
@@ -846,6 +877,11 @@ function overviewHash(query: string): string {
 function jumpToId(id: string, onDone?: () => void) {
   const el = document.getElementById(id);
   if (!el) return;
+  // Before measuring: a target inside a collapsed guide has no layout box of its own, and
+  // `closest` includes the element itself, so jumping to the guide also opens it
+  for (let details = el.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
+    details.open = true;
+  }
   el.scrollIntoView({ block: "start" });
   // scrollIntoView aligns the target with the viewport top, where the stacked sticky headers
   // would cover it. The target's own sticky header already knows where that stack ends, so
@@ -1042,7 +1078,7 @@ function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
-  const entries = buildNavEntries(suites);
+  const entries = buildNavEntries(suites, "headings");
   const overviewRows = buildOverviewRows(suites);
   /**
    * Local so typing in the overview's filter box does not push a history entry per keystroke.
