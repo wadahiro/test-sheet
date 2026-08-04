@@ -977,6 +977,67 @@ function CommandPalette({
   `;
 }
 
+type Theme = "light" | "dark";
+
+const THEME_STORAGE_KEY = "test-sheet-theme";
+
+/**
+ * `data-theme` on <html> is the single source of truth. It is absent until the reader picks
+ * a theme (or when localStorage is unreadable, as it can be over file://), in which case the
+ * stylesheet follows the OS — so fall back to the same signal the stylesheet uses.
+ */
+function currentTheme(): Theme {
+  const attr = document.documentElement.dataset.theme;
+  if (attr === "dark" || attr === "light") return attr;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+
+  const onClick = useCallback(() => {
+    const next: Theme = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Blocked over file:// in some browsers; the choice still applies for this session
+    }
+    setTheme(next);
+  }, []);
+
+  return html`
+    <button
+      class="header-btn header-btn-icon"
+      title=${theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      aria-label=${theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      onClick=${onClick}
+    >
+      ${theme === "dark"
+        ? html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>`
+        : html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>`}
+    </button>
+  `;
+}
+
+function AppHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
+  const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
+
+  return html`
+    <header class="app-header">
+      <span class="app-header-title">Test Cases</span>
+      <div class="app-header-actions">
+        <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+          <span>Search</span>
+          <kbd class="header-kbd">${shortcut}</kbd>
+        </button>
+        <${ThemeToggle} />
+      </div>
+    </header>
+  `;
+}
+
 function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1057,19 +1118,22 @@ function App() {
   const domains = groupByDomainAndFeature(suites);
 
   return html`
-    <div class="layout">
-      <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} />
-      <div class="app">
-        ${route.view === "overview"
-          ? html`<${OverviewTable}
-              rows=${overviewRows}
-              query=${overviewQuery}
-              onQueryChange=${setOverviewQuery}
-              onSelect=${(id: string) => navigate(id, "testcase")}
-            />`
-          : domains.length === 0
-            ? html`<p class="empty">No testcases.yaml files found.</p>`
-            : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
+    <div>
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} />
+      <div class="layout">
+        <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} />
+        <div class="app">
+          ${route.view === "overview"
+            ? html`<${OverviewTable}
+                rows=${overviewRows}
+                query=${overviewQuery}
+                onQueryChange=${setOverviewQuery}
+                onSelect=${(id: string) => navigate(id, "testcase")}
+              />`
+            : domains.length === 0
+              ? html`<p class="empty">No testcases.yaml files found.</p>`
+              : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
+        </div>
       </div>
       ${paletteOpen
         ? html`<${CommandPalette}

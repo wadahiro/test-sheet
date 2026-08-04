@@ -1,3 +1,22 @@
+/**
+ * Interpolated into two rules below — the explicit opt-in and the OS-preference fallback.
+ * Kept as one constant so the two copies cannot drift apart.
+ */
+const DARK_THEME_VARS = `
+  --fg: #e6edf3;
+  --fg-muted: #9198a1;
+  --fg-faint: #4a525c;
+  --bg: #0d1117;
+  --bg-subtle: #161b22;
+  --bg-hover: #21262d;
+  --border: #3d444d;
+  --accent: #4493f8;
+  --accent-bg: #1f3a5f;
+  --success: #3fb950;
+  --overlay: rgba(1, 4, 9, 0.7);
+  --flash: #4d3800;
+`;
+
 export const STYLES = `
 :root {
   color-scheme: light dark;
@@ -15,24 +34,21 @@ export const STYLES = `
   --success: #1a7f37;
   --overlay: rgba(15, 23, 42, 0.45);
   --flash: #fff2ba;
+  --header-h: 48px;
   --sticky-h: 44px;
 }
 
+:root[data-theme="light"] { color-scheme: light; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;${DARK_THEME_VARS}}
+
+/*
+ * With no explicit choice, follow the OS. The :not() is what makes an explicit "light"
+ * survive an OS dark preference; without it the media query would always win.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #e6edf3;
-    --fg-muted: #9198a1;
-    --fg-faint: #4a525c;
-    --bg: #0d1117;
-    --bg-subtle: #161b22;
-    --bg-hover: #21262d;
-    --border: #3d444d;
-    --accent: #4493f8;
-    --accent-bg: #1f3a5f;
-    --success: #3fb950;
-    --overlay: rgba(1, 4, 9, 0.7);
-    --flash: #4d3800;
-  }
+  :root:not([data-theme="light"]) {${DARK_THEME_VARS}}
 }
 
 * { box-sizing: border-box; }
@@ -46,6 +62,72 @@ body {
   background: var(--bg);
 }
 
+/*
+ * Global menu bar. Everything else that sticks is offset below it by --header-h, so its
+ * height must stay fixed rather than growing with its contents.
+ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: var(--header-h);
+  padding: 0 16px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.header-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.header-btn-icon {
+  padding: 6px;
+}
+
+.header-kbd {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.72rem;
+  font-family: inherit;
+  color: var(--fg-faint);
+}
+
 .layout {
   display: flex;
   align-items: flex-start;
@@ -53,10 +135,10 @@ body {
 
 .nav-outline {
   position: sticky;
-  top: 0;
+  top: var(--header-h);
   flex: 0 0 240px;
   width: 240px;
-  height: 100vh;
+  height: calc(100vh - var(--header-h));
   overflow-y: auto;
   border-right: 1px solid var(--border);
   padding: 20px 12px;
@@ -215,7 +297,7 @@ body {
 /*
  * Stacked sticky headers for the hierarchy (domain -> feature -> test suite -> section).
  * Each level shares the same height (--sticky-h); top is offset by the level index so
- * headers stack instead of overlapping.
+ * headers stack instead of overlapping, starting below the global menu bar (--header-h).
  * .app's left/right padding would otherwise show through, so sticky-header cancels it
  * out itself and paints its own background.
  */
@@ -232,11 +314,11 @@ body {
   padding-right: 32px;
 }
 
-.sticky-level-0 { top: calc(var(--sticky-h) * 0); z-index: 14; }
-.sticky-level-1 { top: calc(var(--sticky-h) * 1); z-index: 13; }
-.sticky-level-2 { top: calc(var(--sticky-h) * 2); z-index: 12; }
-.sticky-level-3 { top: calc(var(--sticky-h) * 3); z-index: 11; }
-.sticky-level-4 { top: calc(var(--sticky-h) * 4); z-index: 10; }
+.sticky-level-0 { top: calc(var(--header-h) + var(--sticky-h) * 0); z-index: 14; }
+.sticky-level-1 { top: calc(var(--header-h) + var(--sticky-h) * 1); z-index: 13; }
+.sticky-level-2 { top: calc(var(--header-h) + var(--sticky-h) * 2); z-index: 12; }
+.sticky-level-3 { top: calc(var(--header-h) + var(--sticky-h) * 3); z-index: 11; }
+.sticky-level-4 { top: calc(var(--header-h) + var(--sticky-h) * 4); z-index: 10; }
 
 .domain-section {
   margin-bottom: 40px;
@@ -371,7 +453,7 @@ body {
 
 .overview-table thead th {
   position: sticky;
-  top: var(--sticky-h);
+  top: calc(var(--header-h) + var(--sticky-h));
   z-index: 9;
   background: var(--bg-subtle);
 }

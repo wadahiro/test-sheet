@@ -100,6 +100,17 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
 <meta charset="utf-8" />
 <title>Test Cases</title>
 <style>${STYLES}</style>
+<script>
+// Applies the stored theme before first paint, so a dark-theme reader never sees a white flash.
+// Left unset when nothing is stored (or localStorage is blocked, as it can be over file://),
+// which is what makes the stylesheet fall back to the OS preference.
+(function () {
+  try {
+    var t = localStorage.getItem("test-sheet-theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <div id="app"></div>

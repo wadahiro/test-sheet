@@ -28,7 +28,7 @@ The generated HTML has zero external dependencies (no CDN links, no separate JS/
 
 Test cases nest five levels deep: **domain → feature → test suite → section → test case**. Domain and feature come from the first two path segments under the scan root (see `extractDomainAndFeature` in `testCases.ts`); a test suite is one `testcases.yaml` file; a section is the `category` field on a test case. Optional `README.md` files at the domain/feature directory level supply human-readable labels (first `# Heading`) — otherwise the raw directory name is shown.
 
-Sticky header stacking (`sticky-level-0` through `sticky-level-4` in `styles.ts`) mirrors this hierarchy — each level's `top` offset is `--sticky-h * level`. If you add a new hierarchy level, add a matching `sticky-level-N` rule and update `--sticky-h` math accordingly.
+Sticky header stacking (`sticky-level-0` through `sticky-level-4` in `styles.ts`) mirrors this hierarchy — each level's `top` offset is `--header-h + --sticky-h * level`, where `--header-h` clears the global menu bar. If you add a new hierarchy level, add a matching `sticky-level-N` rule and update the math accordingly. Anything else that sticks (`.nav-outline`, the overview's `thead`) must offset by `--header-h` too, and `.app-header`'s height must stay pinned to `--header-h` rather than growing with its contents.
 
 ### Views and routing
 
@@ -45,7 +45,11 @@ Routing is hash-based (`parseRoute` in `app.ts`), **not** the History API: `--ou
 
 ### Theming
 
-Every color is a CSS variable on `:root` with a `@media (prefers-color-scheme: dark)` override — never hardcode a color in a rule. `--bg` must stay in sync with `body`'s background because `.sticky-header` repaints it to cover content scrolling underneath.
+Every color is a CSS variable on `:root` — never hardcode a color in a rule. `--bg` must stay in sync with `body`'s background because `.sticky-header` repaints it to cover content scrolling underneath.
+
+The dark values live in `DARK_THEME_VARS` (a plain constant in `styles.ts`) and are interpolated into two rules: `:root[data-theme="dark"]` for an explicit choice, and `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }` for the OS default. The `:not()` is what lets an explicit light choice survive an OS dark preference. Add new colors to `DARK_THEME_VARS`, not to either rule directly.
+
+`data-theme` on `<html>` is the single source of truth, set by `ThemeToggle` in `app.ts` and persisted to `localStorage` under `test-sheet-theme`. An inline script in `generate.ts`'s `<head>` re-applies it before first paint; both it and the toggle wrap `localStorage` in `try/catch`, since it can be blocked over `file://`. When the attribute is absent the stylesheet follows the OS, so `currentTheme()` falls back to `matchMedia` rather than assuming light.
 
 ## Development commands
 
