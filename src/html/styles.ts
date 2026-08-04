@@ -133,16 +133,30 @@ body {
   align-items: flex-start;
 }
 
+/*
+ * A column whose head (view toggle, title, search) stays put while only the entry list
+ * scrolls — the search box is how you get back to the top of a long outline, so it must not
+ * be the first thing that scrolls away.
+ */
 .nav-outline {
   position: sticky;
   top: var(--header-h);
   flex: 0 0 240px;
   width: 240px;
   height: calc(100vh - var(--header-h));
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid var(--border);
   padding: 20px 12px;
   background: var(--bg-subtle);
+}
+
+/* The three pinned rows: they must keep their height rather than shrink to fit the list */
+.view-toggle,
+.nav-outline-title,
+.nav-search {
+  flex: 0 0 auto;
 }
 
 .view-toggle {
@@ -212,6 +226,11 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* min-height:0 lets this flex item shrink below its content height, which is what makes
+     it — rather than the whole sidebar — the thing that scrolls */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-outline-item {

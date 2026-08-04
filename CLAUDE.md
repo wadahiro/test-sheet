@@ -30,6 +30,8 @@ Test cases nest five levels deep: **domain → feature → test suite → sectio
 
 Sticky header stacking (`sticky-level-0` through `sticky-level-4` in `styles.ts`) mirrors this hierarchy — each level's `top` offset is `--header-h + --sticky-h * level`, where `--header-h` clears the global menu bar. If you add a new hierarchy level, add a matching `sticky-level-N` rule and update the math accordingly. Anything else that sticks (`.nav-outline`, the overview's `thead`) must offset by `--header-h` too, and `.app-header`'s height must stay pinned to `--header-h` rather than growing with its contents.
 
+`.nav-outline` is a flex column: its head (view toggle, title, search) is fixed-height and only the `ul` scrolls. Anything added to that head needs `flex: 0 0 auto`, and the `ul` keeps `min-height: 0` so it can shrink below its content and be the element that scrolls.
+
 ### Views and routing
 
 The page has two views, switched by the toggle at the top of `NavOutline`. Overview is the landing view — anything the hash does not name resolves to it, so opening the file shows what is in it rather than dropping the reader into one suite:
