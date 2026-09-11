@@ -16,6 +16,8 @@ export interface TestCase {
   preconditions?: unknown[];
   steps: Step[];
   notes?: string | null;
+  /** Explicit stable ID. Takes precedence over the sequential fallback in assignTestCaseIds. */
+  id?: string;
   _tcId?: string;
 }
 
@@ -118,7 +120,8 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
 
     for (const pattern of patterns) {
       const { id, notes, ...params } = pattern;
-      const tcId = `${idPrefix}${id}`;
+      const hasId = id !== undefined && id !== null;
+      const tcId = hasId ? `${idPrefix}${id}` : idPrefix;
       const allParams = { id: tcId, ...params };
 
       const templateName = template.name as string | undefined;
@@ -158,6 +161,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         preconditions: preconditions || [],
         steps,
         notes: (notes as string) || null,
+        id: hasId ? tcId : undefined,
       });
     }
   }
@@ -165,9 +169,40 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
   return expandedCases;
 }
 
-function assignTestCaseIds(testCases: TestCase[], idPrefix = "TC"): TestCase[] {
+// Anchors flow verbatim into DOM element ids and #/ hash routes (see testCaseAnchorId in app.ts),
+// so explicit ids are restricted to characters that are safe unencoded in both.
+const VALID_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function assignTestCaseIds(testCases: TestCase[], idPrefix = "TC", sourceFile?: string): TestCase[] {
   const makeId = (index: number) => `${idPrefix}-${String(index + 1).padStart(3, "0")}`;
-  return testCases.map((tc, index) => ({ ...tc, _tcId: makeId(index) }));
+
+  const withIds = testCases.map((tc, index) => {
+    if (tc.id === undefined || tc.id === null) {
+      return { ...tc, _tcId: makeId(index) };
+    }
+    const explicitId = String(tc.id);
+    if (!VALID_ID_PATTERN.test(explicitId)) {
+      throw new Error(
+        `Invalid test case id "${explicitId}"${sourceFile ? ` in ${sourceFile}` : ""}: ` +
+          `only letters, digits, "-" and "_" are allowed (ids become DOM element ids and URL fragments).`,
+      );
+    }
+    return { ...tc, _tcId: explicitId };
+  });
+
+  const seen = new Map<string, number>();
+  withIds.forEach((tc, index) => {
+    const firstIndex = seen.get(tc._tcId!);
+    if (firstIndex !== undefined) {
+      throw new Error(
+        `Duplicate test case id "${tc._tcId}"${sourceFile ? ` in ${sourceFile}` : ""}: ` +
+          `used by test cases at position ${firstIndex + 1} and ${index + 1}.`,
+      );
+    }
+    seen.set(tc._tcId!, index);
+  });
+
+  return withIds;
 }
 
 function sortByCategoryOrder(testCases: TestCase[], categoryOrder: string[] | undefined): TestCase[] {
@@ -265,7 +300,7 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
 
   const categoryOrder = yamlData.metadata?.category_order;
   const sortedCases = sortByCategoryOrder(mergedCases, categoryOrder);
-  const testCases = assignTestCaseIds(sortedCases, idPrefix);
+  const testCases = assignTestCaseIds(sortedCases, idPrefix, yamlFile);
 
   return { metadata: yamlData.metadata, testCases, guideContent, watchFiles };
 }

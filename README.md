@@ -63,6 +63,36 @@ test_cases:
 
 See `examples/` for complete samples.
 
+### Test case IDs
+
+Each test case gets an ID (`LOGIN-001`, `LOGIN-002`, ...) built from `metadata.id_prefix` and
+its position in the file. Adding, removing, or reordering cases shifts every ID after the
+change, which breaks references from outside the file (automated test mappings, per-release
+run records, issue links).
+
+To pin a stable ID that survives reordering, set `id` on the test case:
+
+```yaml
+test_cases:
+  - name: Can log in with a valid ID and password
+    id: LOGIN-VALID-01
+    category: Basic flow
+    steps:
+      - action: Enter ID/password on the login screen
+        expected: Redirected to the dashboard
+```
+
+`id` is used verbatim and takes precedence over the sequential fallback. Cases without `id`
+keep counting sequentially, so existing files with no `id` fields behave exactly as before.
+IDs must be unique within the file (checked after sequential IDs are assigned, so an explicit
+ID can still collide with an auto-numbered one) and may only contain letters, digits, `-`, and
+`_` — an ID becomes a DOM element id and a `#/` hash-route fragment, so other characters are
+rejected at load time.
+
+Uniqueness is only checked per file, not across the whole scan root, so an explicit `id` must
+also be unique across every `testcases.yaml` under the root — conventionally give it the
+suite's own `id_prefix` to keep that true.
+
 ### Directory hierarchy, domain, and feature
 
 The first two path segments relative to the root directory are treated as "domain" and "feature", respectively.
@@ -124,8 +154,9 @@ parameterized_tests:
           expected: "An error message is displayed"
 ```
 
-Each pattern's `id` is appended to `id_prefix` to form the test case ID (`LOGIN-INVALID-01`).
-Any other key on a pattern is substituted wherever `{{key}}` appears in the template.
+Each pattern's `id` is appended to `id_prefix` to form the test case's explicit stable ID
+(`LOGIN-INVALID-01`) — reordering patterns does not change it. Any other key on a pattern is
+substituted wherever `{{key}}` appears in the template.
 
 Steps and postconditions can be made conditional with `when`, which supports `key == 'value'`
 combined with `&&` and `||`. A `postconditions` entry is appended to the last step's expected
