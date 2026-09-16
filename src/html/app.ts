@@ -12,6 +12,11 @@ interface Step {
   expected: string;
 }
 
+interface Skip {
+  reason: string;
+  until?: string;
+}
+
 interface TestCase {
   _tcId: string;
   name: string;
@@ -20,6 +25,20 @@ interface TestCase {
   preconditions?: unknown[];
   steps: Step[];
   notes?: string | null;
+  legacy_id?: string;
+  status?: "active" | "obsolete" | "superseded";
+  reason?: string;
+  superseded_by?: string;
+  legacy_marker?: string;
+  skip?: Skip;
+  tags?: string[];
+  automation?: "manual" | "idweave" | "semi";
+  scenario?: string;
+}
+
+/** status(permanent) is orthogonal to skip(temporary) — either one takes the case out of active coverage. */
+function isInactive(tc: TestCase): boolean {
+  return tc.status === "obsolete" || tc.status === "superseded" || tc.skip != null;
 }
 
 interface GuideHeading {
@@ -238,9 +257,25 @@ function StepsTable({ steps }: { steps: Step[] }) {
 }
 
 function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
+  const inactive = isInactive(tc);
   return html`
-    <div class="test-case" id=${testCaseAnchorId(tc._tcId)}>
-      <h4 class="test-case-title sticky-header sticky-level-4">${tc._tcId}: ${tc.name}</h4>
+    <div class="test-case ${inactive ? "test-case-inactive" : ""}" id=${testCaseAnchorId(tc._tcId)}>
+      <h4 class="test-case-title sticky-header sticky-level-4">
+        ${tc._tcId}: ${tc.name}
+        ${tc.status === "obsolete"
+          ? html`<span class="badge badge-status" title=${tc.reason ?? ""}>obsolete</span>`
+          : null}
+        ${tc.status === "superseded"
+          ? html`<span class="badge badge-status" title=${tc.reason ?? ""}>superseded${tc.superseded_by ? ` → ${tc.superseded_by}` : ""}</span>`
+          : null}
+        ${tc.skip
+          ? html`<span class="badge badge-skip" title=${tc.skip.reason}>skip${tc.skip.until ? ` (until ${tc.skip.until})` : ""}</span>`
+          : null}
+        ${tc.automation && tc.automation !== "manual"
+          ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
+          : null}
+      </h4>
+      ${tc.legacy_marker ? html`<div class="legacy-marker">元の表記: ${tc.legacy_marker}</div>` : null}
       ${tc.preconditions && tc.preconditions.length > 0
         ? html`<div class="preconditions">
             <strong>Preconditions:</strong>
@@ -255,13 +290,20 @@ function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
   `;
 }
 
+/** Renders a count as "active (total)" when some cases are obsolete/superseded/skipped, otherwise just the total. */
+function CountLabel({ testCases }: { testCases: TestCase[] }) {
+  const total = testCases.length;
+  const activeCount = testCases.filter((tc) => !isInactive(tc)).length;
+  return activeCount === total ? html`${total}` : html`${activeCount} <span class="count-total">(${total})</span>`;
+}
+
 function CategorySection({ idPrefix, category, testCases }: { idPrefix: string; category: string; testCases: TestCase[] }) {
   return html`
     <section class="category-section" id=${categoryAnchorId(idPrefix, category)}>
       <div class="category-header sticky-header sticky-level-3">
         <h3>${category}</h3>
         <div class="category-header-right">
-          <span class="count">${testCases.length}</span>
+          <span class="count"><${CountLabel} testCases=${testCases} /></span>
           <${CopyButton} title="Copy this section as Markdown" getText=${() => categoryToMarkdown(category, testCases)} />
         </div>
       </div>
@@ -533,7 +575,7 @@ function SuiteSection({ suite }: { suite: SuitePageData }) {
       <h1 class="suite-title sticky-header sticky-level-2">
         <span class="suite-title-text">${suite.idPrefix}: ${suite.typeName}</span>
         <span class="suite-title-right">
-          <span class="suite-title-count">${suite.testCases.length}</span>
+          <span class="suite-title-count"><${CountLabel} testCases=${suite.testCases} /></span>
           <${CopyButton} title="Copy all test cases as Markdown" getText=${() => allTestCasesToMarkdown(suite)} />
         </span>
       </h1>
@@ -550,16 +592,35 @@ function SuiteSection({ suite }: { suite: SuitePageData }) {
   `;
 }
 
-function featureTestCaseCount(group: FeatureGroup): number {
-  return group.suites.reduce((sum, suite) => sum + suite.testCases.length, 0);
+interface CaseCount {
+  active: number;
+  total: number;
 }
 
-function domainTestCaseCount(group: DomainGroup): number {
-  return group.features.reduce((sum, f) => sum + featureTestCaseCount(f), 0);
+function addCounts(a: CaseCount, b: CaseCount): CaseCount {
+  return { active: a.active + b.active, total: a.total + b.total };
+}
+
+function suiteTestCaseCount(suite: SuitePageData): CaseCount {
+  const total = suite.testCases.length;
+  const active = suite.testCases.filter((tc) => !isInactive(tc)).length;
+  return { active, total };
+}
+
+function featureTestCaseCount(group: FeatureGroup): CaseCount {
+  return group.suites.reduce((sum, suite) => addCounts(sum, suiteTestCaseCount(suite)), { active: 0, total: 0 });
+}
+
+function domainTestCaseCount(group: DomainGroup): CaseCount {
+  return group.features.reduce((sum, f) => addCounts(sum, featureTestCaseCount(f)), { active: 0, total: 0 });
+}
+
+function formatCaseCount({ active, total }: CaseCount): string {
+  return active === total ? `${total}` : `${active} (${total})`;
 }
 
 function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
-  const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${featureTestCaseCount(group)} test case(s)`, ""];
+  const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${formatCaseCount(featureTestCaseCount(group))} test case(s)`, ""];
   for (const suite of group.suites) {
     lines.push(allTestCasesToMarkdown(suite, headingLevel + 1));
   }
@@ -567,7 +628,7 @@ function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
 }
 
 function domainToMarkdown(group: DomainGroup): string {
-  const lines = [`# ${group.domainLabel}`, "", `> ${domainTestCaseCount(group)} test case(s)`, ""];
+  const lines = [`# ${group.domainLabel}`, "", `> ${formatCaseCount(domainTestCaseCount(group))} test case(s)`, ""];
   for (const feature of group.features) {
     lines.push(featureToMarkdown(feature, 2));
   }
@@ -580,7 +641,7 @@ function FeatureSection({ domain, group }: { domain: string; group: FeatureGroup
       <h2 class="feature-title sticky-header sticky-level-1">
         <span class="suite-title-text">${group.featureLabel}</span>
         <span class="suite-title-right">
-          <span class="suite-title-count">${featureTestCaseCount(group)}</span>
+          <span class="suite-title-count">${formatCaseCount(featureTestCaseCount(group))}</span>
           <${CopyButton} title="Copy this feature as Markdown" getText=${() => featureToMarkdown(group)} />
         </span>
       </h2>
@@ -655,7 +716,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
       id: domainAnchorId(d.domain),
       label: d.domainLabel,
       searchText: `${d.domain} ${d.domainLabel}`,
-      count: domainTestCaseCount(d),
+      count: domainTestCaseCount(d).active,
     });
     for (const f of d.features) {
       entries.push({
@@ -664,7 +725,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
         label: f.featureLabel,
         searchText: `${f.feature} ${f.featureLabel}`,
         breadcrumb: d.domainLabel,
-        count: featureTestCaseCount(f),
+        count: featureTestCaseCount(f).active,
       });
       for (const suite of f.suites) {
         entries.push({

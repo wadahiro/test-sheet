@@ -706,6 +706,49 @@ body {
   color: var(--fg-muted);
 }
 
+.test-case-inactive {
+  opacity: 0.6;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.badge-status {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+
+.badge-skip {
+  background: var(--flash);
+  color: var(--fg);
+}
+
+.badge-automation {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.legacy-marker {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--fg-faint);
+  font-family: monospace;
+}
+
+.count-total {
+  color: var(--fg-muted);
+  font-weight: normal;
+}
+
 /* Command palette (Cmd+K / Ctrl+K) */
 
 .palette-overlay {

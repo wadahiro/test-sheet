@@ -9,6 +9,13 @@ export interface Step {
   expected: string;
 }
 
+export interface Skip {
+  /** Required: why this case can't be run right now. */
+  reason: string;
+  /** Optional release condition (ticket id, release name, ...). */
+  until?: string;
+}
+
 export interface TestCase {
   name: string;
   category?: string;
@@ -18,6 +25,31 @@ export interface TestCase {
   notes?: string | null;
   /** Explicit stable ID. Takes precedence over the sequential fallback in assignTestCaseIds. */
   id?: string;
+  /** Stable reference into the pre-migration source (e.g. a Confluence row id). Traceability only. */
+  legacy_id?: string;
+  /**
+   * The test case document's permanent lifecycle — orthogonal to `skip` (a temporary,
+   * execution-time block). active (default) / obsolete (no longer valid, e.g. a spec change) /
+   * superseded (replaced by another case — see superseded_by). Keeping a permanently-unrunnable
+   * case as `obsolete`/`superseded` rather than deleting it preserves the coverage decision;
+   * a *temporary* block (e.g. "feature not released yet") belongs in `skip`, not here — folding
+   * it into status risks it being forgotten once the blocker clears.
+   */
+  status?: "active" | "obsolete" | "superseded";
+  /** status: obsolete/superseded — why it no longer applies. */
+  reason?: string;
+  /** status: superseded — id of the case that replaces this one. */
+  superseded_by?: string;
+  /** Verbatim marker from the migration source (e.g. "【SKIP】") when its intent couldn't be classified. */
+  legacy_marker?: string;
+  /** A temporary, execution-time block — the case itself stays active. */
+  skip?: Skip;
+  /** Free-form labels for attributes not worth a dedicated field (e.g. db_verup). */
+  tags?: string[];
+  /** manual (default) / idweave / semi — automation state, orthogonal to status. */
+  automation?: "manual" | "idweave" | "semi";
+  /** Path to the idweave scenario.yaml when automation is idweave/semi. */
+  scenario?: string;
   _tcId?: string;
 }
 
