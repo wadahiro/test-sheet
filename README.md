@@ -89,9 +89,8 @@ ID can still collide with an auto-numbered one) and may only contain letters, di
 `_` — an ID becomes a DOM element id and a `#/` hash-route fragment, so other characters are
 rejected at load time.
 
-Uniqueness is only checked per file, not across the whole scan root, so an explicit `id` must
-also be unique across every `testcases.yaml` under the root — conventionally give it the
-suite's own `id_prefix` to keep that true.
+An explicit `id` must start with `<metadata.id_prefix>-`, and IDs must be unique across every
+`testcases.yaml` under the scan root — a suite whose IDs collide with an earlier one fails to load.
 
 ### Directory hierarchy, domain, and feature
 
@@ -157,6 +156,13 @@ parameterized_tests:
 Each pattern's `id` is appended to `id_prefix` to form the test case's explicit stable ID
 (`LOGIN-INVALID-01`) — reordering patterns does not change it. Any other key on a pattern is
 substituted wherever `{{key}}` appears in the template.
+
+This `id_prefix` is independent of `metadata.id_prefix`: it is used as written, with nothing
+prepended. It must still begin with `<metadata.id_prefix>-` (here `LOGIN-`); a prefix that does
+not, such as `""`, is rejected when the file is loaded.
+
+In the template, `{{id}}` is the pattern's own `id` as written (`01`), while `{{tc_id}}` is the
+full test case ID (`LOGIN-INVALID-01`). `when` conditions see the same two keys.
 
 Steps and postconditions can be made conditional with `when`, which supports `key == 'value'`
 combined with `&&` and `||`. A `postconditions` entry is appended to the last step's expected

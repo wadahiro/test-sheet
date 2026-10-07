@@ -144,7 +144,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
   for (const ptRaw of parameterizedTests) {
     const pt = ptRaw as Record<string, unknown>;
     const category = pt.category as string | undefined;
-    const idPrefix = pt.id_prefix as string;
+    const idPrefix = (pt.id_prefix as string | undefined) ?? "";
     const preconditions = pt.preconditions as unknown[] | undefined;
     const patterns = pt.patterns as Array<Record<string, unknown>>;
     const template = pt.template as Record<string, unknown>;
@@ -154,7 +154,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
       const { id, notes, ...params } = pattern;
       const hasId = id !== undefined && id !== null;
       const tcId = hasId ? `${idPrefix}${id}` : idPrefix;
-      const allParams = { id: tcId, ...params };
+      const allParams = { ...params, ...(hasId ? { id } : {}), tc_id: tcId };
 
       const templateName = template.name as string | undefined;
       const name = templateName ? expandPlaceholders(templateName, allParams, formatConfig) : tcId;
@@ -217,6 +217,12 @@ function assignTestCaseIds(testCases: TestCase[], idPrefix = "TC", sourceFile?: 
       throw new Error(
         `Invalid test case id "${explicitId}"${sourceFile ? ` in ${sourceFile}` : ""}: ` +
           `only letters, digits, "-" and "_" are allowed (ids become DOM element ids and URL fragments).`,
+      );
+    }
+    if (!explicitId.startsWith(`${idPrefix}-`)) {
+      throw new Error(
+        `Invalid test case id "${explicitId}"${sourceFile ? ` in ${sourceFile}` : ""}: ` +
+          `explicit ids must start with "${idPrefix}-" (metadata.id_prefix) so they stay unique across suites.`,
       );
     }
     return { ...tc, _tcId: explicitId };
@@ -396,9 +402,18 @@ function readReadmeTitle(dir: string): string | null {
 export async function loadAllTestSuites(rootDir: string, exclude: string[] = []): Promise<TestSuiteTestCases[]> {
   const files = await findAllTestCaseFiles(rootDir, exclude);
   const results: TestSuiteTestCases[] = [];
+  // Anchors and routes carry only the test case id, so it must be unique across the whole scan root
+  const idOwners = new Map<string, string>();
   for (const file of files) {
     try {
       const loaded = loadTestCases(file);
+      for (const tc of loaded.testCases) {
+        const owner = idOwners.get(tc._tcId!);
+        if (owner !== undefined) {
+          throw new Error(`Duplicate test case id "${tc._tcId}": already used in ${owner}.`);
+        }
+      }
+      for (const tc of loaded.testCases) idOwners.set(tc._tcId!, file);
       const { domain, feature } = extractDomainAndFeature(rootDir, file);
       const domainLabel = (domain && readReadmeTitle(resolve(rootDir, domain))) || domain;
       const featureLabel = (domain && feature && readReadmeTitle(resolve(rootDir, domain, feature))) || feature;
