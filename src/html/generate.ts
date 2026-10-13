@@ -93,6 +93,10 @@ async function renderGuideWithHeadings(
   return { html, headings };
 }
 
+// Notes are often hard-wrapped in the YAML source; Markdown turns a single newline into a soft wrap
+// and a blank line into a paragraph, so the text reflows to the page instead of keeping the source width.
+const notesMarked = new Marked();
+
 export interface GenerateHtmlOptions {
   /** When true, enables WebSocket auto-reload in the browser (server mode only). Set to false for static output. */
   liveReload?: boolean;
@@ -116,7 +120,9 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         featureLabel: suite.featureLabel,
         typeName: suite.metadata.type_name,
         idPrefix,
-        testCases: suite.testCases,
+        testCases: await Promise.all(
+          suite.testCases.map(async (tc) => (tc.notes ? { ...tc, notesHtml: await notesMarked.parse(tc.notes) } : tc))
+        ),
         guideHtml,
         guideHeadings,
         /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */

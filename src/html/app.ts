@@ -25,6 +25,8 @@ interface TestCase {
   preconditions?: unknown[];
   steps: Step[];
   notes?: string | null;
+  /** `notes` rendered as Markdown at generation time; `notes` itself stays raw for copy and search */
+  notesHtml?: string;
   legacy_id?: string;
   status?: "active" | "obsolete" | "superseded";
   reason?: string;
@@ -285,7 +287,12 @@ function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
           </div>`
         : null}
       <${StepsTable} steps=${tc.steps} />
-      ${tc.notes ? html`<div class="notes">📝 ${tc.notes.trimEnd()}</div>` : null}
+      ${tc.notesHtml
+        ? html`<div class="notes">
+            <span class="notes-icon">📝</span>
+            <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
+          </div>`
+        : null}
     </div>
   `;
 }

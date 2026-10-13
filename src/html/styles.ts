@@ -701,11 +701,17 @@ body {
 }
 
 .notes {
-  white-space: pre-wrap;
+  display: flex;
+  gap: 6px;
   margin-top: 12px;
   font-size: 0.85rem;
   color: var(--fg-muted);
 }
+
+.notes-icon { flex: 0 0 auto; }
+.notes-body { min-width: 0; }
+.notes-body > :first-child { margin-top: 0; }
+.notes-body > :last-child { margin-bottom: 0; }
 
 .test-case-inactive {
   opacity: 0.6;
