@@ -285,7 +285,7 @@ function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
           </div>`
         : null}
       <${StepsTable} steps=${tc.steps} />
-      ${tc.notes ? html`<div class="notes">📝 ${tc.notes}</div>` : null}
+      ${tc.notes ? html`<div class="notes">📝 ${tc.notes.trimEnd()}</div>` : null}
     </div>
   `;
 }

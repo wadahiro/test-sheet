@@ -701,6 +701,7 @@ body {
 }
 
 .notes {
+  white-space: pre-wrap;
   margin-top: 12px;
   font-size: 0.85rem;
   color: var(--fg-muted);
