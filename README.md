@@ -93,6 +93,26 @@ numbers). Tags are shown under the test case title, included in search and in th
 and shown in the Overview, where clicking one filters the list. The filter is a plain text match,
 so a short tag also matches names that contain it.
 
+To tag every case in a suite, put `tags` under `metadata`; each case gets those tags in addition
+to its own. In `parameterized_tests`, a template's `tags` and a pattern's `tags` are both added to
+each case the pattern expands to, so patterns can differ in tags while sharing one template.
+
+```yaml
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+  tags: [login]
+parameterized_tests:
+  - id_prefix: LOGIN-ROLE-
+    patterns:
+      - { id: "01", role: admin, tags: [admin_only] }
+      - { id: "02", role: user }
+    template:
+      name: "Login as {{role}}"
+      tags: [per_role]
+      steps: []
+```
+
 ### Test case IDs
 
 Each test case gets an ID (`LOGIN-001`, `LOGIN-002`, ...) built from `metadata.id_prefix` and

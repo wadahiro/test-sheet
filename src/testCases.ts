@@ -58,6 +58,8 @@ export interface Metadata {
   id_prefix: string;
   guides?: string[];
   category_order?: string[];
+  /** Tags every test case in the suite inherits */
+  tags?: string[];
 }
 
 export interface TestCasesFileData {
@@ -134,6 +136,18 @@ function evaluateWhen(whenExpr: string | undefined, params: Record<string, unkno
   return evaluateSingleCondition(whenExpr, params);
 }
 
+/**
+ * Concatenates tag lists, dropping repeats; undefined when there are none so untagged cases stay
+ * untagged. A value that is not a list is passed through untouched for validateTags to reject.
+ */
+function mergeTags(...lists: unknown[]): string[] | undefined {
+  const present = lists.filter((list) => list !== undefined && list !== null);
+  const malformed = present.find((list) => !Array.isArray(list));
+  if (malformed !== undefined) return malformed as string[];
+  const unique = [...new Set(present.flat() as string[])];
+  return unique.length > 0 ? unique : undefined;
+}
+
 function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
   if (!parameterizedTests || parameterizedTests.length === 0) {
     return [];
@@ -151,7 +165,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
     const formatConfig = (pt.format as FormatConfig) || {};
 
     for (const pattern of patterns) {
-      const { id, notes, ...params } = pattern;
+      const { id, notes, tags: patternTags, ...params } = pattern;
       const hasId = id !== undefined && id !== null;
       const tcId = hasId ? `${idPrefix}${id}` : idPrefix;
       const allParams = { ...params, ...(hasId ? { id } : {}), tc_id: tcId };
@@ -194,6 +208,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         steps,
         notes: (notes as string) || null,
         id: hasId ? tcId : undefined,
+        tags: mergeTags(template.tags, patternTags),
       });
     }
   }
@@ -243,15 +258,20 @@ function assignTestCaseIds(testCases: TestCase[], idPrefix = "TC", sourceFile?: 
   return withIds;
 }
 
-function validateTags(testCases: TestCase[], sourceFile: string): void {
+function isTagList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((tag) => typeof tag === "string" && tag.trim() !== "");
+}
+
+const TAGS_HINT = `tags must be a list of non-empty strings (quote values like "2024" that YAML would read as numbers).`;
+
+function validateTags(testCases: TestCase[], metadataTags: unknown, sourceFile: string): void {
+  if (metadataTags !== undefined && metadataTags !== null && !isTagList(metadataTags)) {
+    throw new Error(`Invalid metadata.tags in ${sourceFile}: ${TAGS_HINT}`);
+  }
   for (const tc of testCases) {
     if (tc.tags === undefined || tc.tags === null) continue;
-    const valid = Array.isArray(tc.tags) && tc.tags.every((tag) => typeof tag === "string" && tag.trim() !== "");
-    if (!valid) {
-      throw new Error(
-        `Invalid tags on test case "${tc.name}" in ${sourceFile}: ` +
-          `tags must be a list of non-empty strings (quote values like "2024" that YAML would read as numbers).`,
-      );
+    if (!isTagList(tc.tags)) {
+      throw new Error(`Invalid tags on test case "${tc.name}" in ${sourceFile}: ${TAGS_HINT}`);
     }
   }
 }
@@ -351,8 +371,10 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
 
   const categoryOrder = yamlData.metadata?.category_order;
   const sortedCases = sortByCategoryOrder(mergedCases, categoryOrder);
-  validateTags(sortedCases, yamlFile);
-  const testCases = assignTestCaseIds(sortedCases, idPrefix, yamlFile);
+  validateTags(sortedCases, yamlData.metadata.tags, yamlFile);
+  const suiteTags = yamlData.metadata.tags;
+  const taggedCases = suiteTags ? sortedCases.map((tc) => ({ ...tc, tags: mergeTags(suiteTags, tc.tags) })) : sortedCases;
+  const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
 
   return { metadata: yamlData.metadata, testCases, guideContent, watchFiles };
 }
