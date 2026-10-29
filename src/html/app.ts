@@ -430,6 +430,59 @@ function imageFiles(list: FileList | null | undefined): File[] {
 }
 
 /**
+ * A step's screenshots at full size over the page, one at a time with arrows (and the arrow keys)
+ * to move between them. It is mounted on <body> rather than inside the card: the cards sit in a
+ * container-query box, which would pin a fixed overlay to that box instead of the window.
+ */
+function useLightbox(index: number | null, images: RunImage[], label: (n: number) => string, onChange: (index: number | null) => void) {
+  useEffect(() => {
+    if (index === null || !images[index]) return;
+    const image = images[index];
+    const close = () => onChange(null);
+    const go = (to: number) => {
+      if (to >= 0 && to < images.length) onChange(to);
+    };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    render(
+      html`<div class="lightbox" role="dialog" aria-modal="true" aria-label=${label(index)} onClick=${close}>
+        <div class="lightbox-bar" onClick=${(e: Event) => e.stopPropagation()}>
+          ${images.length > 1 ? html`<span class="lightbox-count">${index + 1} / ${images.length}</span>` : null}
+          <a class="lightbox-link" href=${image.url} target="_blank" rel="noopener">Open in a new tab</a>
+          <button class="lightbox-close" title="Close (Esc)" aria-label="Close" onClick=${close}>✕</button>
+        </div>
+        <div class="lightbox-stage" onClick=${(e: Event) => e.stopPropagation()}>
+          ${images.length > 1
+            ? html`<button class="lightbox-nav" title="Previous image (←)" aria-label="Previous image" disabled=${index === 0} onClick=${() => go(index - 1)}>‹</button>`
+            : null}
+          <img class="lightbox-image" src=${image.url} alt=${label(index)} />
+          ${images.length > 1
+            ? html`<button class="lightbox-nav" title="Next image (→)" aria-label="Next image" disabled=${index === images.length - 1} onClick=${() => go(index + 1)}>›</button>`
+            : null}
+        </div>
+      </div>`,
+      host
+    );
+    host.querySelector<HTMLElement>(".lightbox-close")?.focus();
+    // Capture phase: these keys belong to the picture first, not to the guide, the note or the page
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowLeft") go(index - 1);
+      else if (e.key === "ArrowRight") go(index + 1);
+      else return;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      render(null, host);
+      host.remove();
+    };
+  }, [index, images.length]);
+}
+
+/**
  * One screenshot with what can be done with it. Markdown cannot carry the image itself (issue
  * trackers drop data: URLs), so the way into a comment box is to copy the image and paste it there,
  * where the site uploads it and writes its own link; downloading is the drag-and-drop alternative.
@@ -438,11 +491,13 @@ function ImageThumb({
   image,
   label,
   fileName,
+  onOpen,
   onRemove,
 }: {
   image: RunImage;
   label: string;
   fileName: string;
+  onOpen: () => void;
   onRemove: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -459,7 +514,9 @@ function ImageThumb({
   };
 
   return html`<li class="step-image">
-    <a href=${image.url} target="_blank" rel="noopener" title="Open the full image"><img src=${image.url} alt=${label} /></a>
+    <button class="image-open" title="View the full image" aria-label=${`View ${label} full size`} onClick=${onOpen}>
+      <img src=${image.url} alt=${label} />
+    </button>
     <span class="image-tools">
       <button class=${"image-tool" + (copied ? " image-tool-done" : "")} title="Copy the image, to paste into an issue or comment" aria-label=${`Copy ${label}`} onClick=${copy}>
         ${copied ? "✓" : html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
@@ -480,6 +537,8 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
   const images = run.images[index] ?? [];
   const full = images.length >= MAX_IMAGES_PER_STEP;
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const [viewing, setViewing] = useState<number | null>(null);
+  useLightbox(viewing, images, (n) => `Screenshot ${n + 1} for step ${index + 1}`, setViewing);
 
   // Grows with the text so a few lines never need scrolling inside the box
   useEffect(() => {
@@ -557,6 +616,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
                 image=${image}
                 label=${`Screenshot ${n + 1} for step ${index + 1}`}
                 fileName=${`${tcId}-step${index + 1}-${n + 1}.${image.blob.type === "image/png" ? "png" : "jpg"}`}
+                onOpen=${() => setViewing(n)}
                 onRemove=${() => run.removeImage(index, image.id)}
               />`
             )}
