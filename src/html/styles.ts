@@ -168,9 +168,7 @@ body {
 }
 
 /*
- * A column whose head (view toggle, title) stays put while only the entry list
- * scrolls — the view toggle is how you leave the outline, so it must not be the first thing
- * that scrolls away.
+ * A column that stays put while only the entry list scrolls.
  */
 .nav-outline {
   position: sticky;
@@ -186,50 +184,10 @@ body {
   background: var(--bg-subtle);
 }
 
-/* The three pinned rows: they must keep their height rather than shrink to fit the list */
-.view-toggle,
-.nav-outline-title {
-  flex: 0 0 auto;
-}
-
-.view-toggle {
-  display: flex;
-  gap: 3px;
-  margin-bottom: 14px;
-  padding: 3px;
-  background: var(--bg-hover);
-  border-radius: 6px;
-}
-
-.view-toggle-btn {
-  flex: 1;
-  border: none;
-  background: none;
-  padding: 5px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-family: inherit;
-  cursor: pointer;
+.nav-empty {
   color: var(--fg-muted);
-}
-
-.view-toggle-btn:hover {
-  color: var(--fg);
-}
-
-.view-toggle-btn.view-toggle-active {
-  background: var(--bg);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.nav-outline-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0 8px 8px;
+  font-size: 0.85rem;
+  padding: 6px 8px;
 }
 
 .nav-outline ul {
@@ -281,6 +239,11 @@ body {
   flex: 0 0 auto;
   color: var(--fg-muted);
   font-weight: normal;
+}
+
+.nav-outline-view .nav-outline-item {
+  font-weight: 700;
+  font-size: 0.95rem;
 }
 
 .nav-outline-domain {
@@ -505,13 +468,6 @@ body {
   white-space: nowrap;
 }
 
-/* Wrapping (rather than nowrap) with a cap: with Status/Method/Tags beside it, long suite names
-   would otherwise squeeze Name into a sliver and push the table past the page width */
-.overview-hier {
-  max-width: 9rem;
-  overflow-wrap: break-word;
-}
-
 .overview-name {
   min-width: 12rem;
 }
@@ -520,26 +476,12 @@ body {
   max-width: 9rem;
 }
 
-/* Repeated hierarchy values are kept (not merged) so each row reads standalone, but dimmed
-   far enough that the eye still picks out where a group starts */
-.overview-repeat {
-  color: var(--fg-faint);
-}
-
 .overview-nowrap {
   white-space: nowrap;
 }
 
 .section-index {
   margin: 0 0 16px;
-}
-
-.section-index tbody tr {
-  cursor: pointer;
-}
-
-.section-index tbody tr:hover {
-  background: var(--bg-subtle);
 }
 
 /* A filled row rather than reduced opacity, so struck-off cases stay as legible as active ones */
@@ -558,6 +500,47 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+.scope-table {
+  margin-bottom: 24px;
+}
+
+.scope-crumb {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.scope-link {
+  font-size: 0.8rem;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.scope-link:hover {
+  text-decoration: underline;
+}
+
+/* A heading row ahead of each section: it names where the rows below sit, in place of the
+   hierarchy columns the table used to repeat on every row */
+.scope-table .scope-group th {
+  padding: 6px 10px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.scope-table .scope-group a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.scope-table .scope-group a:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .overview-link {
@@ -584,12 +567,17 @@ body {
 
 /*
  * Guides carry no sticky header of their own, so jumpToId's offset trick does not apply to
- * them. scroll-margin-top does the same job declaratively: clear the menu bar plus the three
- * levels (domain, feature, test suite) that stay stuck above a guide.
+ * them. scroll-margin-top does the same job declaratively: clear the menu bar plus the levels
+ * that stay stuck above a guide: three on the long page (domain, feature, test suite), one on a
+ * suite's own page (its title).
  */
+.scope-page {
+  --guide-depth: 1;
+}
+
 .guide,
 .guide h2 {
-  scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * 3);
+  scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * var(--guide-depth, 3));
 }
 
 .guide-summary {
