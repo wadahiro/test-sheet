@@ -401,7 +401,9 @@ body {
 .overview-title {
   font-size: 1.6rem;
   border-bottom: 4px solid var(--accent);
-  margin: 0 0 24px;
+  /* No gap below: the filter bar pins right under this title, so any gap here would close up
+     the moment the page scrolls */
+  margin: 0;
   padding-left: 0;
   padding-right: 0;
   justify-content: space-between;
