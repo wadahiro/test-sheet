@@ -2402,7 +2402,12 @@ function App() {
    * Local so typing in the filter box does not push a history entry per keystroke.
    * The route only seeds it — see the effect below.
    */
-  const [query, setQuery] = useState(route.query);
+  const [filter, setFilter] = useState({ scope: scopeKey(route), text: route.query });
+  // Derived from the route: a page the filter was not typed on starts from the route's own query.
+  // Resetting it in an effect would let the new page render once with the old page's filter, which
+  // can hide the very case being opened or rebuild the list under the jump to it.
+  const query = filter.scope === scopeKey(route) ? filter.text : route.query;
+  const setQuery = useCallback((text: string) => setFilter({ scope: scopeKey(route), text }), [route.hash]);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
   const [runModeOn, setRunModeOn] = useState(readRunMode);
@@ -2486,7 +2491,7 @@ function App() {
         location.hash = entry.hash;
       }
     },
-    [suites]
+    [suites, setQuery]
   );
 
   const setGuide = useCallback(
