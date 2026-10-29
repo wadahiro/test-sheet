@@ -21,6 +21,7 @@ domain → feature → test suite → section → test case. Domain and feature 
 - Sticky `top` is `--header-h + --sticky-h * level` (`sticky-level-0`..`4`). A new hierarchy level needs a matching rule. A scope page (`ScopePage`) has one sticky header above its cards, so its sections and cards pass `level` 1 and 2, whereas the single long page (`#/all`) stacks 3 and 4; guides on the long page follow via `--guide-depth`. Anything else that sticks (`.nav-outline`, a table `thead`) offsets by `--header-h` too, and `.app-header` must keep a fixed height rather than growing with its contents.
 - `jumpToId` nudges a target down by its own sticky header's `top`; elements without one (guides) use `scroll-margin-top` instead. It also opens ancestor `<details>` before measuring.
 - A suite's guide opens in `.guide-panel`, a right-hand sticky column beside the cases, and stays open across pages. Its body and the sidebar's list are the only nested scrollers; keep it that way. `jumpToId` scrolls the panel itself for targets inside `.guide-panel-body` (`scrollIntoView` would move the page too), and scroll tracking skips anything in the panel.
+- A case card's header band is its `.sticky-header` (the deepest level); `jumpToId` reads its `top`, so keep it a descendant of the card. The narrow step layout keys off the cards' own width (`.cards` container query), not the viewport, because the sidebar and guide panel set it.
 - `.nav-outline` is a flex column and only its `ul` scrolls. New head elements need `flex: 0 0 auto`; the `ul` keeps `min-height: 0`.
 
 ## Theming

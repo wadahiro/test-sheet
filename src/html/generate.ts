@@ -7,6 +7,7 @@ import { Marked } from "marked";
 import type { TestSuiteTestCases } from "../testCases";
 import { STYLES } from "./styles";
 import { createCaseMarkdown } from "./caseMarkdown";
+import { formatTestData } from "./caseFormat";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -101,6 +102,7 @@ const notesMarked = createCaseMarkdown({ breaks: false });
 const stepMarked = createCaseMarkdown({ breaks: true });
 
 async function renderTestCase(tc: TestSuiteTestCases["testCases"][number]) {
+  const testDataMarkdown = formatTestData(tc.test_data);
   return {
     ...tc,
     steps: await Promise.all(
@@ -111,6 +113,7 @@ async function renderTestCase(tc: TestSuiteTestCases["testCases"][number]) {
       }))
     ),
     ...(tc.notes ? { notesHtml: await notesMarked.parse(tc.notes) } : {}),
+    ...(testDataMarkdown ? { testDataHtml: await notesMarked.parse(testDataMarkdown) } : {}),
   };
 }
 

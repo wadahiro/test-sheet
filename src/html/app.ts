@@ -4,6 +4,7 @@
 import { h, render } from "preact";
 import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import htmBind from "htm";
+import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 
 const html = htmBind.bind(h);
 
@@ -30,6 +31,8 @@ interface TestCase {
   notes?: string | null;
   /** `notes` rendered as Markdown at generation time; `notes` itself stays raw for copy and search */
   notesHtml?: string;
+  /** `test_data` rendered as Markdown at generation time */
+  testDataHtml?: string;
   legacy_id?: string;
   status?: "active" | "obsolete" | "superseded";
   reason?: string;
@@ -77,83 +80,6 @@ declare global {
     /** When true, watches for file changes over WebSocket and auto-reloads (server mode only) */
     __LIVE_RELOAD__: boolean;
   }
-}
-
-function formatPreconditions(preconditions: unknown[] | undefined): string {
-  if (!preconditions || preconditions.length === 0) return "";
-  return preconditions
-    .map((p) => {
-      if (typeof p === "object" && p !== null) {
-        return Object.entries(p as Record<string, unknown>)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join("");
-      }
-      return String(p);
-    })
-    .map((p) => `- ${p}`)
-    .join("\n");
-}
-
-function isObjectArray(arr: unknown[]): boolean {
-  return arr.some((item) => typeof item === "object" && item !== null);
-}
-
-function formatArrayAsTable(dataArray: Array<Record<string, unknown>>): string {
-  if (!dataArray || dataArray.length === 0) return "";
-  const allKeys = new Set<string>();
-  for (const item of dataArray) {
-    for (const key of Object.keys(item)) allKeys.add(key);
-  }
-  const keys = Array.from(allKeys);
-  if (keys.length === 0) return "";
-
-  const headerRow = `| ${keys.join(" | ")} |`;
-  const separatorRow = `|${keys.map(() => "---").join("|")}|`;
-  const dataRows = dataArray.map((item) => {
-    const values = keys.map((key) => {
-      const value = item[key];
-      if (value === undefined || value === null) return "";
-      if (typeof value === "object") return JSON.stringify(value);
-      return String(value);
-    });
-    return `| ${values.join(" | ")} |`;
-  });
-  return [headerRow, separatorRow, ...dataRows].join("\n");
-}
-
-function formatTestData(testData: unknown): string {
-  if (!testData) return "";
-  const lines: string[] = [];
-
-  if (Array.isArray(testData)) {
-    if (isObjectArray(testData)) {
-      return formatArrayAsTable(testData as Array<Record<string, unknown>>);
-    }
-    return testData.join(", ");
-  }
-
-  for (const [key, value] of Object.entries(testData as Record<string, unknown>)) {
-    if (Array.isArray(value)) {
-      if (isObjectArray(value)) {
-        lines.push(`- **${key}:**`, "", formatArrayAsTable(value as Array<Record<string, unknown>>), "");
-      } else {
-        lines.push(`- **${key}:** ${value.join(", ")}`);
-      }
-    } else if (typeof value === "object" && value !== null) {
-      const entries = Object.entries(value as Record<string, unknown>);
-      const allScalar = entries.every(([, v]) => typeof v !== "object" || v === null);
-      if (allScalar) {
-        lines.push(`- **${key}:**`);
-        for (const [k, v] of entries) lines.push(`  - ${k}: ${v}`);
-      } else {
-        lines.push(`- **${key}:** \`${JSON.stringify(value)}\``);
-      }
-    } else {
-      lines.push(`- **${key}:** ${value}`);
-    }
-  }
-
-  return lines.join("\n");
 }
 
 function formatStepsAsMarkdownTable(steps: Step[]): string {
@@ -224,7 +150,7 @@ function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string 
   return lines.join("\n");
 }
 
-function CopyButton({ getText, title }: { getText: () => string; title: string }) {
+function CopyButton({ getText, title, iconOnly = false }: { getText: () => string; title: string; iconOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const onClick = useCallback(() => {
@@ -235,33 +161,46 @@ function CopyButton({ getText, title }: { getText: () => string; title: string }
   }, [getText]);
 
   return html`
-    <button class="copy-btn ${copied ? "copy-btn-copied" : ""}" title=${title} onClick=${onClick}>
+    <button
+      class=${(iconOnly ? "icon-btn" : "copy-btn") + (copied ? " copy-btn-copied" : "")}
+      title=${title}
+      aria-label=${title}
+      onClick=${onClick}
+    >
       ${copied
         ? html`<span>✓</span>`
         : html`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
-      <span>${copied ? "Copied" : "Copy"}</span>
+      ${iconOnly ? null : html`<span>${copied ? "Copied" : "Copy"}</span>`}
     </button>
   `;
 }
 
+/**
+ * The explicit roles keep this a table for assistive technology even when the narrow layout
+ * turns its cells into blocks, which would otherwise drop the table semantics.
+ */
 function StepsTable({ steps }: { steps: Step[] }) {
   return html`
-    <table class="steps-table">
+    <table class="steps-table" role="table">
       <colgroup>
         <col class="col-step-no" />
         <col class="col-step-action" />
         <col />
       </colgroup>
-      <thead>
-        <tr><th>#</th><th>Action</th><th>Expected</th></tr>
+      <thead role="rowgroup">
+        <tr role="row">
+          <th role="columnheader" class="step-no">#</th>
+          <th role="columnheader">Action</th>
+          <th role="columnheader">Expected</th>
+        </tr>
       </thead>
-      <tbody>
+      <tbody role="rowgroup">
         ${steps.map(
           (step, i) => html`
-            <tr key=${i}>
-              <td>${i + 1}</td>
-              <td class="step-cell" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
-              <td class="step-cell" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
+            <tr key=${i} role="row">
+              <th role="rowheader" scope="row" class="step-no">${i + 1}</th>
+              <td role="cell" class="step-cell step-action" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
+              <td role="cell" class="step-cell step-expected" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
             </tr>
           `
         )}
@@ -270,48 +209,77 @@ function StepsTable({ steps }: { steps: Step[] }) {
   `;
 }
 
-/** `level` is the card title's position in the stack of sticky headers above it */
+/** Why a case is out of active coverage, spelled out; null for an active case */
+function inactiveNote(tc: TestCase): string | null {
+  const reason = tc.reason ?? tc.skip?.reason;
+  if (tc.status === "obsolete") return `Obsolete${reason ? `: ${reason}` : ""}`;
+  if (tc.status === "superseded") {
+    return `Superseded${tc.superseded_by ? ` by ${tc.superseded_by}` : ""}${reason ? `: ${reason}` : ""}`;
+  }
+  if (tc.skip) return `Skipped${tc.skip.until ? ` until ${tc.skip.until}` : ""}: ${tc.skip.reason}`;
+  return null;
+}
+
+/** `level` is the card header's position in the stack of sticky headers above it */
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   const inactive = isInactive(tc);
+  const note = inactiveNote(tc);
+  const hasMeta = !!(tc.tags && tc.tags.length > 0) || !!tc.legacy_marker || !!note;
+  const hasPreconditions = !!tc.preconditions && tc.preconditions.length > 0;
+
   return html`
-    <div class="test-case ${inactive ? "test-case-inactive" : ""}" id=${testCaseAnchorId(tc._tcId)}>
-      <h4 class=${`test-case-title sticky-header sticky-level-${level}`}>
-        ${tc._tcId}: ${tc.name}
-        ${tc.status === "obsolete"
-          ? html`<span class="badge badge-status" title=${tc.reason ?? ""}>obsolete</span>`
+    <article class=${"test-case" + (inactive ? " test-case-inactive" : "")} id=${testCaseAnchorId(tc._tcId)}>
+      <header class=${`test-case-head sticky-header sticky-level-${level}`}>
+        <span class="test-case-id">${tc._tcId}</span>
+        <h4 class="test-case-name" title=${tc.name}>${tc.name}</h4>
+        <span class="test-case-badges">
+          ${tc.status === "obsolete" ? html`<span class="badge">obsolete</span>` : null}
+          ${tc.status === "superseded" ? html`<span class="badge">superseded${tc.superseded_by ? ` → ${tc.superseded_by}` : ""}</span>` : null}
+          ${tc.skip ? html`<span class="badge badge-skip">skip${tc.skip.until ? ` (until ${tc.skip.until})` : ""}</span>` : null}
+          ${tc.automation && tc.automation !== "manual"
+            ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
+            : null}
+        </span>
+        <span class="test-case-actions">
+          <a class="icon-btn" href=${testCaseHash(tc._tcId)} title="Link to this test case" aria-label="Link to this test case">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+          </a>
+          <${CopyButton} iconOnly=${true} title="Copy this test case as Markdown" getText=${() => testCaseToMarkdown(tc)} />
+        </span>
+      </header>
+      <div class="test-case-body">
+        ${hasMeta
+          ? html`<div class="test-case-meta">
+              ${(tc.tags ?? []).map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title="Show test cases matching this tag">${tag}</a>`)}
+              ${note ? html`<span class="inactive-note">${note}</span>` : null}
+              ${tc.legacy_marker ? html`<span class="legacy-marker">Original marker: ${tc.legacy_marker}</span>` : null}
+            </div>`
           : null}
-        ${tc.status === "superseded"
-          ? html`<span class="badge badge-status" title=${tc.reason ?? ""}>superseded${tc.superseded_by ? ` → ${tc.superseded_by}` : ""}</span>`
+        ${hasPreconditions || tc.testDataHtml
+          ? html`<div class="test-case-setup">
+              ${hasPreconditions
+                ? html`<div class="preconditions">
+                    <h5 class="eyebrow">Preconditions</h5>
+                    <ul>${tc.preconditions!.map((p, i) => html`<li key=${i}>${preconditionText(p)}</li>`)}</ul>
+                  </div>`
+                : null}
+              ${tc.testDataHtml
+                ? html`<div class="test-data">
+                    <h5 class="eyebrow">Test data</h5>
+                    <div class="test-data-body" dangerouslySetInnerHTML=${{ __html: tc.testDataHtml }} />
+                  </div>`
+                : null}
+            </div>`
           : null}
-        ${tc.skip
-          ? html`<span class="badge badge-skip" title=${tc.skip.reason}>skip${tc.skip.until ? ` (until ${tc.skip.until})` : ""}</span>`
+        <${StepsTable} steps=${tc.steps} />
+        ${tc.notesHtml
+          ? html`<aside class="notes">
+              <h5 class="eyebrow">Note</h5>
+              <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
+            </aside>`
           : null}
-        ${tc.automation && tc.automation !== "manual"
-          ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
-          : null}
-      </h4>
-      ${tc.tags && tc.tags.length > 0
-        ? html`<div class="tags">
-            ${tc.tags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title="Show test cases matching this tag in the Overview">${tag}</a>`)}
-          </div>`
-        : null}
-      ${tc.legacy_marker ? html`<div class="legacy-marker">Original marker: ${tc.legacy_marker}</div>` : null}
-      ${tc.preconditions && tc.preconditions.length > 0
-        ? html`<div class="preconditions">
-            <strong>Preconditions:</strong>
-            <ul>
-              ${tc.preconditions.map((p, i) => html`<li key=${i}>${typeof p === "object" ? JSON.stringify(p) : String(p)}</li>`)}
-            </ul>
-          </div>`
-        : null}
-      <${StepsTable} steps=${tc.steps} />
-      ${tc.notesHtml
-        ? html`<div class="notes">
-            <span class="notes-icon">📝</span>
-            <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
-          </div>`
-        : null}
-    </div>
+      </div>
+    </article>
   `;
 }
 
@@ -732,6 +700,8 @@ function ScopePage({
   onQueryChange,
   guideOpen,
   onToggleGuide,
+  showInactive,
+  onToggleInactive,
 }: {
   route: Route;
   suites: SuitePageData[];
@@ -740,6 +710,8 @@ function ScopePage({
   onQueryChange: (query: string) => void;
   guideOpen: boolean;
   onToggleGuide: () => void;
+  showInactive: boolean;
+  onToggleInactive: () => void;
 }) {
   const resolved = resolveScope(route.scope, suites);
   if (!resolved) {
@@ -756,6 +728,17 @@ function ScopePage({
   const visibleIds = new Set(visibleRows.map((row) => row.tcId));
   const suite = route.scope.kind === "suite" ? resolved.suites[0] : null;
   const hasGuide = !!suite?.guideHtml;
+  const hasInactive = !!suite?.testCases.some(isInactive);
+  // Inactive cases stay in the table, where coverage is read; their cards are only noise for whoever
+  // runs the suite. A case the route points at is always shown, so a table row never opens onto nothing.
+  const cardCases = suite
+    ? suite.testCases.filter(
+        (tc) =>
+          visibleIds.has(tc._tcId) &&
+          (showInactive || !isInactive(tc) || testCaseAnchorId(tc._tcId) === route.target)
+      )
+    : [];
+  const hiddenCount = suite ? suite.testCases.filter((tc) => visibleIds.has(tc._tcId)).length - cardCases.length : 0;
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
@@ -794,13 +777,25 @@ function ScopePage({
             value=${query}
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
+          ${hasInactive
+            ? html`<label class="filter-toggle" title="Obsolete, superseded and skipped cases are always listed in the table">
+                <input type="checkbox" checked=${showInactive} onChange=${onToggleInactive} />
+                Show inactive cards
+              </label>`
+            : null}
         </div>
         ${visibleRows.length === 0
           ? html`<p class="empty">No matches</p>`
           : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
       </div>
-      ${suite && visibleRows.length > 0
-        ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${1} showIndex=${false} />`
+      ${hiddenCount > 0
+        ? html`<p class="hidden-note">
+            ${hiddenCount} inactive case${hiddenCount === 1 ? " is" : "s are"} not shown below; ${hiddenCount === 1 ? "it stays" : "they stay"} in the table.${" "}
+            <button class="link-btn" onClick=${onToggleInactive}>Show</button>
+          </p>`
+        : null}
+      ${suite && cardCases.length > 0
+        ? html`<${SuiteCategories} suite=${suite} testCases=${cardCases} level=${1} showIndex=${false} />`
         : null}
     </section>
   `;
@@ -871,7 +866,7 @@ function SuiteCategories({
   level: number;
   showIndex: boolean;
 }) {
-  return html`<main>
+  return html`<main class="cards">
     ${groupByCategory(testCases).map(
       ([category, cases]) => html`<${CategorySection} key=${category} idPrefix=${suite.idPrefix} category=${category} testCases=${cases} level=${level} showIndex=${showIndex} />`
     )}
@@ -1566,6 +1561,24 @@ function ThemeToggle() {
   `;
 }
 
+const SHOW_INACTIVE_STORAGE_KEY = "test-sheet-show-inactive";
+
+function readShowInactive(): boolean {
+  try {
+    return localStorage.getItem(SHOW_INACTIVE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeShowInactive(show: boolean) {
+  try {
+    localStorage.setItem(SHOW_INACTIVE_STORAGE_KEY, show ? "1" : "0");
+  } catch {
+    // Blocked storage (e.g. over file://) just means the choice is not remembered
+  }
+}
+
 const GUIDE_OPEN_STORAGE_KEY = "test-sheet-guide-open";
 
 function readGuideOpen(): boolean {
@@ -1799,6 +1812,7 @@ function App() {
    */
   const [query, setQuery] = useState(route.query);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
+  const [showInactive, setShowInactive] = useState(readShowInactive);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
   const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
@@ -1888,6 +1902,13 @@ function App() {
     writePanelWidth(GUIDE_SIZE, width);
   }, []);
 
+  const toggleInactive = useCallback(() => {
+    setShowInactive((show) => {
+      writeShowInactive(!show);
+      return !show;
+    });
+  }, []);
+
   const resetGuideWidth = useCallback(() => {
     setGuideWidth(null);
     clearPanelWidth(GUIDE_SIZE);
@@ -1928,6 +1949,8 @@ function App() {
                 onQueryChange=${setQuery}
                 guideOpen=${guidePanelOpen}
                 onToggleGuide=${() => setGuide(!guidePanelOpen)}
+                showInactive=${showInactive}
+                onToggleInactive=${toggleInactive}
               />`}
         </div>
         ${guidePanelOpen && guideSuite

@@ -8,7 +8,8 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - Navigate a domain → feature → test suite → section → test case hierarchy
 - Click a domain, feature or test suite to see a table of every case under it; a suite also lists its cases in full below the table
 - Full-text search in a command palette (Cmd+K / Ctrl+K), and a filter on every table
-- Resizable, collapsible side nav
+- Resizable, collapsible side nav; a docked guide panel to read beside the cases
+- Each case shows its preconditions, test data, steps and note; a suite page hides the cards of obsolete, superseded and skipped cases by default (they stay in the table)
 - Copy any section or test suite as Markdown (for pasting into a PR or issue comment)
 - Auto-reloads the browser whenever a `testcases.yaml` is saved
 - Can also render to a single self-contained HTML file (for CI artifacts or static distribution)

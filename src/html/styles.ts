@@ -16,6 +16,8 @@ const DARK_THEME_VARS = `
   --overlay: rgba(1, 4, 9, 0.7);
   --flash: #4d3800;
   --inactive-bg: #262c36;
+  --warn: #d29922;
+  --warn-bg: #3a2d00;
 `;
 
 export const STYLES = `
@@ -36,6 +38,8 @@ export const STYLES = `
   --overlay: rgba(15, 23, 42, 0.45);
   --flash: #fff2ba;
   --inactive-bg: #eceff2;
+  --warn: #9a6700;
+  --warn-bg: #fff8c5;
   --header-h: 48px;
   --nav-w: 240px;
   --guide-w: 380px;
@@ -432,7 +436,8 @@ body {
 }
 
 .overview-search {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 38px;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -441,6 +446,35 @@ body {
   background: var(--bg);
   color: var(--fg);
 }
+
+.filter-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hidden-note {
+  margin: 0 0 16px;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.link-btn:hover { text-decoration: underline; }
 
 .overview-search:focus {
   outline: 2px solid var(--accent);
@@ -686,8 +720,19 @@ body {
 
 @media print {
   .guide-panel,
-  .nav-outline {
+  .nav-outline,
+  .filter-bar,
+  .test-case-actions {
     display: none;
+  }
+
+  .sticky-header {
+    position: static;
+  }
+
+  .test-case,
+  .steps-table tr {
+    break-inside: avoid;
   }
 }
 
@@ -812,35 +857,132 @@ body {
   color: var(--success);
 }
 
+/*
+ * A test case: a header band (sticky, so the ID stays in view while stepping through a long case)
+ * over a body. The band is opaque because it repaints over the body scrolling beneath it, and the
+ * card itself has no padding so the band can reach its edges.
+ */
 .test-case {
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 16px;
   margin-bottom: 16px;
-  /* Establishes the positioning context so .test-case-title's sticky header can paint its own background */
-  position: relative;
+  background: var(--bg);
 }
 
-.test-case-title {
-  /* Cancels against .test-case's 16px padding, not .sticky-header's generic 32px */
-  margin-left: -16px;
-  margin-right: -16px;
-  margin-bottom: 12px;
-  padding-left: 16px;
-  padding-right: 16px;
-  font-size: 1rem;
+.test-case-head {
+  /* .sticky-header assumes it sits in .app's padding; here it fills the card instead */
+  margin: 0;
+  padding: 0 8px 0 16px;
+  gap: 10px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
 }
 
-.preconditions {
-  margin-bottom: 12px;
+.test-case-id {
+  flex: 0 0 auto;
+  font: 600 0.8rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.test-case-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-case-badges,
+.test-case-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.test-case-actions { gap: 2px; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.icon-btn.copy-btn-copied { color: var(--success); }
+
+.test-case-body {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+
+.test-case-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+/* Spelled out rather than left to a tooltip, which touch and keyboard readers never see */
+.inactive-note { color: var(--fg-muted); }
+
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+/* auto-fit rather than a media query: the card's width follows the sidebar and guide panel, not the window */
+.test-case-setup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 10px 24px;
   font-size: 0.9rem;
 }
 
 .preconditions ul {
-  margin: 4px 0 0;
-  padding-left: 20px;
+  margin: 0;
+  padding-left: 1.2em;
 }
+
+.test-data-body { font-size: 0.85rem; }
+.test-data-body > :first-child { margin-top: 0; }
+.test-data-body > :last-child { margin-bottom: 0; }
+.test-data-body ul { margin: 0; padding-left: 1.2em; }
+.test-data-body table { display: block; overflow-x: auto; border-collapse: collapse; margin: 4px 0; }
+.test-data-body th,
+.test-data-body td { border: 1px solid var(--border); padding: 3px 10px; text-align: left; }
+.test-data-body th { background: var(--bg-subtle); }
+.test-data-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
 
 /* Fixed layout so every case's table shares the same column edges as they stack down the page;
    with auto layout each table sized itself to its own content, and the grid jumped between cases */
@@ -851,80 +993,140 @@ body {
   font-size: 0.9rem;
 }
 
-.steps-table .col-step-no { width: 3rem; }
-.steps-table .col-step-action { width: 40%; }
-
-.steps-table td {
-  overflow-wrap: break-word;
-}
+.steps-table .col-step-no { width: 2.5rem; }
+.steps-table .col-step-action { width: 45%; }
 
 .steps-table th,
 .steps-table td {
-  border: 1px solid var(--border);
-  padding: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: break-word;
 }
 
-.steps-table th {
-  background: var(--bg-subtle);
+.steps-table thead th {
+  border-bottom: 2px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
 }
+
+.steps-table tbody tr:nth-child(even) > * { background: var(--bg-subtle); }
+
+.steps-table .step-no {
+  text-align: right;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.step-expected { border-left: 1px solid var(--border); }
 
 /* Rendered Markdown in narrow cells: block margins would pad every cell, and the default list indent wastes width */
 .step-cell > :first-child { margin-top: 0; }
 .step-cell > :last-child { margin-bottom: 0; }
 .step-cell p { margin: 0 0 6px; }
 .step-cell ul, .step-cell ol { margin: 0 0 6px; padding-left: 1.3em; }
+.step-cell code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
+.step-cell pre { overflow-x: auto; margin: 6px 0; padding: 8px; background: var(--bg-hover); border-radius: 4px; font-size: 0.85em; }
+.step-cell pre code { background: none; padding: 0; }
+.step-cell table { display: block; overflow-x: auto; border-collapse: collapse; margin: 6px 0; font-size: 0.85em; }
+.step-cell table th, .step-cell table td { border: 1px solid var(--border); padding: 3px 8px; }
+.step-cell img { max-width: 100%; }
 
-.notes {
-  display: flex;
-  gap: 6px;
-  margin-top: 12px;
-  font-size: 0.85rem;
-  color: var(--fg-muted);
+/*
+ * Narrow cards stack Expected under Action. Keyed to the cards' own width rather than the
+ * viewport, because the sidebar and the guide panel decide how much room the cards get.
+ */
+.cards { container: cards / inline-size; }
+
+@container cards (max-width: 600px) {
+  .steps-table,
+  .steps-table tbody,
+  .steps-table tr,
+  .steps-table td,
+  .steps-table th { display: block; }
+  /* Kept for assistive technology, hidden visually */
+  .steps-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .steps-table tr {
+    display: grid;
+    grid-template-columns: 2.2rem 1fr;
+    grid-template-areas: "no action" "no expected";
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .steps-table tbody tr:nth-child(even) { background: var(--bg-subtle); }
+  .steps-table tr > * { padding: 0 8px; border: 0; background: none !important; }
+  .steps-table .step-no { grid-area: no; }
+  .steps-table .step-action { grid-area: action; font-weight: 600; }
+  .steps-table .step-expected { grid-area: expected; padding-top: 4px; }
+  .steps-table .step-expected::before {
+    content: "Expected";
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+  }
+  .test-case-badges { display: none; }
 }
 
-.notes-icon { flex: 0 0 auto; }
+/* A caveat for whoever runs the case, so it gets a callout rather than muted small print */
+.notes {
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-subtle);
+  font-size: 0.875rem;
+}
+
+.notes .eyebrow { margin-bottom: 2px; }
 .notes-body { min-width: 0; }
 .notes-body > :first-child { margin-top: 0; }
 .notes-body > :last-child { margin-bottom: 0; }
+.notes-body p { margin: 0 0 8px; }
+.notes-body ul, .notes-body ol { margin: 0 0 8px; padding-left: 1.3em; }
+.notes-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
+.notes-body pre { overflow-x: auto; margin: 8px 0; padding: 8px; background: var(--bg-hover); border-radius: 4px; font-size: 0.85em; }
+.notes-body pre code { background: none; padding: 0; }
+.notes-body table { display: block; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.85rem; }
+.notes-body th, .notes-body td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+.notes-body th { background: var(--bg-hover); }
+.notes-body blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--fg-muted); }
 
-.test-case-inactive {
-  opacity: 0.6;
-}
+/* A filled band rather than a faded card, so an inactive case's steps stay as legible as an active one's */
+.test-case-inactive .test-case-head { background: var(--inactive-bg); }
+.test-case-inactive .test-case-name { color: var(--fg-muted); text-decoration: line-through; }
 
 .badge {
   display: inline-block;
-  margin-left: 8px;
   padding: 1px 8px;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  vertical-align: middle;
-  cursor: help;
-}
-
-.badge-status {
   background: var(--bg-hover);
   color: var(--fg-muted);
-  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .badge-skip {
-  background: var(--flash);
-  color: var(--fg);
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-color: var(--warn);
 }
 
 .badge-automation {
   background: var(--accent-bg);
   color: var(--accent);
-}
-
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
+  border-color: transparent;
+  cursor: help;
 }
 
 .overview-table td .tag-chip + .tag-chip {
@@ -950,7 +1152,6 @@ body {
 }
 
 .legacy-marker {
-  margin-top: 4px;
   font-size: 0.8rem;
   color: var(--fg-faint);
   font-family: monospace;
