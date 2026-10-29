@@ -75,6 +75,8 @@ See `examples/` for complete samples.
 - `**bold**` also works right next to Japanese text, where CommonMark would leave the asterisks.
   Single-asterisk emphasis still follows CommonMark, so footnote-style marks such as `条件*1と条件*2`
   turn into italics; write `\*` for a literal asterisk.
+- A line holding only `-` ("nothing to check") is kept as a literal dash instead of becoming an empty
+  bullet. Write `- item` or `1. item` for real lists.
 - `~x~` is not strikethrough (only `~~x~~` is), so ranges like `1~3` stay intact, and email
   addresses are not turned into links.
 

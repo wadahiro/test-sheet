@@ -13,6 +13,15 @@ function escapeHtml(text: string): string {
 const STRIKE = /^~~(?!\s)([\s\S]*?\S)~~/;
 const STRONG = /^\*\*(?!\s)([\s\S]*?\S)\*\*/;
 
+// A cell holding only "-" means "nothing to check" in the sheets these cases are migrated from. Markdown
+// reads it as an empty bullet (and `text\n-` as a heading underline), so the dash is escaped to stay literal.
+const LONE_DASH = /^((?:[ \t]*(?:[-*+]|\d+[.)])[ \t]+)*[ \t]*)-[ \t]*$/gm;
+const THEMATIC_BREAK = /^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+function escapeLoneDashes(markdown: string): string {
+  return markdown.replace(LONE_DASH, (line, lead: string) => (THEMATIC_BREAK.test(line) ? line : `${lead}\\-`));
+}
+
 export interface CaseMarkdownOptions {
   /** true turns a single newline into <br>, for table cells where each line is meant as its own line */
   breaks: boolean;
@@ -22,6 +31,9 @@ export function createCaseMarkdown({ breaks }: CaseMarkdownOptions): Marked {
   return new Marked({
     gfm: true,
     breaks,
+    hooks: {
+      preprocess: escapeLoneDashes,
+    },
     // CommonMark only closes `**` after punctuation when a space or punctuation follows, so
     // `**【注意】**続き` leaves the asterisks literal. Japanese has no spaces to satisfy that rule.
     extensions: [
