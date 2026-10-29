@@ -844,9 +844,7 @@ function CountLabel({ testCases }: { testCases: TestCase[] }) {
 
 /** Selecting the current target again fires no hashchange, so jump directly in that case */
 function goToTestCase(tcId: string) {
-  // The case's address carries the filter it was reached through, so the list stays as it was
-  const filter = location.hash.split("?")[1];
-  const next = testCaseHash(tcId) + (filter ? `?${filter}` : "");
+  const next = testCaseHash(tcId);
   if (location.hash === next) jumpToId(testCaseAnchorId(tcId));
   else location.hash = next;
 }
@@ -2371,13 +2369,29 @@ function AppHeader({
   `;
 }
 
-/** How long after the last keystroke the filter is written to the address */
-const FILTER_URL_DELAY_MS = 300;
+const FILTERS_STORAGE_KEY = "test-sheet-filters";
 
-/** The same address with its `?q=` replaced (or dropped, for an empty filter) */
-function hashWithQuery(hash: string, text: string): string {
-  const base = hash.split("?")[0];
-  return text.trim() === "" ? base : `${base}?q=${encodeURIComponent(text)}`;
+/** sessionStorage: a filter should outlast a reload of the tab, not the tab itself */
+function readFilters(): Record<string, string> {
+  try {
+    const raw = sessionStorage.getItem(FILTERS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFilters(filters: Record<string, string>) {
+  try {
+    sessionStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters));
+  } catch {
+    // Blocked storage (e.g. over file://): filters last until the page is reloaded
+  }
+}
+
+/** Which page's filter a route uses: pages are told apart by scope, not by case or section within one */
+function scopeKey(route: Route): string {
+  return `${route.mode}:${JSON.stringify(route.scope)}`;
 }
 
 /** Command-palette entries for the two page-wide views, which have no outline entry of their own */
@@ -2410,29 +2424,29 @@ function App() {
    * The route only seeds it — see the effect below.
    */
   /**
-   * The filter lives in the URL (`?q=`), so a filtered list can be bookmarked or sent, and Back
-   * returns to it as it was. Typing shows at once and reaches the address a moment later, replacing
-   * the current entry rather than adding one per keystroke.
+   * Each page keeps the filter typed on it, so coming back to a list after opening a case, or
+   * pressing Back, finds it as it was. The address is left alone: rewriting it while typing is what
+   * made a filter follow the reader to pages it was never typed on. Kept for this tab, and across a
+   * reload of it.
    */
-  const [typed, setTyped] = useState<{ hash: string; text: string } | null>(null);
-  // Derived: a page reached by navigating starts from its own address, never another page's text
-  const query = typed && typed.hash === route.hash ? typed.text : route.query;
-  const ownHash = useRef<string | null>(null);
-  const urlTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [filters, setFilters] = useState<Record<string, string>>(readFilters);
+  const pageKey = scopeKey(route);
+  /** The route whose `?q=` (from a link, say) has been taken into the filters, so typing can then change it */
+  const [queryTakenFrom, setQueryTakenFrom] = useState<string | null>(null);
+  const routeQueryPending = route.query !== "" && queryTakenFrom !== route.hash;
+  // Derived rather than set in an effect, so a page never renders once with another page's filter
+  const query = routeQueryPending ? route.query : (filters[pageKey] ?? "");
   const setQuery = useCallback(
-    (text: string) => {
-      setTyped({ hash: route.hash, text });
-      clearTimeout(urlTimer.current);
-      urlTimer.current = setTimeout(() => {
-        const next = hashWithQuery(location.hash, text);
-        if (next === location.hash) return;
-        // replace, not assign: no history entry per edit. The hashchange it raises is ours to ignore.
-        ownHash.current = next;
-        location.replace(next);
-      }, FILTER_URL_DELAY_MS);
-    },
-    [route.hash]
+    (text: string) =>
+      setFilters((current) => {
+        const next = { ...current };
+        if (text === "") delete next[pageKey];
+        else next[pageKey] = text;
+        return next;
+      }),
+    [pageKey]
   );
+  useEffect(() => writeFilters(filters), [filters]);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
   const [runModeOn, setRunModeOn] = useState(readRunMode);
@@ -2461,10 +2475,6 @@ function App() {
 
   useEffect(() => {
     function onHashChange() {
-      if (ownHash.current === location.hash) {
-        ownHash.current = null;
-        return;
-      }
       setRoute(parseRoute(location.hash, suites));
     }
     window.addEventListener("hashchange", onHashChange);
@@ -2481,8 +2491,11 @@ function App() {
     if (routeTargetsGuide) {
       setGuideOpen(true);
       writeGuideOpen(true);
+    } else if (route.query) {
+      setQuery(route.query);
+      setQueryTakenFrom(route.hash);
     }
-    // A target the filter has hidden (say, from the palette) is not in the DOM: clear the filter
+    // A target the page's filter has hidden (say, from the palette) is not in the DOM: clear the filter
     // and jump once the full list is there
     if (route.target && !document.getElementById(route.target) && !routeTargetsGuide && query.trim() !== "") {
       jumpAfterRender.current = route;
@@ -2504,7 +2517,7 @@ function App() {
       // Selecting the page already shown fires no hashchange, so apply its effects directly
       if (location.hash === entry.hash) {
         const same = parseRoute(entry.hash, suites);
-        setQuery(same.query);
+        if (same.query) setQuery(same.query);
         scrollToRoute(same);
       } else {
         location.hash = entry.hash;
