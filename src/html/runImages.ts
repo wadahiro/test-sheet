@@ -95,15 +95,6 @@ export async function shrinkImage(file: Blob): Promise<Blob> {
   }
 }
 
-export function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => resolve("");
-    reader.readAsDataURL(blob);
-  });
-}
-
 /**
  * The clipboard takes only PNG for an image on every browser, so a stored JPEG is redrawn as one.
  * Pasting that into an issue or comment box makes the site upload it and insert its own link.

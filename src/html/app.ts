@@ -5,7 +5,7 @@ import { h, render, createContext } from "preact";
 import { useState, useCallback, useEffect, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
-import { blobToDataUrl, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
+import { blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
 const html = htmBind.bind(h);
 
@@ -97,9 +97,7 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: 
       continue;
     }
     const result = run.results[i];
-    const shots = run.images?.[i]?.length ?? 0;
-    const attached = shots > 0 ? ` (${shots} screenshot${shots === 1 ? "" : "s"} attached in the sheet: copy each image there and paste it here)` : "";
-    const note = run.notes[i] || attached ? ` — ${escapeMarkdownCell(run.notes[i] ?? "")}${attached}` : "";
+    const note = run.notes[i] ? ` — ${escapeMarkdownCell(run.notes[i])}` : "";
     const cell = result === "p" ? "Pass" : result === "f" ? `**Fail**${note}` : "not run";
     lines.push(`| ${i + 1} | ${action} | ${expected} | ${cell} |`);
   }
@@ -138,6 +136,13 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
 
   lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps, recorded), "");
 
+  // An image cannot travel inside Markdown (trackers drop data: URLs), so each one gets a marked spot
+  // to paste it into, after copying it from the sheet
+  const shotLines = Object.entries(recorded?.images ?? {}).flatMap(([step, list]) =>
+    list.map((_, n) => `- Step ${Number(step) + 1}, screenshot ${n + 1}: _(paste the image here)_`)
+  );
+  if (shotLines.length > 0) lines.push("**Screenshots:**", "", ...shotLines, "");
+
   if (tc.notes) {
     const notesLines = tc.notes.split("\n");
     lines.push(`> **Note:** ${notesLines[0]}`);
@@ -146,34 +151,6 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
   }
 
   return lines.join("\n");
-}
-
-function escapeHtmlText(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** The recorded run as HTML, with screenshots inline, for pasting into an editor that takes rich text */
-async function runCaseToHtml(tc: TestCase, run: CaseRun): Promise<string> {
-  const outcome = caseOutcome(run.results);
-  const label = outcome === "pass" ? "Pass" : outcome === "fail" ? "Fail" : "In progress";
-  const marked = run.results.filter((result) => result !== "").length;
-  const rows: string[] = [];
-  for (let i = 0; i < tc.steps.length; i++) {
-    const result = run.results[i];
-    let cell = result === "p" ? "Pass" : result === "f" ? "<strong>Fail</strong>" : "not run";
-    if (result === "f") {
-      if (run.notes[i]) cell += `<br>${escapeHtmlText(run.notes[i]).replace(/\n/g, "<br>")}`;
-      for (const image of run.images[i] ?? []) {
-        cell += `<br><img src="${await blobToDataUrl(image.blob)}" style="max-width:480px" alt="Screenshot for step ${i + 1}">`;
-      }
-    }
-    rows.push(`<tr><td>${i + 1}</td><td>${tc.steps[i].actionHtml}</td><td>${tc.steps[i].expectedHtml}</td><td>${cell}</td></tr>`);
-  }
-  return (
-    `<h3>${escapeHtmlText(tc._tcId)}: ${escapeHtmlText(tc.name)}</h3>` +
-    `<p><strong>Result:</strong> ${label} (${marked}/${tc.steps.length} run)</p>` +
-    `<table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>#</th><th>Action</th><th>Expected</th><th>Result</th></tr></thead><tbody>${rows.join("")}</tbody></table>`
-  );
 }
 
 /** Renders every test case in a section as a single Markdown document */
@@ -199,46 +176,15 @@ function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string 
   return lines.join("\n");
 }
 
-/** What a copy puts on the clipboard when it carries more than text */
-interface RichCopy {
-  text: string;
-  html: string;
-}
-
-function CopyButton({
-  getText,
-  getRich,
-  title,
-  iconOnly = false,
-}: {
-  getText: () => string;
-  /** When given, copies HTML as well as text, so images survive a paste into a rich editor */
-  getRich?: () => Promise<RichCopy>;
-  title: string;
-  iconOnly?: boolean;
-}) {
+function CopyButton({ getText, title, iconOnly = false }: { getText: () => string; title: string; iconOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const onClick = useCallback(() => {
-    const flash = () => {
+    navigator.clipboard.writeText(getText()).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    };
-    if (getRich) {
-      // The promises go in whole: awaiting before write() would lose the click's permission in Safari
-      const rich = getRich();
-      navigator.clipboard
-        .write([
-          new ClipboardItem({
-            "text/plain": rich.then((r) => new Blob([r.text], { type: "text/plain" })),
-            "text/html": rich.then((r) => new Blob([r.html], { type: "text/html" })),
-          }),
-        ])
-        .then(flash);
-      return;
-    }
-    navigator.clipboard.writeText(getText()).then(flash);
-  }, [getText, getRich]);
+    });
+  }, [getText]);
 
   return html`
     <button
@@ -776,9 +722,8 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           </a>
           <${CopyButton}
             iconOnly=${true}
-            title=${hasShots ? "Copy this test case with its screenshots" : "Copy this test case as Markdown"}
+            title=${hasShots ? "Copy this test case as Markdown (copy each screenshot separately)" : "Copy this test case as Markdown"}
             getText=${() => testCaseToMarkdown(tc, 3, run)}
-            getRich=${hasShots && run ? async () => ({ text: testCaseToMarkdown(tc, 3, run), html: await runCaseToHtml(tc, run) }) : undefined}
           />
         </span>
       </header>
