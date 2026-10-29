@@ -5,7 +5,7 @@ import { h, render, createContext } from "preact";
 import { useState, useCallback, useEffect, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
-import { blobToDataUrl, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
+import { blobToDataUrl, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
 const html = htmBind.bind(h);
 
@@ -98,7 +98,7 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: 
     }
     const result = run.results[i];
     const shots = run.images?.[i]?.length ?? 0;
-    const attached = shots > 0 ? ` (${shots} screenshot${shots === 1 ? "" : "s"} attached; paste as rich text to include them)` : "";
+    const attached = shots > 0 ? ` (${shots} screenshot${shots === 1 ? "" : "s"} attached in the sheet: copy each image there and paste it here)` : "";
     const note = run.notes[i] || attached ? ` — ${escapeMarkdownCell(run.notes[i] ?? "")}${attached}` : "";
     const cell = result === "p" ? "Pass" : result === "f" ? `**Fail**${note}` : "not run";
     lines.push(`| ${i + 1} | ${action} | ${expected} | ${cell} |`);
@@ -484,10 +484,53 @@ function imageFiles(list: FileList | null | undefined): File[] {
 }
 
 /**
+ * One screenshot with what can be done with it. Markdown cannot carry the image itself (issue
+ * trackers drop data: URLs), so the way into a comment box is to copy the image and paste it there,
+ * where the site uploads it and writes its own link; downloading is the drag-and-drop alternative.
+ */
+function ImageThumb({
+  image,
+  label,
+  fileName,
+  onRemove,
+}: {
+  image: RunImage;
+  label: string;
+  fileName: string;
+  onRemove: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    const png = blobToPng(image.blob);
+    navigator.clipboard
+      .write([new ClipboardItem({ "image/png": png })])
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  };
+
+  return html`<li class="step-image">
+    <a href=${image.url} target="_blank" rel="noopener" title="Open the full image"><img src=${image.url} alt=${label} /></a>
+    <span class="image-tools">
+      <button class=${"image-tool" + (copied ? " image-tool-done" : "")} title="Copy the image, to paste into an issue or comment" aria-label=${`Copy ${label}`} onClick=${copy}>
+        ${copied ? "✓" : html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
+      </button>
+      <a class="image-tool" href=${image.url} download=${fileName} title="Download the image" aria-label=${`Download ${label}`}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+      </a>
+      <button class="image-tool image-tool-remove" title="Remove this image" aria-label=${`Remove ${label}`} onClick=${onRemove}>✕</button>
+    </span>
+  </li>`;
+}
+
+/**
  * What the tester saw at a failed step: free text with line breaks, plus screenshots that can be
  * pasted straight in (the usual way a screenshot is taken), dropped, or picked from a file.
  */
-function StepNote({ index, run, onNext, onBack }: { index: number; run: CaseRun; onNext: () => void; onBack: () => void }) {
+function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: number; run: CaseRun; onNext: () => void; onBack: () => void }) {
   const images = run.images[index] ?? [];
   const full = images.length >= MAX_IMAGES_PER_STEP;
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -563,10 +606,13 @@ function StepNote({ index, run, onNext, onBack }: { index: number; run: CaseRun;
       ${images.length > 0
         ? html`<ul class="step-images">
             ${images.map(
-              (image, n) => html`<li key=${image.id}>
-                <a href=${image.url} target="_blank" rel="noopener" title="Open the full image"><img src=${image.url} alt=${`Screenshot ${n + 1} for step ${index + 1}`} /></a>
-                <button class="image-remove" title="Remove this image" aria-label=${`Remove screenshot ${n + 1}`} onClick=${() => run.removeImage(index, image.id)}>✕</button>
-              </li>`
+              (image, n) => html`<${ImageThumb}
+                key=${image.id}
+                image=${image}
+                label=${`Screenshot ${n + 1} for step ${index + 1}`}
+                fileName=${`${tcId}-step${index + 1}-${n + 1}.${image.blob.type === "image/png" ? "png" : "jpg"}`}
+                onRemove=${() => run.removeImage(index, image.id)}
+              />`
             )}
           </ul>`
         : null}
@@ -612,7 +658,7 @@ function StepResultButtons({
  * The explicit roles keep this a table for assistive technology even when the narrow layout
  * turns its cells into blocks, which would otherwise drop the table semantics.
  */
-function StepsTable({ steps, run }: { steps: Step[]; run: CaseRun | null }) {
+function StepsTable({ tcId, steps, run }: { tcId: string; steps: Step[]; run: CaseRun | null }) {
   const tableRef = useRef<HTMLTableElement>(null);
 
   const focusIn = (selector: string) => {
@@ -673,7 +719,7 @@ function StepsTable({ steps, run }: { steps: Step[]; run: CaseRun | null }) {
             ${run && result === "f"
               ? html`<tr key=${`${i}-note`} role="row" data-step=${i} class=${"step-note-row" + (i % 2 === 1 ? " step-even" : "")}>
                   <td role="cell" colspan="4">
-                    <${StepNote} index=${i} run=${run} onNext=${() => focusNextPass(i, run.results)} onBack=${() => focusIn(`tr.step-row[data-step="${i}"] .result-btn-fail`)} />
+                    <${StepNote} tcId=${tcId} index=${i} run=${run} onNext=${() => focusNextPass(i, run.results)} onBack=${() => focusIn(`tr.step-row[data-step="${i}"] .result-btn-fail`)} />
                   </td>
                 </tr>`
               : null}
@@ -760,7 +806,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
                 : null}
             </div>`
           : null}
-        <${StepsTable} steps=${tc.steps} run=${run} />
+        <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
         ${tc.notesHtml
           ? html`<aside class="notes">
               <h5 class="eyebrow">Note</h5>

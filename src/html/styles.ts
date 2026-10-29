@@ -1193,7 +1193,7 @@ body {
   list-style: none;
 }
 
-.step-images li { position: relative; }
+.step-image { position: relative; }
 
 .step-images img {
   display: block;
@@ -1204,12 +1204,20 @@ body {
   background: var(--bg);
 }
 
-.image-remove {
+.image-tools {
   position: absolute;
   top: 4px;
   right: 4px;
-  width: 22px;
-  height: 22px;
+  display: flex;
+  gap: 4px;
+}
+
+.image-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -1220,7 +1228,9 @@ body {
   cursor: pointer;
 }
 
-.image-remove:hover { color: var(--danger); border-color: var(--danger); }
+.image-tool:hover { color: var(--accent); border-color: var(--accent); }
+.image-tool-remove:hover { color: var(--danger); border-color: var(--danger); }
+.image-tool-done { color: var(--success); border-color: var(--success); }
 
 .run-status {
   display: flex;
