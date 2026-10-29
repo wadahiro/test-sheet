@@ -2369,6 +2369,10 @@ function AppHeader({
   `;
 }
 
+function scopeKey(route: Route): string {
+  return `${route.mode}:${JSON.stringify(route.scope)}`;
+}
+
 /** Command-palette entries for the two page-wide views, which have no outline entry of their own */
 const ALL_TEST_CASES_ENTRY: NavEntry = {
   kind: "view",
@@ -2437,25 +2441,46 @@ function App() {
     if (pageGuideSuite) setLastGuideId(pageGuideSuite.idPrefix);
   }, [pageGuideSuite?.idPrefix]);
 
-  // Runs after the new page is in the DOM, so the scroll target exists. A new route also drops
-  // the previous page's filter in favour of its own — except when it only opens the guide, which
-  // says nothing about which cases the reader is filtering.
+  // Runs after the new page is in the DOM, so the scroll target exists. Moving to another page, or
+  // to the page itself, drops the previous filter in favour of the route's own; going to a case or
+  // section within the same page keeps it, so opening a case from a filtered table does not rebuild
+  // the list under the jump. Opening the
+  // guide says nothing about the filter either.
+  const lastScope = useRef(scopeKey(route));
+  const jumpAfterRender = useRef<Route | null>(null);
   useEffect(() => {
+    const sameScope = lastScope.current === scopeKey(route);
+    lastScope.current = scopeKey(route);
     if (routeTargetsGuide) {
       setGuideOpen(true);
       writeGuideOpen(true);
-    } else {
+    } else if (!sameScope || !route.target || route.query) {
       setQuery(route.query);
+    }
+    // A target the filter has hidden (say, from the palette) is not in the DOM: clear the filter
+    // and jump once the full list is there
+    if (route.target && !document.getElementById(route.target) && sameScope && !routeTargetsGuide && query.trim() !== "") {
+      jumpAfterRender.current = route;
+      setQuery("");
+      return;
     }
     scrollToRoute(route);
   }, [route.hash]);
+
+  useEffect(() => {
+    if (jumpAfterRender.current) {
+      scrollToRoute(jumpAfterRender.current);
+      jumpAfterRender.current = null;
+    }
+  }, [query]);
 
   const navigate = useCallback(
     (entry: NavEntry) => {
       // Selecting the page already shown fires no hashchange, so apply its effects directly
       if (location.hash === entry.hash) {
         const same = parseRoute(entry.hash, suites);
-        if (!same.target?.includes("-guide")) setQuery(same.query);
+        // Re-selecting a case or a guide must not disturb the filter; re-selecting a page resets it
+        if (!same.target) setQuery(same.query);
         scrollToRoute(same);
       } else {
         location.hash = entry.hash;
