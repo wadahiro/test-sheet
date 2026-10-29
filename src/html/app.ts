@@ -82,14 +82,23 @@ declare global {
   }
 }
 
-function formatStepsAsMarkdownTable(steps: Step[]): string {
+function formatStepsAsMarkdownTable(steps: Step[], run?: RunState | null): string {
   if (!steps || steps.length === 0) return "";
-  const lines = ["| # | Action | Expected |", "|:---:|------|----------|"];
+  const lines = run
+    ? ["| # | Action | Expected | Result |", "|:---:|------|----------|--------|"]
+    : ["| # | Action | Expected |", "|:---:|------|----------|"];
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const action = escapeMarkdownCell(step.action || "");
     const expected = escapeMarkdownCell((step.expected || "").replace(/^(\s*)- /gm, "$1• "));
-    lines.push(`| ${i + 1} | ${action} | ${expected} |`);
+    if (!run) {
+      lines.push(`| ${i + 1} | ${action} | ${expected} |`);
+      continue;
+    }
+    const result = run.results[i];
+    const note = run.notes[i] ? ` — ${escapeMarkdownCell(run.notes[i])}` : "";
+    const cell = result === "p" ? "Pass" : result === "f" ? `**Fail**${note}` : "not run";
+    lines.push(`| ${i + 1} | ${action} | ${expected} | ${cell} |`);
   }
   return lines.join("\n");
 }
@@ -99,7 +108,8 @@ function formatStepsAsMarkdownTable(steps: Step[]): string {
  * headingLevel is threaded down from whichever level was copied, so a domain-level copy
  * still nests its sections and test cases below the domain heading.
  */
-function testCaseToMarkdown(tc: TestCase, headingLevel = 3): string {
+function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: RunState | null = null): string {
+  const recorded = run && caseOutcome(run.results) !== "none" ? run : null;
   const lines: string[] = [];
   lines.push(`${"#".repeat(headingLevel)} ${tc._tcId}`, "", `**${tc.name}**`, "");
 
@@ -115,7 +125,15 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3): string {
     lines.push(`**Tags:** ${tc.tags.join(", ")}`, "");
   }
 
-  lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps), "");
+  if (recorded) {
+    const outcome = caseOutcome(recorded.results);
+    const label = outcome === "pass" ? "Pass" : outcome === "fail" ? "Fail" : "In progress";
+    const marked = recorded.results.filter((result) => result !== "").length;
+    const when = recorded.recordedAt ? `, recorded ${recorded.recordedAt.slice(0, 10)}` : "";
+    lines.push(`**Result:** ${label} (${marked}/${recorded.results.length} run${when})`, "");
+  }
+
+  lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps, recorded), "");
 
   if (tc.notes) {
     const notesLines = tc.notes.split("\n");
@@ -175,13 +193,19 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
   `;
 }
 
-/** Whether cards show a checklist column; shared by context so it need not be threaded through every list */
-const ChecklistContext = createContext(false);
+/** Whether cards record Pass/Fail per step; shared by context so it need not be threaded through every list */
+const RunContext = createContext(false);
 
-interface StoredChecklist {
-  /** Hash of the steps' text, so a case edited since is not shown half-ticked for steps that changed */
+type StepResult = "" | "p" | "f";
+
+interface StoredRun {
+  v: 1;
+  /** Hash of the steps' text, so a case edited since is not shown with marks for steps that changed */
   h: string;
-  done: number[];
+  r: StepResult[];
+  /** What the tester saw, for failed steps only, keyed by step index */
+  n: Record<string, string>;
+  t: string;
 }
 
 function stepsFingerprint(steps: Step[]): string {
@@ -192,63 +216,134 @@ function stepsFingerprint(steps: Step[]): string {
   return String(hash);
 }
 
-function checklistKey(tc: TestCase): string {
+/**
+ * Over file:// every local HTML file shares one storage origin, so two sheets with the same case
+ * ids would overwrite each other's results; the path keeps them apart.
+ */
+function runNamespace(): string {
+  let hash = 5381;
+  for (const ch of location.pathname) hash = ((hash << 5) + hash + ch.charCodeAt(0)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
+function runKey(tc: TestCase): string {
+  return `test-sheet-run:${runNamespace()}:${tc._tcId}`;
+}
+
+/** The first version of this feature only ticked steps, under a key without a namespace */
+function legacyChecklistKey(tc: TestCase): string {
   return `test-sheet-checklist:${tc._tcId}`;
 }
 
-function readChecklist(tc: TestCase): Set<number> {
+interface RunState {
+  results: StepResult[];
+  notes: Record<number, string>;
+  recordedAt: string | null;
+}
+
+function emptyRun(tc: TestCase): RunState {
+  return { results: tc.steps.map(() => ""), notes: {}, recordedAt: null };
+}
+
+function readRun(tc: TestCase): RunState {
+  const fingerprint = stepsFingerprint(tc.steps);
   try {
-    const raw = localStorage.getItem(checklistKey(tc));
-    if (!raw) return new Set();
-    const stored = JSON.parse(raw) as StoredChecklist;
-    return stored.h === stepsFingerprint(tc.steps) ? new Set(stored.done) : new Set();
+    const raw = localStorage.getItem(runKey(tc));
+    if (raw) {
+      const stored = JSON.parse(raw) as StoredRun;
+      if (stored.h !== fingerprint || stored.r.length !== tc.steps.length) return emptyRun(tc);
+      return {
+        results: stored.r,
+        notes: Object.fromEntries(Object.entries(stored.n ?? {}).map(([i, text]) => [Number(i), text])),
+        recordedAt: stored.t ?? null,
+      };
+    }
+    const legacy = localStorage.getItem(legacyChecklistKey(tc));
+    if (legacy) {
+      const old = JSON.parse(legacy) as { h: string; done: number[] };
+      localStorage.removeItem(legacyChecklistKey(tc));
+      if (old.h === fingerprint) {
+        const migrated: RunState = { ...emptyRun(tc), recordedAt: new Date().toISOString() };
+        for (const i of old.done) if (i < migrated.results.length) migrated.results[i] = "p";
+        writeRun(tc, migrated);
+        return migrated;
+      }
+    }
   } catch {
-    return new Set();
+    // Unreadable or blocked storage: start from nothing
+  }
+  return emptyRun(tc);
+}
+
+function writeRun(tc: TestCase, run: RunState) {
+  try {
+    if (run.results.every((result) => result === "")) {
+      localStorage.removeItem(runKey(tc));
+      return;
+    }
+    const stored: StoredRun = {
+      v: 1,
+      h: stepsFingerprint(tc.steps),
+      r: run.results,
+      n: Object.fromEntries(Object.entries(run.notes).filter(([, text]) => text !== "")),
+      t: run.recordedAt ?? new Date().toISOString(),
+    };
+    localStorage.setItem(runKey(tc), JSON.stringify(stored));
+  } catch {
+    // Blocked storage (e.g. over file://): the marks last for this visit only
   }
 }
 
-function writeChecklist(tc: TestCase, done: Set<number>) {
-  try {
-    if (done.size === 0) localStorage.removeItem(checklistKey(tc));
-    else localStorage.setItem(checklistKey(tc), JSON.stringify({ h: stepsFingerprint(tc.steps), done: [...done] } satisfies StoredChecklist));
-  } catch {
-    // Blocked storage (e.g. over file://): the ticks last for this visit only
-  }
-}
-
-interface Checklist {
-  done: Set<number>;
-  /** The first step not yet ticked, or -1 when all are */
+interface CaseRun extends RunState {
+  /** The first step not yet marked, or -1 when all are */
   current: number;
-  toggle: (index: number) => void;
+  set: (index: number, result: Exclude<StepResult, "">) => void;
+  setNote: (index: number, text: string) => void;
   reset: () => void;
 }
 
-function useChecklist(tc: TestCase, enabled: boolean): Checklist | null {
-  const [done, setDone] = useState<Set<number>>(() => (enabled ? readChecklist(tc) : new Set()));
+type CaseOutcome = "none" | "running" | "pass" | "fail";
+
+/** Derived, never stored: one failed step fails the case, all passed passes it, anything between is under way */
+function caseOutcome(results: StepResult[]): CaseOutcome {
+  const marked = results.filter((result) => result !== "").length;
+  if (marked === 0) return "none";
+  if (results.includes("f")) return "fail";
+  return marked === results.length ? "pass" : "running";
+}
+
+function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
+  if (outcome === "pass") return "PASS";
+  if (outcome === "fail") return "FAIL";
+  return `${results.filter((result) => result !== "").length}/${results.length} run`;
+}
+
+function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
+  const [run, setRun] = useState<RunState>(() => (enabled ? readRun(tc) : emptyRun(tc)));
 
   useEffect(() => {
-    if (enabled) setDone(readChecklist(tc));
+    if (enabled) setRun(readRun(tc));
   }, [enabled, tc._tcId]);
 
   if (!enabled) return null;
 
-  const update = (next: Set<number>) => {
-    setDone(next);
-    writeChecklist(tc, next);
+  const update = (next: RunState) => {
+    const stamped = { ...next, recordedAt: new Date().toISOString() };
+    setRun(stamped);
+    writeRun(tc, stamped);
   };
-  let current = tc.steps.findIndex((_, i) => !done.has(i));
-  if (tc.steps.length === 0) current = -1;
   return {
-    done,
-    current,
-    toggle: (index) => {
-      const next = new Set(done);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      update(next);
+    ...run,
+    current: tc.steps.length === 0 ? -1 : run.results.findIndex((result) => result === ""),
+    set: (index, result) => {
+      const results = [...run.results];
+      results[index] = results[index] === result ? "" : result;
+      const notes = { ...run.notes };
+      if (results[index] !== "f") delete notes[index];
+      update({ ...run, results, notes });
     },
-    reset: () => update(new Set()),
+    setNote: (index, text) => update({ ...run, notes: { ...run.notes, [index]: text } }),
+    reset: () => update(emptyRun(tc)),
   };
 }
 
@@ -256,38 +351,123 @@ function useChecklist(tc: TestCase, enabled: boolean): Checklist | null {
  * The explicit roles keep this a table for assistive technology even when the narrow layout
  * turns its cells into blocks, which would otherwise drop the table semantics.
  */
-function StepsTable({ steps, checklist }: { steps: Step[]; checklist: Checklist | null }) {
+const RESULT_LABEL: Record<Exclude<StepResult, "">, string> = { p: "Pass", f: "Fail" };
+
+/**
+ * Two adjacent buttons per step. Pass and Fail keep a fixed order so a hand learns where each is,
+ * pressing the selected one again clears it, and the label and glyph carry the meaning as well as
+ * the colour. The first unmarked step is where a keyboard run carries on.
+ */
+function StepResultButtons({
+  index,
+  result,
+  onSet,
+}: {
+  index: number;
+  result: StepResult;
+  onSet: (index: number, result: Exclude<StepResult, "">, byKeyboard: boolean) => void;
+}) {
+  return html`<div class="step-result-group" role="group" aria-label=${`Step ${index + 1} result`}>
+    ${(["p", "f"] as const).map(
+      (value) => html`<button
+        key=${value}
+        class=${`result-btn result-btn-${value === "p" ? "pass" : "fail"}`}
+        aria-pressed=${result === value}
+        onClick=${(e: MouseEvent) => onSet(index, value, e.detail === 0)}
+      >
+        <span aria-hidden="true">${value === "p" ? "✓" : "✕"}</span> ${RESULT_LABEL[value]}
+      </button>`
+    )}
+  </div>`;
+}
+
+/**
+ * The explicit roles keep this a table for assistive technology even when the narrow layout
+ * turns its cells into blocks, which would otherwise drop the table semantics.
+ */
+function StepsTable({ steps, run }: { steps: Step[]; run: CaseRun | null }) {
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  const focusIn = (selector: string) => {
+    tableRef.current?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+  };
+  const focusNextPass = (after: number, results: StepResult[]) => {
+    const next = results.findIndex((result, j) => j > after && result === "");
+    if (next >= 0) focusIn(`tr.step-row[data-step="${next}"] .result-btn-pass`);
+  };
+
+  const onSet = (index: number, result: Exclude<StepResult, "">, byKeyboard: boolean) => {
+    if (!run) return;
+    const clearing = run.results[index] === result;
+    run.set(index, result);
+    if (clearing || !byKeyboard) return;
+    // Keyboard runs should not have to Tab back to the next step; mouse and touch users get no focus jump
+    if (result === "f") requestAnimationFrame(() => focusIn(`tr.step-note-row[data-step="${index}"] input`));
+    else focusNextPass(index, [...run.results.slice(0, index), "p", ...run.results.slice(index + 1)]);
+  };
+
   return html`
-    <table class=${"steps-table" + (checklist ? " steps-checklist" : "")} role="table">
+    <table ref=${tableRef} class=${"steps-table" + (run ? " steps-run" : "")} role="table">
       <colgroup>
-        ${checklist ? html`<col class="col-step-check" />` : null}
         <col class="col-step-no" />
         <col class="col-step-action" />
         <col />
+        ${run ? html`<col class="col-step-result" />` : null}
       </colgroup>
       <thead role="rowgroup">
         <tr role="row">
-          ${checklist ? html`<th role="columnheader" class="step-check"><span class="visually-hidden">Done</span></th>` : null}
           <th role="columnheader" class="step-no">#</th>
           <th role="columnheader">Action</th>
           <th role="columnheader">Expected</th>
+          ${run ? html`<th role="columnheader" class="step-result">Result</th>` : null}
         </tr>
       </thead>
       <tbody role="rowgroup">
         ${steps.map((step, i) => {
-          const done = checklist?.done.has(i) ?? false;
-          const current = checklist?.current === i;
+          const result = run?.results[i] ?? "";
+          const classes = [
+            "step-row",
+            i % 2 === 1 ? "step-even" : "",
+            result === "p" ? "step-done" : "",
+            result === "f" ? "step-failed" : "",
+            run?.current === i ? "step-current" : "",
+          ].filter(Boolean);
           return html`
-            <tr key=${i} role="row" class=${(done ? "step-done " : "") + (current ? "step-current" : "")}>
-              ${checklist
-                ? html`<td role="cell" class="step-check">
-                    <input type="checkbox" checked=${done} aria-label=${`Step ${i + 1} done`} onChange=${() => checklist.toggle(i)} />
-                  </td>`
-                : null}
+            <tr key=${i} role="row" data-step=${i} class=${classes.join(" ")}>
               <th role="rowheader" scope="row" class="step-no">${i + 1}</th>
               <td role="cell" class="step-cell step-action" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
               <td role="cell" class="step-cell step-expected" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
+              ${run
+                ? html`<td role="cell" class="step-result">
+                    <${StepResultButtons} index=${i} result=${result} onSet=${onSet} />
+                  </td>`
+                : null}
             </tr>
+            ${run && result === "f"
+              ? html`<tr key=${`${i}-note`} role="row" data-step=${i} class=${"step-note-row" + (i % 2 === 1 ? " step-even" : "")}>
+                  <td role="cell" colspan="4">
+                    <input
+                      class="step-note"
+                      type="text"
+                      maxlength="500"
+                      placeholder="What did you see? (optional)"
+                      aria-label=${`Step ${i + 1} failure note`}
+                      value=${run.notes[i] ?? ""}
+                      onInput=${(e: Event) => run.setNote(i, (e.target as HTMLInputElement).value)}
+                      onKeyDown=${(e: KeyboardEvent) => {
+                        if (e.isComposing) return;
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          focusNextPass(i, run.results);
+                        } else if (e.key === "Escape") {
+                          e.stopPropagation();
+                          focusIn(`tr.step-row[data-step="${i}"] .result-btn-fail`);
+                        }
+                      }}
+                    />
+                  </td>
+                </tr>`
+              : null}
           `;
         })}
       </tbody>
@@ -308,7 +488,8 @@ function inactiveNote(tc: TestCase): string | null {
 
 /** `level` is the card header's position in the stack of sticky headers above it */
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
-  const checklist = useChecklist(tc, useContext(ChecklistContext));
+  const run = useCaseRun(tc, useContext(RunContext));
+  const outcome = run ? caseOutcome(run.results) : "none";
   const inactive = isInactive(tc);
   const note = inactiveNote(tc);
   const hasMeta = !!(tc.tags && tc.tags.length > 0) || !!tc.legacy_marker || !!note;
@@ -327,17 +508,17 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
             ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
             : null}
         </span>
-        ${checklist && tc.steps.length > 0
-          ? html`<span class="checklist-progress">
-              ${checklist.done.size}/${tc.steps.length} done
-              ${checklist.done.size > 0 ? html`<button class="link-btn" onClick=${checklist.reset}>Reset</button>` : null}
+        ${run && outcome !== "none"
+          ? html`<span class="run-status">
+              <span class=${`run-chip run-chip-${outcome}`} title="Recorded in this browser only">${outcomeLabel(outcome, run.results)}</span>
+              <button class="link-btn" onClick=${run.reset}>Reset</button>
             </span>`
           : null}
         <span class="test-case-actions">
           <a class="icon-btn" href=${testCaseHash(tc._tcId)} title="Link to this test case" aria-label="Link to this test case">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
           </a>
-          <${CopyButton} iconOnly=${true} title="Copy this test case as Markdown" getText=${() => testCaseToMarkdown(tc)} />
+          <${CopyButton} iconOnly=${true} title="Copy this test case as Markdown" getText=${() => testCaseToMarkdown(tc, 3, run)} />
         </span>
       </header>
       <div class="test-case-body">
@@ -364,7 +545,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
                 : null}
             </div>`
           : null}
-        <${StepsTable} steps=${tc.steps} checklist=${checklist} />
+        <${StepsTable} steps=${tc.steps} run=${run} />
         ${tc.notesHtml
           ? html`<aside class="notes">
               <h5 class="eyebrow">Note</h5>
@@ -1654,19 +1835,22 @@ function ThemeToggle() {
   `;
 }
 
-const CHECKLIST_MODE_STORAGE_KEY = "test-sheet-checklist-mode";
+const RUN_MODE_STORAGE_KEY = "test-sheet-run-mode";
+/** What the mode was called while it only ticked steps */
+const LEGACY_RUN_MODE_STORAGE_KEY = "test-sheet-checklist-mode";
 
-function readChecklistMode(): boolean {
+function readRunMode(): boolean {
   try {
-    return localStorage.getItem(CHECKLIST_MODE_STORAGE_KEY) === "1";
+    const stored = localStorage.getItem(RUN_MODE_STORAGE_KEY) ?? localStorage.getItem(LEGACY_RUN_MODE_STORAGE_KEY);
+    return stored === "1";
   } catch {
     return false;
   }
 }
 
-function writeChecklistMode(on: boolean) {
+function writeRunMode(on: boolean) {
   try {
-    localStorage.setItem(CHECKLIST_MODE_STORAGE_KEY, on ? "1" : "0");
+    localStorage.setItem(RUN_MODE_STORAGE_KEY, on ? "1" : "0");
   } catch {
     // Blocked storage (e.g. over file://) just means the choice is not remembered
   }
@@ -1860,14 +2044,14 @@ function AppHeader({
   onOpenPalette,
   navCollapsed,
   onToggleNav,
-  checklistOn,
-  onToggleChecklist,
+  runModeOn,
+  onToggleRunMode,
 }: {
   onOpenPalette: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
-  checklistOn: boolean;
-  onToggleChecklist: () => void;
+  runModeOn: boolean;
+  onToggleRunMode: () => void;
 }) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
 
@@ -1886,13 +2070,13 @@ function AppHeader({
       </div>
       <div class="app-header-actions">
         <button
-          class=${"header-btn" + (checklistOn ? " header-btn-on" : "")}
-          aria-pressed=${checklistOn}
-          title="Tick off steps as you run a case (remembered in this browser)"
-          onClick=${onToggleChecklist}
+          class=${"header-btn" + (runModeOn ? " header-btn-on" : "")}
+          aria-pressed=${runModeOn}
+          title="Record Pass/Fail per step as you run a case (saved in this browser only)"
+          onClick=${onToggleRunMode}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-          <span>Checklist</span>
+          <span>Run mode</span>
         </button>
         <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
@@ -1937,7 +2121,7 @@ function App() {
   const [query, setQuery] = useState(route.query);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
-  const [checklistOn, setChecklistOn] = useState(readChecklistMode);
+  const [runModeOn, setRunModeOn] = useState(readRunMode);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
   const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
@@ -2027,9 +2211,9 @@ function App() {
     writePanelWidth(GUIDE_SIZE, width);
   }, []);
 
-  const toggleChecklist = useCallback(() => {
-    setChecklistOn((on) => {
-      writeChecklistMode(!on);
+  const toggleRunMode = useCallback(() => {
+    setRunModeOn((on) => {
+      writeRunMode(!on);
       return !on;
     });
   }, []);
@@ -2062,8 +2246,8 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} checklistOn=${checklistOn} onToggleChecklist=${toggleChecklist} />
-      <${ChecklistContext.Provider} value=${checklistOn}>
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runModeOn=${runModeOn} onToggleRunMode=${toggleRunMode} />
+      <${RunContext.Provider} value=${runModeOn}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
@@ -2097,7 +2281,7 @@ function App() {
             />`
           : null}
       </div>
-      </${ChecklistContext.Provider}>
+      </${RunContext.Provider}>
       ${paletteOpen
         ? html`<${CommandPalette}
             entries=${[ALL_TEST_CASES_ENTRY, ONE_PAGE_ENTRY, ...entries]}

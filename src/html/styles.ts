@@ -18,6 +18,9 @@ const DARK_THEME_VARS = `
   --inactive-bg: #262c36;
   --warn: #d29922;
   --warn-bg: #3a2d00;
+  --success-bg: #1a3d26;
+  --danger: #f85149;
+  --danger-bg: #3d1a1c;
 `;
 
 export const STYLES = `
@@ -40,6 +43,9 @@ export const STYLES = `
   --inactive-bg: #eceff2;
   --warn: #9a6700;
   --warn-bg: #fff8c5;
+  --success-bg: #dafbe1;
+  --danger: #cf222e;
+  --danger-bg: #ffebe9;
   --header-h: 48px;
   --nav-w: 240px;
   --guide-w: 380px;
@@ -1016,7 +1022,7 @@ body {
   color: var(--fg-muted);
 }
 
-.steps-table tbody tr:nth-child(even) > * { background: var(--bg-subtle); }
+.steps-table tbody tr.step-even > * { background: var(--bg-subtle); }
 
 .steps-table .step-no {
   text-align: right;
@@ -1062,15 +1068,18 @@ body {
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
   }
-  .steps-table tbody tr:nth-child(even) { background: var(--bg-subtle); }
+  .steps-table tbody tr.step-even { background: var(--bg-subtle); }
   .steps-table tr > * { padding: 0 8px; border: 0; background: none !important; }
-  .steps-table.steps-checklist tr {
-    grid-template-columns: 1.6rem 2.2rem 1fr;
-    grid-template-areas: "check no action" "check no expected";
+  .steps-table.steps-run tr.step-row {
+    grid-template-areas: "no action" "no expected" "no result";
   }
-  .steps-table .step-check { grid-area: check; text-align: left; }
+  .steps-table tr.step-note-row { display: block; padding: 0 8px 8px; }
+  .steps-table tr.step-note-row > td { padding: 0; }
   .steps-table tbody tr.step-current { background: var(--accent-bg); }
   .steps-table tbody tr.step-current > :first-child { box-shadow: none; }
+  .steps-table .step-result { grid-area: result; padding-top: 6px; }
+  .steps-table .step-result-group { display: flex; gap: 8px; }
+  .steps-table .result-btn { flex: 1; height: 40px; }
   .steps-table .step-no { grid-area: no; }
   .steps-table .step-action { grid-area: action; font-weight: 600; }
   .steps-table .step-expected { grid-area: expected; padding-top: 4px; }
@@ -1086,23 +1095,110 @@ body {
   .test-case-badges { display: none; }
 }
 
-/* Checklist mode: a tick column, done steps muted, the first open step marked as where to go next */
-.steps-table .col-step-check { width: 2.2rem; }
-.steps-table .step-check { text-align: center; }
-.steps-table .step-check input { margin: 0; cursor: pointer; }
-.steps-table .step-done > * { color: var(--fg-muted); }
-.steps-table .step-done .step-no::before { content: "\\2713  "; color: var(--success); }
+/*
+ * Run mode: a Result column of two real buttons (32px tall, against a 13px checkbox), finished
+ * steps muted, the first unmarked step marked as where to go next, a failed step flagged on its
+ * edge and followed by a row for what the tester saw.
+ */
+.steps-table .col-step-result { width: 9rem; }
+.steps-table.steps-run .col-step-action { width: 38%; }
+.steps-table .step-result { vertical-align: top; }
+.steps-table .step-result-group { display: flex; gap: 4px; }
+
+.result-btn {
+  flex: 1 1 0;
+  min-width: 3.5rem;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.result-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.result-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.result-btn-pass[aria-pressed="true"],
+.result-btn-pass[aria-pressed="true"]:hover {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.result-btn-fail[aria-pressed="true"],
+.result-btn-fail[aria-pressed="true"]:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.steps-table .step-done > :not(.step-result) { color: var(--fg-muted); }
 .steps-table tbody tr.step-current > * { background: var(--accent-bg); }
 .steps-table tbody tr.step-current > :first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.steps-table tbody tr.step-failed > :first-child { box-shadow: inset 3px 0 0 var(--danger); }
 
-.checklist-progress {
-  flex: 0 0 auto;
+.steps-table .step-note-row > td { background: var(--danger-bg); }
+.steps-table .step-note-row.step-even > td { background: var(--danger-bg); }
+
+.step-note {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.step-note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.run-status {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   font-size: 0.75rem;
-  color: var(--fg-muted);
   white-space: nowrap;
+}
+
+.run-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.run-chip-pass {
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.run-chip-fail {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .visually-hidden {
