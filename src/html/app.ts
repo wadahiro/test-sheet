@@ -730,23 +730,17 @@ function ScopePage({
   rows,
   query,
   onQueryChange,
+  guideOpen,
+  onToggleGuide,
 }: {
   route: Route;
   suites: SuitePageData[];
   rows: OverviewRow[];
   query: string;
   onQueryChange: (query: string) => void;
+  guideOpen: boolean;
+  onToggleGuide: () => void;
 }) {
-  const guideTargetPrefix = route.scope.kind === "suite" ? `suite-${route.scope.idPrefix}-guide` : null;
-  // Opened up front when the route points into the guide, so its headings exist when the page jumps
-  const [guideOpen, setGuideOpen] = useState(() => guideTargetPrefix !== null && !!route.target?.startsWith(guideTargetPrefix));
-  const guideToggled = useRef(false);
-
-  // Opening from the pinned bar can happen far below the guide, so bring the guide into view
-  useEffect(() => {
-    if (guideOpen && guideToggled.current && guideTargetPrefix) jumpToId(guideTargetPrefix);
-  }, [guideOpen]);
-
   const resolved = resolveScope(route.scope, suites);
   if (!resolved) {
     return html`<p class="empty">Not found. <a href=${OVERVIEW_HASH}>Back to all test cases</a></p>`;
@@ -764,13 +758,21 @@ function ScopePage({
   const hasGuide = !!suite?.guideHtml;
 
   return html`
-    <section class=${"overview scope-page" + (hasGuide ? " scope-page-guide" : "")} id=${resolved.anchorId}>
+    <section class="overview scope-page" id=${resolved.anchorId}>
       <h2 class="overview-title sticky-header sticky-level-0">
         <span class="suite-title-text">
           ${resolved.ancestors.length > 0 ? html`<span class="scope-crumb">${resolved.ancestors.join(" › ")} › </span>` : null}${resolved.title}
         </span>
         <span class="suite-title-right">
           ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>Read as one page</a>` : null}
+          ${hasGuide
+            ? html`<button
+                class=${"header-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
+                aria-pressed=${guideOpen}
+                title=${guideOpen ? "Hide the guide" : "Show the guide beside the test cases"}
+                onClick=${onToggleGuide}
+              >📖 Guide</button>`
+            : null}
           <span class="suite-title-count">
             ${trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count)} test case(s)
           </span>
@@ -780,16 +782,6 @@ function ScopePage({
           />
         </span>
       </h2>
-      ${suite && hasGuide
-        ? html`<${GuideBar}
-              open=${guideOpen}
-              onToggle=${() => {
-                guideToggled.current = true;
-                setGuideOpen(!guideOpen);
-              }}
-            />
-            ${guideOpen ? html`<${GuideBody} suite=${suite} />` : null}`
-        : null}
       <div class="scope-table-wrap">
         <div class="filter-bar">
           <input
@@ -805,7 +797,7 @@ function ScopePage({
           : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
       </div>
       ${suite && visibleRows.length > 0
-        ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${hasGuide ? 2 : 1} showIndex=${false} />`
+        ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${1} showIndex=${false} />`
         : null}
     </section>
   `;
@@ -824,24 +816,42 @@ function SuiteGuide({ suite }: { suite: SuitePageData }) {
 }
 
 /**
- * A suite page's guide, as a bar that stays pinned under the title plus a body that scrolls away
- * with the page — a <details> cannot do this, since its summary only sticks within its own box.
- * Pinned, the guide can be opened from anywhere on the page and closed without scrolling back.
+ * A suite's guide docked beside its cases, so it can be read while working through them. Its body
+ * scrolls independently of the page; that and the sidebar's list are the only nested scrollers.
  */
-function GuideBar({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function GuidePanel({
+  suite,
+  width,
+  limit,
+  onClose,
+  onResize,
+}: {
+  suite: SuitePageData;
+  width: number;
+  limit: number;
+  onClose: () => void;
+  onResize: (width: number) => void;
+}) {
   return html`
-    <div class="guide-bar sticky-header sticky-level-1">
-      <button class="guide-toggle" aria-expanded=${open} onClick=${onToggle}>
-        <span class="guide-chevron">${open ? "▾" : "▸"}</span> 📖 Guide
-      </button>
-    </div>
+    <aside
+      class="guide-panel"
+      aria-label="Guide"
+      onKeyDown=${(e: KeyboardEvent) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label="Resize guide" onResize=${onResize} />
+      <div class="guide-panel-head">
+        <span class="guide-panel-title" title=${`${suite.idPrefix}: ${suite.typeName}`}>📖 Guide · ${suite.typeName}</span>
+        <button class="header-btn header-btn-icon" title="Close the guide" aria-label="Close the guide" onClick=${onClose}>✕</button>
+      </div>
+      <div class="guide-panel-body" tabindex="0">
+        <div class="guide" id=${guideAnchorId(suite.idPrefix)}>
+          <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
+        </div>
+      </div>
+    </aside>
   `;
-}
-
-function GuideBody({ suite }: { suite: SuitePageData }) {
-  return html`<div class="guide" id=${guideAnchorId(suite.idPrefix)}>
-    <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
-  </div>`;
 }
 
 /** The suite's sections and their cards. `level` is the sections' own sticky level; cards sit one below. */
@@ -1027,7 +1037,7 @@ function testCaseSearchText(tc: TestCase): string {
  * one entry per guide heading buries the test cases it is supposed to introduce, while the
  * palette is a search surface, where that same granularity is the point.
  */
-type GuideDetail = "collapsed" | "headings";
+type GuideDetail = "none" | "collapsed" | "headings";
 
 /** Flattens every test suite into domain -> feature -> suite -> guide -> section -> test case navigation entries */
 function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, includeTestCases: boolean): NavEntry[] {
@@ -1066,7 +1076,9 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
         });
         const suiteId = suiteAnchorId(suite.idPrefix);
         const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
-        if (guideDetail === "collapsed") {
+        if (guideDetail === "none") {
+          // The sidebar leaves guides out: a guide is opened from the page it belongs to, and found by search
+        } else if (guideDetail === "collapsed") {
           // Keyed off guideHtml, not guideHeadings: a guide with no h2 still needs an entry
           if (suite.guideHtml) {
             entries.push({
@@ -1175,7 +1187,7 @@ function NavOutline({
     searchText: "",
     count: suites.reduce((sum, suite) => sum + suiteTestCaseCount(suite).active, 0),
   };
-  const entries = [allEntry, ...buildNavEntries(suites, "collapsed", false)];
+  const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
   const selectedId = scopeEntryId(route.scope);
   const tracksScroll = route.mode === "full" || route.scope.kind === "suite";
   const [currentId, setCurrentId] = useState<string>(selectedId);
@@ -1195,7 +1207,8 @@ function NavOutline({
       let current: string | null = null;
       for (const entry of entries) {
         const el = document.getElementById(entry.id);
-        if (!el) continue;
+        // The guide panel scrolls apart from the page, so its position says nothing about where the reader is
+        if (!el || el.closest(".guide-panel")) continue;
         if (el.getBoundingClientRect().top <= threshold) {
           current = entry.id;
         }
@@ -1263,7 +1276,7 @@ function NavOutline({
           `
         )}
       </ul>
-      <${NavResizer} width=${width} onResize=${onResize} />
+      <${Resizer} edge="end" width=${width} size=${NAV_SIZE} label="Resize navigation" onResize=${onResize} />
     </nav>
   `;
 }
@@ -1346,10 +1359,23 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
   return landing;
 }
 
+/** Breathing room kept above a heading when the guide panel scrolls to it */
+const GUIDE_PANEL_GAP = 12;
+
 /** Shared jump-to-ID logic, used by both NavOutline and CommandPalette. */
 function jumpToId(id: string, onDone?: () => void) {
   const el = document.getElementById(id);
   if (!el) return;
+  // The guide panel scrolls on its own, and scrollIntoView would also move the page of cases
+  // beside it, which is exactly what reading the guide next to a case must not do
+  const panelBody = el.closest<HTMLElement>(".guide-panel-body");
+  if (panelBody) {
+    panelBody.scrollTop += el.getBoundingClientRect().top - panelBody.getBoundingClientRect().top - GUIDE_PANEL_GAP;
+    el.classList.add("jump-flash");
+    setTimeout(() => el.classList.remove("jump-flash"), 1200);
+    onDone?.();
+    return;
+  }
   // Before measuring: a target inside a collapsed guide has no layout box of its own, and
   // `closest` includes the element itself, so jumping to the guide also opens it
   for (let details = el.closest("details"); details; details = details.parentElement?.closest("details") ?? null) {
@@ -1535,6 +1561,34 @@ function ThemeToggle() {
   `;
 }
 
+const GUIDE_OPEN_STORAGE_KEY = "test-sheet-guide-open";
+
+function readGuideOpen(): boolean {
+  try {
+    return localStorage.getItem(GUIDE_OPEN_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeGuideOpen(open: boolean) {
+  try {
+    localStorage.setItem(GUIDE_OPEN_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // Blocked storage (e.g. over file://) just means the choice is not remembered
+  }
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 const NAV_COLLAPSED_STORAGE_KEY = "test-sheet-nav-collapsed";
 
 function readNavCollapsed(): boolean {
@@ -1553,36 +1607,63 @@ function writeNavCollapsed(collapsed: boolean) {
   }
 }
 
-const NAV_WIDTH_STORAGE_KEY = "test-sheet-nav-width";
-const NAV_WIDTH_DEFAULT = 240;
-const NAV_WIDTH_MIN = 200;
-const NAV_WIDTH_MAX = 640;
-const NAV_WIDTH_KEY_STEP = 16;
-
-function clampNavWidth(width: number): number {
-  return Math.min(NAV_WIDTH_MAX, Math.max(NAV_WIDTH_MIN, Math.round(width)));
+interface PanelSize {
+  storageKey: string;
+  defaultWidth: number;
+  min: number;
+  max: number;
 }
 
-function readNavWidth(): number {
+const NAV_SIZE: PanelSize = { storageKey: "test-sheet-nav-width", defaultWidth: 240, min: 200, max: 640 };
+const GUIDE_SIZE: PanelSize = { storageKey: "test-sheet-guide-width", defaultWidth: 380, min: 280, max: 720 };
+const PANEL_KEY_STEP = 16;
+/** What the cases keep when both side panels are open, so the steps table never collapses */
+const MAIN_MIN_WIDTH = 480;
+
+function clampWidth(size: PanelSize, width: number, limit = size.max): number {
+  return Math.min(Math.max(size.min, limit), Math.max(size.min, Math.round(width)));
+}
+
+function readPanelWidth(size: PanelSize): number {
   try {
-    const stored = Number(localStorage.getItem(NAV_WIDTH_STORAGE_KEY));
-    return stored > 0 ? clampNavWidth(stored) : NAV_WIDTH_DEFAULT;
+    const stored = Number(localStorage.getItem(size.storageKey));
+    return stored > 0 ? clampWidth(size, stored) : size.defaultWidth;
   } catch {
-    return NAV_WIDTH_DEFAULT;
+    return size.defaultWidth;
   }
 }
 
-function writeNavWidth(width: number) {
+function writePanelWidth(size: PanelSize, width: number) {
   try {
-    localStorage.setItem(NAV_WIDTH_STORAGE_KEY, String(width));
+    localStorage.setItem(size.storageKey, String(width));
   } catch {
     // Blocked storage (e.g. over file://) just means the width is not remembered
   }
 }
 
-/** Drag handle on the sidebar's right edge. Arrow keys resize too, and a double click restores the default. */
-function NavResizer({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+/**
+ * Drag handle on a side panel's inner edge. `edge` is the side of the panel the handle sits on:
+ * "end" for the left sidebar (its right edge), "start" for the right-hand guide (its left edge).
+ * Arrow keys resize too, and a double click restores the default.
+ */
+function Resizer({
+  edge,
+  width,
+  size,
+  limit,
+  label,
+  onResize,
+}: {
+  edge: "start" | "end";
+  width: number;
+  size: PanelSize;
+  /** Upper bound tighter than the size's own max, e.g. what is left of the window */
+  limit?: number;
+  label: string;
+  onResize: (width: number) => void;
+}) {
   const [dragging, setDragging] = useState(false);
+  const clamp = (value: number) => clampWidth(size, value, limit);
 
   const onPointerDown = (e: PointerEvent) => {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1591,24 +1672,27 @@ function NavResizer({ width, onResize }: { width: number; onResize: (width: numb
   };
   const onPointerMove = (e: PointerEvent) => {
     if (!dragging) return;
-    // The sidebar starts at the viewport's left edge, so the pointer's x is the new width
-    onResize(clampNavWidth(e.clientX));
+    // The sidebar starts at the window's left edge and the guide ends at its right edge, so the
+    // pointer's distance from that edge is the new width
+    onResize(clamp(edge === "end" ? e.clientX : window.innerWidth - e.clientX));
   };
   const onPointerUp = () => setDragging(false);
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "ArrowLeft") onResize(clampNavWidth(width - NAV_WIDTH_KEY_STEP));
-    else if (e.key === "ArrowRight") onResize(clampNavWidth(width + NAV_WIDTH_KEY_STEP));
+    const widen = edge === "end" ? "ArrowRight" : "ArrowLeft";
+    const narrow = edge === "end" ? "ArrowLeft" : "ArrowRight";
+    if (e.key === widen) onResize(clamp(width + PANEL_KEY_STEP));
+    else if (e.key === narrow) onResize(clamp(width - PANEL_KEY_STEP));
     else return;
     e.preventDefault();
   };
 
   return html`<div
-    class=${"nav-resizer" + (dragging ? " nav-resizer-active" : "")}
+    class=${`panel-resizer panel-resizer-${edge}` + (dragging ? " panel-resizer-active" : "")}
     role="separator"
     aria-orientation="vertical"
-    aria-label="Resize navigation"
-    aria-valuemin=${NAV_WIDTH_MIN}
-    aria-valuemax=${NAV_WIDTH_MAX}
+    aria-label=${label}
+    aria-valuemin=${size.min}
+    aria-valuemax=${limit ?? size.max}
     aria-valuenow=${width}
     tabindex="0"
     title="Drag to resize (double-click to reset)"
@@ -1617,7 +1701,7 @@ function NavResizer({ width, onResize }: { width: number; onResize: (width: numb
     onPointerUp=${onPointerUp}
     onPointerCancel=${onPointerUp}
     onKeyDown=${onKeyDown}
-    onDblClick=${() => onResize(NAV_WIDTH_DEFAULT)}
+    onDblClick=${() => onResize(size.defaultWidth)}
   />`;
 }
 
@@ -1678,7 +1762,7 @@ function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
-  const [navWidth, setNavWidth] = useState(readNavWidth);
+  const [navWidth, setNavWidth] = useState(() => readPanelWidth(NAV_SIZE));
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash, suites));
   const entries = buildNavEntries(suites, "headings", true);
   const overviewRows = buildOverviewRows(suites);
@@ -1687,6 +1771,27 @@ function App() {
    * The route only seeds it — see the effect below.
    */
   const [query, setQuery] = useState(route.query);
+  const [guideOpen, setGuideOpen] = useState(readGuideOpen);
+  const [guideWidth, setGuideWidth] = useState(() => readPanelWidth(GUIDE_SIZE));
+  /** The route the reader closed the guide on, so a route that points into it does not hold it open */
+  const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
+  const viewportWidth = useViewportWidth();
+
+  // The suite whose guide this page offers, if any
+  const pageGuideSuite =
+    route.mode === "table" && route.scope.kind === "suite"
+      ? suites.find((suite) => suite.idPrefix === (route.scope as { idPrefix: string }).idPrefix && suite.guideHtml)
+      : undefined;
+  /**
+   * The guide stays on screen when the reader moves to a page that has none, so it can be read
+   * while going on to other cases or suites. It switches when another page brings its own.
+   */
+  const [lastGuideId, setLastGuideId] = useState<string | null>(null);
+  const guideSuite = pageGuideSuite ?? suites.find((suite) => suite.idPrefix === lastGuideId);
+  const routeTargetsGuide = !!pageGuideSuite && !!route.target?.startsWith(`suite-${pageGuideSuite.idPrefix}-guide`);
+  // Derived rather than set in an effect, so the panel is already in the DOM when the route's scroll runs
+  const guidePanelOpen = !!guideSuite && (guideOpen || (routeTargetsGuide && guideDismissedOn !== route.hash));
+  const guideLimit = Math.max(GUIDE_SIZE.min, viewportWidth - (navCollapsed ? 0 : navWidth) - MAIN_MIN_WIDTH);
 
   useEffect(() => {
     function onHashChange() {
@@ -1696,10 +1801,20 @@ function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [suites]);
 
-  // Runs after the new page is in the DOM, so the scroll target exists. A new route also drops
-  // the previous page's filter in favour of its own.
   useEffect(() => {
-    setQuery(route.query);
+    if (pageGuideSuite) setLastGuideId(pageGuideSuite.idPrefix);
+  }, [pageGuideSuite?.idPrefix]);
+
+  // Runs after the new page is in the DOM, so the scroll target exists. A new route also drops
+  // the previous page's filter in favour of its own — except when it only opens the guide, which
+  // says nothing about which cases the reader is filtering.
+  useEffect(() => {
+    if (routeTargetsGuide) {
+      setGuideOpen(true);
+      writeGuideOpen(true);
+    } else {
+      setQuery(route.query);
+    }
     scrollToRoute(route);
   }, [route.hash]);
 
@@ -1708,13 +1823,22 @@ function App() {
       // Selecting the page already shown fires no hashchange, so apply its effects directly
       if (location.hash === entry.hash) {
         const same = parseRoute(entry.hash, suites);
-        setQuery(same.query);
+        if (!same.target?.includes("-guide")) setQuery(same.query);
         scrollToRoute(same);
       } else {
         location.hash = entry.hash;
       }
     },
     [suites]
+  );
+
+  const setGuide = useCallback(
+    (open: boolean) => {
+      setGuideOpen(open);
+      writeGuideOpen(open);
+      setGuideDismissedOn(open ? null : route.hash);
+    },
+    [route.hash]
   );
 
   useEffect(() => {
@@ -1730,9 +1854,14 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const resizeGuide = useCallback((width: number) => {
+    setGuideWidth(width);
+    writePanelWidth(GUIDE_SIZE, width);
+  }, []);
+
   const resizeNav = useCallback((width: number) => {
     setNavWidth(width);
-    writeNavWidth(width);
+    writePanelWidth(NAV_SIZE, width);
   }, []);
 
   const toggleNav = useCallback(() => {
@@ -1747,15 +1876,35 @@ function App() {
   return html`
     <div>
       <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} />
-      <div class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")} style=${{ "--nav-w": `${navWidth}px` }}>
+      <div
+        class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
+        style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${Math.min(guideWidth, guideLimit)}px` }}
+      >
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} />
         <div class="app">
           ${route.mode === "full"
             ? domains.length === 0
               ? html`<p class="empty">No testcases.yaml files found.</p>`
               : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
-            : html`<${ScopePage} key=${route.hash} route=${route} suites=${suites} rows=${overviewRows} query=${query} onQueryChange=${setQuery} />`}
+            : html`<${ScopePage}
+                route=${route}
+                suites=${suites}
+                rows=${overviewRows}
+                query=${query}
+                onQueryChange=${setQuery}
+                guideOpen=${guidePanelOpen}
+                onToggleGuide=${() => setGuide(!guidePanelOpen)}
+              />`}
         </div>
+        ${guidePanelOpen && guideSuite
+          ? html`<${GuidePanel}
+              suite=${guideSuite}
+              width=${Math.min(guideWidth, guideLimit)}
+              limit=${guideLimit}
+              onClose=${() => setGuide(false)}
+              onResize=${resizeGuide}
+            />`
+          : null}
       </div>
       ${paletteOpen
         ? html`<${CommandPalette}

@@ -18,8 +18,9 @@ domain → feature → test suite → section → test case. Domain and feature 
 
 ## Layout invariants
 
-- Sticky `top` is `--header-h + --sticky-h * level` (`sticky-level-0`..`4`). A new hierarchy level needs a matching rule. A scope page (`ScopePage`) has one sticky header above its cards, so its sections and cards pass `level` 1 and 2, whereas the single long page (`#/all`) stacks 3 and 4; a suite page with a guide pins one more row (the guide bar), which `--scope-extra` and `--guide-depth` account for, and its sections and cards move down a level; guides follow via `--guide-depth`. Anything else that sticks (`.nav-outline`, a table `thead`) offsets by `--header-h` too, and `.app-header` must keep a fixed height rather than growing with its contents.
+- Sticky `top` is `--header-h + --sticky-h * level` (`sticky-level-0`..`4`). A new hierarchy level needs a matching rule. A scope page (`ScopePage`) has one sticky header above its cards, so its sections and cards pass `level` 1 and 2, whereas the single long page (`#/all`) stacks 3 and 4; guides on the long page follow via `--guide-depth`. Anything else that sticks (`.nav-outline`, a table `thead`) offsets by `--header-h` too, and `.app-header` must keep a fixed height rather than growing with its contents.
 - `jumpToId` nudges a target down by its own sticky header's `top`; elements without one (guides) use `scroll-margin-top` instead. It also opens ancestor `<details>` before measuring.
+- A suite's guide opens in `.guide-panel`, a right-hand sticky column beside the cases, and stays open across pages. Its body and the sidebar's list are the only nested scrollers; keep it that way. `jumpToId` scrolls the panel itself for targets inside `.guide-panel-body` (`scrollIntoView` would move the page too), and scroll tracking skips anything in the panel.
 - `.nav-outline` is a flex column and only its `ul` scrolls. New head elements need `flex: 0 0 auto`; the `ul` keeps `min-height: 0`.
 
 ## Theming
@@ -32,7 +33,7 @@ domain → feature → test suite → section → test case. Domain and feature 
 
 - `NavEntry.searchText` is full-text and deliberately wider than the label an entry shows: test cases carry their steps, preconditions, test data and notes; guide headings carry their section's Markdown. Index new content types there — a search that only matches titles reads as broken.
 - A table's own filter is the exception: it matches only what the table shows (including its section heading rows), because it filters something the reader is looking at. On a suite page the same rule also narrows the cards.
-- Guides render collapsed, with one outline entry per suite but per-heading entries in the palette (`GuideDetail` in `buildNavEntries`) — an outline is a structure map, a palette is a search surface.
+- Guides have no sidebar entry (they are opened from the page they belong to) but each guide heading is a palette entry (`GuideDetail` in `buildNavEntries`) — an outline is a structure map, a palette is a search surface.
 
 ## Code conventions
 

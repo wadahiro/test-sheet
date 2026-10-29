@@ -38,6 +38,7 @@ export const STYLES = `
   --inactive-bg: #eceff2;
   --header-h: 48px;
   --nav-w: 240px;
+  --guide-w: 380px;
   --sticky-h: 44px;
   --filter-h: 56px;
 }
@@ -144,10 +145,9 @@ body {
   align-items: flex-start;
 }
 
-.nav-resizer {
+.panel-resizer {
   position: absolute;
   top: 0;
-  right: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
@@ -156,9 +156,12 @@ body {
   z-index: 20;
 }
 
-.nav-resizer:hover,
-.nav-resizer.nav-resizer-active,
-.nav-resizer:focus-visible {
+.panel-resizer-end { right: 0; }
+.panel-resizer-start { left: 0; }
+
+.panel-resizer:hover,
+.panel-resizer.panel-resizer-active,
+.panel-resizer:focus-visible {
   background: var(--accent);
   opacity: 0.5;
   outline: none;
@@ -418,7 +421,7 @@ body {
  */
 .filter-bar {
   position: sticky;
-  top: calc(var(--header-h) + var(--sticky-h) + var(--scope-extra, 0px));
+  top: calc(var(--header-h) + var(--sticky-h));
   z-index: 11;
   height: var(--filter-h);
   display: flex;
@@ -478,7 +481,7 @@ body {
 }
 
 .scope-table thead th {
-  top: calc(var(--header-h) + var(--sticky-h) + var(--scope-extra, 0px) + var(--filter-h));
+  top: calc(var(--header-h) + var(--sticky-h) + var(--filter-h));
 }
 
 .overview-row {
@@ -593,52 +596,102 @@ body {
 /*
  * Guides carry no sticky header of their own, so jumpToId's offset trick does not apply to
  * them. scroll-margin-top does the same job declaratively: clear the menu bar plus the levels
- * that stay stuck above a guide: three on the long page (domain, feature, test suite), one on a
- * suite's own page (its title).
+ * that stay stuck above a guide on the long page (domain, feature, test suite). A suite page's
+ * guide lives in a side panel instead.
  */
-.scope-page {
-  --guide-depth: 1;
-  --scope-extra: 0px;
-}
-
-/* The pinned guide bar is one more sticky row above the filter, table header and sections */
-.scope-page-guide {
-  --guide-depth: 2;
-  --scope-extra: var(--sticky-h);
-}
-
 .guide,
 .guide h2 {
   scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * var(--guide-depth, 3));
 }
 
-.guide-bar {
+/*
+ * The guide docked beside the cases. Like .nav-outline it is a sticky column with its own scroll,
+ * mirrored on the right; overscroll-behavior stops a flick at the end of the guide from carrying
+ * on into the page of cases.
+ */
+.guide-panel {
+  position: sticky;
+  top: var(--header-h);
+  flex: 0 0 var(--guide-w);
+  width: var(--guide-w);
+  height: calc(100vh - var(--header-h));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.guide-panel-head {
+  flex: 0 0 auto;
+  height: var(--sticky-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 20px;
   border-bottom: 1px solid var(--border);
 }
 
-.guide-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
+.guide-panel-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--fg-muted);
-  cursor: pointer;
 }
 
-.guide-toggle:hover {
-  color: var(--fg);
+.guide-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 20px 40px;
 }
 
-.guide-chevron {
-  width: 1em;
-  text-align: center;
+.guide-panel-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.guide-panel .guide {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.guide-toggle {
+  margin-left: 4px;
+}
+
+.guide-toggle-on {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Too narrow to share the row with the cases: float over them instead of squeezing them */
+@media (max-width: 1100px) {
+  .guide-panel {
+    position: fixed;
+    top: var(--header-h);
+    right: 0;
+    bottom: 0;
+    width: min(var(--guide-w), 90vw);
+    height: auto;
+    z-index: 50;
+    box-shadow: -8px 0 24px var(--overlay);
+  }
+}
+
+@media print {
+  .guide-panel,
+  .nav-outline {
+    display: none;
+  }
 }
 
 .guide-summary {
