@@ -697,7 +697,9 @@ body {
   margin: 0;
 }
 
+.header-btn-on,
 .guide-toggle-on,
+.header-btn-on:hover,
 .guide-toggle-on:hover {
   background: var(--accent-bg);
   color: var(--accent);
@@ -1062,6 +1064,13 @@ body {
   }
   .steps-table tbody tr:nth-child(even) { background: var(--bg-subtle); }
   .steps-table tr > * { padding: 0 8px; border: 0; background: none !important; }
+  .steps-table.steps-checklist tr {
+    grid-template-columns: 1.6rem 2.2rem 1fr;
+    grid-template-areas: "check no action" "check no expected";
+  }
+  .steps-table .step-check { grid-area: check; text-align: left; }
+  .steps-table tbody tr.step-current { background: var(--accent-bg); }
+  .steps-table tbody tr.step-current > :first-child { box-shadow: none; }
   .steps-table .step-no { grid-area: no; }
   .steps-table .step-action { grid-area: action; font-weight: 600; }
   .steps-table .step-expected { grid-area: expected; padding-top: 4px; }
@@ -1075,6 +1084,33 @@ body {
     color: var(--fg-muted);
   }
   .test-case-badges { display: none; }
+}
+
+/* Checklist mode: a tick column, done steps muted, the first open step marked as where to go next */
+.steps-table .col-step-check { width: 2.2rem; }
+.steps-table .step-check { text-align: center; }
+.steps-table .step-check input { margin: 0; cursor: pointer; }
+.steps-table .step-done > * { color: var(--fg-muted); }
+.steps-table .step-done .step-no::before { content: "\\2713  "; color: var(--success); }
+.steps-table tbody tr.step-current > * { background: var(--accent-bg); }
+.steps-table tbody tr.step-current > :first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+.checklist-progress {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 /* A caveat for whoever runs the case, so it gets a callout rather than muted small print */

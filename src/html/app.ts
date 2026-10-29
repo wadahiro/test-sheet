@@ -1,8 +1,8 @@
 // Browser-side UI (Preact + htm). Bundled by src/html/generate.ts via Bun.build()
 // and inlined into the generated HTML.
 
-import { h, render } from "preact";
-import { useState, useCallback, useEffect, useRef } from "preact/hooks";
+import { h, render, createContext } from "preact";
+import { useState, useCallback, useEffect, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 
@@ -175,35 +175,121 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
   `;
 }
 
+/** Whether cards show a checklist column; shared by context so it need not be threaded through every list */
+const ChecklistContext = createContext(false);
+
+interface StoredChecklist {
+  /** Hash of the steps' text, so a case edited since is not shown half-ticked for steps that changed */
+  h: string;
+  done: number[];
+}
+
+function stepsFingerprint(steps: Step[]): string {
+  let hash = 5381;
+  for (const step of steps) {
+    for (const ch of `${step.action}\u0000${step.expected}\u0001`) hash = ((hash << 5) + hash + ch.charCodeAt(0)) | 0;
+  }
+  return String(hash);
+}
+
+function checklistKey(tc: TestCase): string {
+  return `test-sheet-checklist:${tc._tcId}`;
+}
+
+function readChecklist(tc: TestCase): Set<number> {
+  try {
+    const raw = localStorage.getItem(checklistKey(tc));
+    if (!raw) return new Set();
+    const stored = JSON.parse(raw) as StoredChecklist;
+    return stored.h === stepsFingerprint(tc.steps) ? new Set(stored.done) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeChecklist(tc: TestCase, done: Set<number>) {
+  try {
+    if (done.size === 0) localStorage.removeItem(checklistKey(tc));
+    else localStorage.setItem(checklistKey(tc), JSON.stringify({ h: stepsFingerprint(tc.steps), done: [...done] } satisfies StoredChecklist));
+  } catch {
+    // Blocked storage (e.g. over file://): the ticks last for this visit only
+  }
+}
+
+interface Checklist {
+  done: Set<number>;
+  /** The first step not yet ticked, or -1 when all are */
+  current: number;
+  toggle: (index: number) => void;
+  reset: () => void;
+}
+
+function useChecklist(tc: TestCase, enabled: boolean): Checklist | null {
+  const [done, setDone] = useState<Set<number>>(() => (enabled ? readChecklist(tc) : new Set()));
+
+  useEffect(() => {
+    if (enabled) setDone(readChecklist(tc));
+  }, [enabled, tc._tcId]);
+
+  if (!enabled) return null;
+
+  const update = (next: Set<number>) => {
+    setDone(next);
+    writeChecklist(tc, next);
+  };
+  let current = tc.steps.findIndex((_, i) => !done.has(i));
+  if (tc.steps.length === 0) current = -1;
+  return {
+    done,
+    current,
+    toggle: (index) => {
+      const next = new Set(done);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      update(next);
+    },
+    reset: () => update(new Set()),
+  };
+}
+
 /**
  * The explicit roles keep this a table for assistive technology even when the narrow layout
  * turns its cells into blocks, which would otherwise drop the table semantics.
  */
-function StepsTable({ steps }: { steps: Step[] }) {
+function StepsTable({ steps, checklist }: { steps: Step[]; checklist: Checklist | null }) {
   return html`
-    <table class="steps-table" role="table">
+    <table class=${"steps-table" + (checklist ? " steps-checklist" : "")} role="table">
       <colgroup>
+        ${checklist ? html`<col class="col-step-check" />` : null}
         <col class="col-step-no" />
         <col class="col-step-action" />
         <col />
       </colgroup>
       <thead role="rowgroup">
         <tr role="row">
+          ${checklist ? html`<th role="columnheader" class="step-check"><span class="visually-hidden">Done</span></th>` : null}
           <th role="columnheader" class="step-no">#</th>
           <th role="columnheader">Action</th>
           <th role="columnheader">Expected</th>
         </tr>
       </thead>
       <tbody role="rowgroup">
-        ${steps.map(
-          (step, i) => html`
-            <tr key=${i} role="row">
+        ${steps.map((step, i) => {
+          const done = checklist?.done.has(i) ?? false;
+          const current = checklist?.current === i;
+          return html`
+            <tr key=${i} role="row" class=${(done ? "step-done " : "") + (current ? "step-current" : "")}>
+              ${checklist
+                ? html`<td role="cell" class="step-check">
+                    <input type="checkbox" checked=${done} aria-label=${`Step ${i + 1} done`} onChange=${() => checklist.toggle(i)} />
+                  </td>`
+                : null}
               <th role="rowheader" scope="row" class="step-no">${i + 1}</th>
               <td role="cell" class="step-cell step-action" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
               <td role="cell" class="step-cell step-expected" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
             </tr>
-          `
-        )}
+          `;
+        })}
       </tbody>
     </table>
   `;
@@ -222,6 +308,7 @@ function inactiveNote(tc: TestCase): string | null {
 
 /** `level` is the card header's position in the stack of sticky headers above it */
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
+  const checklist = useChecklist(tc, useContext(ChecklistContext));
   const inactive = isInactive(tc);
   const note = inactiveNote(tc);
   const hasMeta = !!(tc.tags && tc.tags.length > 0) || !!tc.legacy_marker || !!note;
@@ -240,6 +327,12 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
             ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
             : null}
         </span>
+        ${checklist && tc.steps.length > 0
+          ? html`<span class="checklist-progress">
+              ${checklist.done.size}/${tc.steps.length} done
+              ${checklist.done.size > 0 ? html`<button class="link-btn" onClick=${checklist.reset}>Reset</button>` : null}
+            </span>`
+          : null}
         <span class="test-case-actions">
           <a class="icon-btn" href=${testCaseHash(tc._tcId)} title="Link to this test case" aria-label="Link to this test case">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
@@ -271,7 +364,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
                 : null}
             </div>`
           : null}
-        <${StepsTable} steps=${tc.steps} />
+        <${StepsTable} steps=${tc.steps} checklist=${checklist} />
         ${tc.notesHtml
           ? html`<aside class="notes">
               <h5 class="eyebrow">Note</h5>
@@ -1561,6 +1654,24 @@ function ThemeToggle() {
   `;
 }
 
+const CHECKLIST_MODE_STORAGE_KEY = "test-sheet-checklist-mode";
+
+function readChecklistMode(): boolean {
+  try {
+    return localStorage.getItem(CHECKLIST_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeChecklistMode(on: boolean) {
+  try {
+    localStorage.setItem(CHECKLIST_MODE_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    // Blocked storage (e.g. over file://) just means the choice is not remembered
+  }
+}
+
 const SHOW_INACTIVE_STORAGE_KEY = "test-sheet-show-inactive";
 
 function readShowInactive(): boolean {
@@ -1749,10 +1860,14 @@ function AppHeader({
   onOpenPalette,
   navCollapsed,
   onToggleNav,
+  checklistOn,
+  onToggleChecklist,
 }: {
   onOpenPalette: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
+  checklistOn: boolean;
+  onToggleChecklist: () => void;
 }) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
 
@@ -1770,6 +1885,15 @@ function AppHeader({
         <span class="app-header-title">Test Cases</span>
       </div>
       <div class="app-header-actions">
+        <button
+          class=${"header-btn" + (checklistOn ? " header-btn-on" : "")}
+          aria-pressed=${checklistOn}
+          title="Tick off steps as you run a case (remembered in this browser)"
+          onClick=${onToggleChecklist}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+          <span>Checklist</span>
+        </button>
         <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>Search</span>
@@ -1813,6 +1937,7 @@ function App() {
   const [query, setQuery] = useState(route.query);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
+  const [checklistOn, setChecklistOn] = useState(readChecklistMode);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
   const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
@@ -1902,6 +2027,13 @@ function App() {
     writePanelWidth(GUIDE_SIZE, width);
   }, []);
 
+  const toggleChecklist = useCallback(() => {
+    setChecklistOn((on) => {
+      writeChecklistMode(!on);
+      return !on;
+    });
+  }, []);
+
   const toggleInactive = useCallback(() => {
     setShowInactive((show) => {
       writeShowInactive(!show);
@@ -1930,7 +2062,8 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} />
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} checklistOn=${checklistOn} onToggleChecklist=${toggleChecklist} />
+      <${ChecklistContext.Provider} value=${checklistOn}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
@@ -1964,6 +2097,7 @@ function App() {
             />`
           : null}
       </div>
+      </${ChecklistContext.Provider}>
       ${paletteOpen
         ? html`<${CommandPalette}
             entries=${[ALL_TEST_CASES_ENTRY, ONE_PAGE_ENTRY, ...entries]}
