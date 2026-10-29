@@ -1153,22 +1153,74 @@ body {
 .steps-table .step-note-row > td { background: var(--danger-bg); }
 .steps-table .step-note-row.step-even > td { background: var(--danger-bg); }
 
+.step-note-box { display: grid; gap: 6px; }
+
 .step-note {
   width: 100%;
-  height: 32px;
-  padding: 0 10px;
+  min-height: 3.2rem;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
   font-size: 0.85rem;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .step-note:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+
+.step-note-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.link-btn-off { opacity: 0.5; cursor: default; }
+
+.step-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step-images li { position: relative; }
+
+.step-images img {
+  display: block;
+  max-width: 14rem;
+  max-height: 9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.image-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-remove:hover { color: var(--danger); border-color: var(--danger); }
 
 .run-status {
   display: flex;

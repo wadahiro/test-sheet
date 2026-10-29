@@ -5,6 +5,7 @@ import { h, render, createContext } from "preact";
 import { useState, useCallback, useEffect, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
+import { blobToDataUrl, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
 const html = htmBind.bind(h);
 
@@ -82,7 +83,7 @@ declare global {
   }
 }
 
-function formatStepsAsMarkdownTable(steps: Step[], run?: RunState | null): string {
+function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: Record<number, RunImage[]> }) | null): string {
   if (!steps || steps.length === 0) return "";
   const lines = run
     ? ["| # | Action | Expected | Result |", "|:---:|------|----------|--------|"]
@@ -96,7 +97,9 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: RunState | null): strin
       continue;
     }
     const result = run.results[i];
-    const note = run.notes[i] ? ` — ${escapeMarkdownCell(run.notes[i])}` : "";
+    const shots = run.images?.[i]?.length ?? 0;
+    const attached = shots > 0 ? ` (${shots} screenshot${shots === 1 ? "" : "s"} attached; paste as rich text to include them)` : "";
+    const note = run.notes[i] || attached ? ` — ${escapeMarkdownCell(run.notes[i] ?? "")}${attached}` : "";
     const cell = result === "p" ? "Pass" : result === "f" ? `**Fail**${note}` : "not run";
     lines.push(`| ${i + 1} | ${action} | ${expected} | ${cell} |`);
   }
@@ -108,7 +111,7 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: RunState | null): strin
  * headingLevel is threaded down from whichever level was copied, so a domain-level copy
  * still nests its sections and test cases below the domain heading.
  */
-function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: RunState | null = null): string {
+function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { images?: Record<number, RunImage[]> }) | null = null): string {
   const recorded = run && caseOutcome(run.results) !== "none" ? run : null;
   const lines: string[] = [];
   lines.push(`${"#".repeat(headingLevel)} ${tc._tcId}`, "", `**${tc.name}**`, "");
@@ -145,6 +148,34 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: RunState | null
   return lines.join("\n");
 }
 
+function escapeHtmlText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The recorded run as HTML, with screenshots inline, for pasting into an editor that takes rich text */
+async function runCaseToHtml(tc: TestCase, run: CaseRun): Promise<string> {
+  const outcome = caseOutcome(run.results);
+  const label = outcome === "pass" ? "Pass" : outcome === "fail" ? "Fail" : "In progress";
+  const marked = run.results.filter((result) => result !== "").length;
+  const rows: string[] = [];
+  for (let i = 0; i < tc.steps.length; i++) {
+    const result = run.results[i];
+    let cell = result === "p" ? "Pass" : result === "f" ? "<strong>Fail</strong>" : "not run";
+    if (result === "f") {
+      if (run.notes[i]) cell += `<br>${escapeHtmlText(run.notes[i]).replace(/\n/g, "<br>")}`;
+      for (const image of run.images[i] ?? []) {
+        cell += `<br><img src="${await blobToDataUrl(image.blob)}" style="max-width:480px" alt="Screenshot for step ${i + 1}">`;
+      }
+    }
+    rows.push(`<tr><td>${i + 1}</td><td>${tc.steps[i].actionHtml}</td><td>${tc.steps[i].expectedHtml}</td><td>${cell}</td></tr>`);
+  }
+  return (
+    `<h3>${escapeHtmlText(tc._tcId)}: ${escapeHtmlText(tc.name)}</h3>` +
+    `<p><strong>Result:</strong> ${label} (${marked}/${tc.steps.length} run)</p>` +
+    `<table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>#</th><th>Action</th><th>Expected</th><th>Result</th></tr></thead><tbody>${rows.join("")}</tbody></table>`
+  );
+}
+
 /** Renders every test case in a section as a single Markdown document */
 function categoryToMarkdown(category: string, testCases: TestCase[], headingLevel = 2): string {
   const lines = [`${"#".repeat(headingLevel)} Section: ${category}`, ""];
@@ -168,15 +199,46 @@ function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string 
   return lines.join("\n");
 }
 
-function CopyButton({ getText, title, iconOnly = false }: { getText: () => string; title: string; iconOnly?: boolean }) {
+/** What a copy puts on the clipboard when it carries more than text */
+interface RichCopy {
+  text: string;
+  html: string;
+}
+
+function CopyButton({
+  getText,
+  getRich,
+  title,
+  iconOnly = false,
+}: {
+  getText: () => string;
+  /** When given, copies HTML as well as text, so images survive a paste into a rich editor */
+  getRich?: () => Promise<RichCopy>;
+  title: string;
+  iconOnly?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   const onClick = useCallback(() => {
-    navigator.clipboard.writeText(getText()).then(() => {
+    const flash = () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
-  }, [getText]);
+    };
+    if (getRich) {
+      // The promises go in whole: awaiting before write() would lose the click's permission in Safari
+      const rich = getRich();
+      navigator.clipboard
+        .write([
+          new ClipboardItem({
+            "text/plain": rich.then((r) => new Blob([r.text], { type: "text/plain" })),
+            "text/html": rich.then((r) => new Blob([r.html], { type: "text/html" })),
+          }),
+        ])
+        .then(flash);
+      return;
+    }
+    navigator.clipboard.writeText(getText()).then(flash);
+  }, [getText, getRich]);
 
   return html`
     <button
@@ -294,11 +356,24 @@ function writeRun(tc: TestCase, run: RunState) {
   }
 }
 
+/** A screenshot attached to a failed step, with an object URL to show it by */
+interface RunImage {
+  id: string;
+  url: string;
+  blob: Blob;
+}
+
+/** Screenshots a step may carry; a failure rarely needs more, and each costs storage */
+const MAX_IMAGES_PER_STEP = 6;
+
 interface CaseRun extends RunState {
   /** The first step not yet marked, or -1 when all are */
   current: number;
+  images: Record<number, RunImage[]>;
   set: (index: number, result: Exclude<StepResult, "">) => void;
   setNote: (index: number, text: string) => void;
+  addImages: (index: number, files: Blob[]) => void;
+  removeImage: (index: number, id: string) => void;
   reset: () => void;
 }
 
@@ -320,10 +395,33 @@ function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
 
 function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
   const [run, setRun] = useState<RunState>(() => (enabled ? readRun(tc) : emptyRun(tc)));
+  const [images, setImages] = useState<Record<number, RunImage[]>>({});
+  const urls = useRef<string[]>([]);
+  const caseKey = `${runNamespace()}:${tc._tcId}`;
 
   useEffect(() => {
     if (enabled) setRun(readRun(tc));
   }, [enabled, tc._tcId]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    loadImages(caseKey, stepsFingerprint(tc.steps)).then((stored) => {
+      if (cancelled) return;
+      const byStep: Record<number, RunImage[]> = {};
+      for (const image of stored) {
+        const url = URL.createObjectURL(image.blob);
+        urls.current.push(url);
+        (byStep[image.step] ??= []).push({ id: image.id, url, blob: image.blob });
+      }
+      setImages(byStep);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, caseKey]);
+
+  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
   if (!enabled) return null;
 
@@ -332,19 +430,148 @@ function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
     setRun(stamped);
     writeRun(tc, stamped);
   };
+  const dropImages = (steps: number[]) => {
+    const gone = steps.flatMap((step) => images[step] ?? []);
+    gone.forEach((image) => removeImage(image.id));
+    if (gone.length > 0) setImages(Object.fromEntries(Object.entries(images).filter(([step]) => !steps.includes(Number(step)))));
+  };
+
   return {
     ...run,
+    images,
     current: tc.steps.length === 0 ? -1 : run.results.findIndex((result) => result === ""),
     set: (index, result) => {
       const results = [...run.results];
       results[index] = results[index] === result ? "" : result;
       const notes = { ...run.notes };
-      if (results[index] !== "f") delete notes[index];
+      if (results[index] !== "f") {
+        delete notes[index];
+        dropImages([index]);
+      }
       update({ ...run, results, notes });
     },
     setNote: (index, text) => update({ ...run, notes: { ...run.notes, [index]: text } }),
-    reset: () => update(emptyRun(tc)),
+    addImages: async (index, files) => {
+      const room = MAX_IMAGES_PER_STEP - (images[index]?.length ?? 0);
+      const added: RunImage[] = [];
+      for (const file of files.slice(0, Math.max(0, room))) {
+        const blob = await shrinkImage(file);
+        const id = `${caseKey}:${index}:${Date.now().toString(36)}${added.length}`;
+        const url = URL.createObjectURL(blob);
+        urls.current.push(url);
+        added.push({ id, url, blob });
+        await saveImage({ id, caseKey, step: index, fingerprint: stepsFingerprint(tc.steps), blob });
+      }
+      if (added.length > 0) {
+        setImages((current) => ({ ...current, [index]: [...(current[index] ?? []), ...added] }));
+      }
+    },
+    removeImage: (index, id) => {
+      removeImage(id);
+      setImages((current) => ({ ...current, [index]: (current[index] ?? []).filter((image) => image.id !== id) }));
+    },
+    reset: () => {
+      removeCaseImages(caseKey);
+      setImages({});
+      update(emptyRun(tc));
+    },
   };
+}
+
+/** Images found in a paste or drop, in the order given */
+function imageFiles(list: FileList | null | undefined): File[] {
+  return [...(list ?? [])].filter((file) => file.type.startsWith("image/"));
+}
+
+/**
+ * What the tester saw at a failed step: free text with line breaks, plus screenshots that can be
+ * pasted straight in (the usual way a screenshot is taken), dropped, or picked from a file.
+ */
+function StepNote({ index, run, onNext, onBack }: { index: number; run: CaseRun; onNext: () => void; onBack: () => void }) {
+  const images = run.images[index] ?? [];
+  const full = images.length >= MAX_IMAGES_PER_STEP;
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grows with the text so a few lines never need scrolling inside the box
+  useEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    area.style.height = "auto";
+    area.style.height = `${area.scrollHeight}px`;
+  }, [run.notes[index]]);
+
+  const take = (files: File[]) => {
+    if (files.length > 0 && !full) run.addImages(index, files);
+  };
+
+  return html`
+    <div class="step-note-box">
+      <textarea
+        ref=${areaRef}
+        class="step-note"
+        rows="2"
+        maxlength="2000"
+        placeholder="What did you see? Paste a screenshot here, if you have one (optional)"
+        aria-label=${`Step ${index + 1} failure note`}
+        value=${run.notes[index] ?? ""}
+        onInput=${(e: Event) => run.setNote(index, (e.target as HTMLTextAreaElement).value)}
+        onPaste=${(e: ClipboardEvent) => {
+          const files = imageFiles(e.clipboardData?.files);
+          if (files.length === 0) return;
+          e.preventDefault();
+          take(files);
+        }}
+        onDragOver=${(e: DragEvent) => {
+          if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop=${(e: DragEvent) => {
+          const files = imageFiles(e.dataTransfer?.files);
+          if (files.length === 0) return;
+          e.preventDefault();
+          take(files);
+        }}
+        onKeyDown=${(e: KeyboardEvent) => {
+          if (e.isComposing) return;
+          // Enter is a line break here; Cmd/Ctrl+Enter is how to move on without leaving the keyboard
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onNext();
+          } else if (e.key === "Escape") {
+            e.stopPropagation();
+            onBack();
+          }
+        }}
+      />
+      <div class="step-note-tools">
+        <label class=${"link-btn" + (full ? " link-btn-off" : "")}>
+          Attach image
+          <input
+            class="visually-hidden"
+            type="file"
+            accept="image/*"
+            multiple
+            disabled=${full}
+            onChange=${(e: Event) => {
+              const input = e.target as HTMLInputElement;
+              take(imageFiles(input.files));
+              input.value = "";
+            }}
+          />
+        </label>
+        <span class="step-note-hint">${full ? `${MAX_IMAGES_PER_STEP} images is the most a step can hold. ` : ""}Ctrl/Cmd+Enter: next step</span>
+      </div>
+      ${images.length > 0
+        ? html`<ul class="step-images">
+            ${images.map(
+              (image, n) => html`<li key=${image.id}>
+                <a href=${image.url} target="_blank" rel="noopener" title="Open the full image"><img src=${image.url} alt=${`Screenshot ${n + 1} for step ${index + 1}`} /></a>
+                <button class="image-remove" title="Remove this image" aria-label=${`Remove screenshot ${n + 1}`} onClick=${() => run.removeImage(index, image.id)}>✕</button>
+              </li>`
+            )}
+          </ul>`
+        : null}
+    </div>
+  `;
 }
 
 /**
@@ -446,25 +673,7 @@ function StepsTable({ steps, run }: { steps: Step[]; run: CaseRun | null }) {
             ${run && result === "f"
               ? html`<tr key=${`${i}-note`} role="row" data-step=${i} class=${"step-note-row" + (i % 2 === 1 ? " step-even" : "")}>
                   <td role="cell" colspan="4">
-                    <input
-                      class="step-note"
-                      type="text"
-                      maxlength="500"
-                      placeholder="What did you see? (optional)"
-                      aria-label=${`Step ${i + 1} failure note`}
-                      value=${run.notes[i] ?? ""}
-                      onInput=${(e: Event) => run.setNote(i, (e.target as HTMLInputElement).value)}
-                      onKeyDown=${(e: KeyboardEvent) => {
-                        if (e.isComposing) return;
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          focusNextPass(i, run.results);
-                        } else if (e.key === "Escape") {
-                          e.stopPropagation();
-                          focusIn(`tr.step-row[data-step="${i}"] .result-btn-fail`);
-                        }
-                      }}
-                    />
+                    <${StepNote} index=${i} run=${run} onNext=${() => focusNextPass(i, run.results)} onBack=${() => focusIn(`tr.step-row[data-step="${i}"] .result-btn-fail`)} />
                   </td>
                 </tr>`
               : null}
@@ -490,6 +699,7 @@ function inactiveNote(tc: TestCase): string | null {
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   const run = useCaseRun(tc, useContext(RunContext));
   const outcome = run ? caseOutcome(run.results) : "none";
+  const hasShots = !!run && Object.values(run.images).some((list) => list.length > 0);
   const inactive = isInactive(tc);
   const note = inactiveNote(tc);
   const hasMeta = !!(tc.tags && tc.tags.length > 0) || !!tc.legacy_marker || !!note;
@@ -518,7 +728,12 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           <a class="icon-btn" href=${testCaseHash(tc._tcId)} title="Link to this test case" aria-label="Link to this test case">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
           </a>
-          <${CopyButton} iconOnly=${true} title="Copy this test case as Markdown" getText=${() => testCaseToMarkdown(tc, 3, run)} />
+          <${CopyButton}
+            iconOnly=${true}
+            title=${hasShots ? "Copy this test case with its screenshots" : "Copy this test case as Markdown"}
+            getText=${() => testCaseToMarkdown(tc, 3, run)}
+            getRich=${hasShots && run ? async () => ({ text: testCaseToMarkdown(tc, 3, run), html: await runCaseToHtml(tc, run) }) : undefined}
+          />
         </span>
       </header>
       <div class="test-case-body">
