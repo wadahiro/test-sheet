@@ -1430,8 +1430,11 @@ body {
   cursor: help;
 }
 
-.overview-table td .tag-chip + .tag-chip {
-  margin-left: 4px;
+/* Flex with a gap, not a margin on the next chip: when the chips wrap onto a second line a margin would leave no space between the lines */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
 }
 
 .tag-chip {

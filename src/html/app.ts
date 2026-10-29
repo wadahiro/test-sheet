@@ -904,11 +904,13 @@ function IndexRow({ row, onTag }: { row: IndexRowData; onTag?: (tag: string) => 
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}>${row.status}</span>` : null}</td>
       <td class="overview-nowrap">${row.method}</td>
       <td>
-        ${row.tags.map((tag) =>
-          onTag
-            ? html`<button class="tag-chip" key=${tag} title="Filter by this tag" onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}>${tag}</button>`
-            : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}>${tag}</a>`
-        )}
+        <div class="tag-list">
+          ${row.tags.map((tag) =>
+            onTag
+              ? html`<button class="tag-chip" key=${tag} title="Filter by this tag" onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}>${tag}</button>`
+              : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}>${tag}</a>`
+          )}
+        </div>
       </td>
     </tr>
   `;
