@@ -1225,12 +1225,22 @@ body {
   background: var(--overlay);
 }
 
+/* The controls sit on the image's own top edge rather than the window's corner, where they
+   would be a long way from what is being looked at */
+.lightbox-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
 .lightbox-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  align-self: flex-end;
+  gap: 10px;
 }
+
+.lightbox-count { margin-right: auto; }
 
 .lightbox-count {
   padding: 4px 10px;
@@ -1245,6 +1255,7 @@ body {
   align-items: center;
   gap: 12px;
   min-height: 0;
+  max-width: 100%;
 }
 
 .lightbox-nav {
@@ -1291,7 +1302,7 @@ body {
 
 .lightbox-image {
   max-width: calc(100vw - 150px);
-  max-height: calc(100vh - 90px);
+  max-height: calc(100vh - 100px);
   object-fit: contain;
   border-radius: 4px;
   background: var(--bg);

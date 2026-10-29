@@ -446,16 +446,18 @@ function useLightbox(index: number | null, images: RunImage[], label: (n: number
     document.body.appendChild(host);
     render(
       html`<div class="lightbox" role="dialog" aria-modal="true" aria-label=${label(index)} onClick=${close}>
-        <div class="lightbox-bar" onClick=${(e: Event) => e.stopPropagation()}>
-          ${images.length > 1 ? html`<span class="lightbox-count">${index + 1} / ${images.length}</span>` : null}
-          <a class="lightbox-link" href=${image.url} target="_blank" rel="noopener">Open in a new tab</a>
-          <button class="lightbox-close" title="Close (Esc)" aria-label="Close" onClick=${close}>✕</button>
-        </div>
         <div class="lightbox-stage" onClick=${(e: Event) => e.stopPropagation()}>
           ${images.length > 1
             ? html`<button class="lightbox-nav" title="Previous image (←)" aria-label="Previous image" disabled=${index === 0} onClick=${() => go(index - 1)}>‹</button>`
             : null}
-          <img class="lightbox-image" src=${image.url} alt=${label(index)} />
+          <div class="lightbox-frame">
+            <div class="lightbox-bar">
+              ${images.length > 1 ? html`<span class="lightbox-count">${index + 1} / ${images.length}</span>` : null}
+              <a class="lightbox-link" href=${image.url} target="_blank" rel="noopener">Open in a new tab</a>
+              <button class="lightbox-close" title="Close (Esc)" aria-label="Close" onClick=${close}>✕</button>
+            </div>
+            <img class="lightbox-image" src=${image.url} alt=${label(index)} />
+          </div>
           ${images.length > 1
             ? html`<button class="lightbox-nav" title="Next image (→)" aria-label="Next image" disabled=${index === images.length - 1} onClick=${() => go(index + 1)}>›</button>`
             : null}
