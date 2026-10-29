@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { Marked } from "marked";
 import type { TestSuiteTestCases } from "../testCases";
 import { STYLES } from "./styles";
+import { createCaseMarkdown } from "./caseMarkdown";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -95,7 +96,23 @@ async function renderGuideWithHeadings(
 
 // Notes are often hard-wrapped in the YAML source; Markdown turns a single newline into a soft wrap
 // and a blank line into a paragraph, so the text reflows to the page instead of keeping the source width.
-const notesMarked = new Marked();
+const notesMarked = createCaseMarkdown({ breaks: false });
+// Step cells are short, and a newline there has always meant a new line, so it stays one
+const stepMarked = createCaseMarkdown({ breaks: true });
+
+async function renderTestCase(tc: TestSuiteTestCases["testCases"][number]) {
+  return {
+    ...tc,
+    steps: await Promise.all(
+      (tc.steps ?? []).map(async (step) => ({
+        ...step,
+        actionHtml: await stepMarked.parse(step.action ?? ""),
+        expectedHtml: await stepMarked.parse(step.expected ?? ""),
+      }))
+    ),
+    ...(tc.notes ? { notesHtml: await notesMarked.parse(tc.notes) } : {}),
+  };
+}
 
 export interface GenerateHtmlOptions {
   /** When true, enables WebSocket auto-reload in the browser (server mode only). Set to false for static output. */
@@ -120,9 +137,7 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         featureLabel: suite.featureLabel,
         typeName: suite.metadata.type_name,
         idPrefix,
-        testCases: await Promise.all(
-          suite.testCases.map(async (tc) => (tc.notes ? { ...tc, notesHtml: await notesMarked.parse(tc.notes) } : tc))
-        ),
+        testCases: await Promise.all(suite.testCases.map(renderTestCase)),
         guideHtml,
         guideHeadings,
         /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */

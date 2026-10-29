@@ -10,6 +10,9 @@ const html = htmBind.bind(h);
 interface Step {
   action: string;
   expected: string;
+  /** Markdown-rendered at generation time; the raw fields stay for copy and search */
+  actionHtml: string;
+  expectedHtml: string;
 }
 
 interface Skip {
@@ -248,8 +251,8 @@ function StepsTable({ steps }: { steps: Step[] }) {
           (step, i) => html`
             <tr key=${i}>
               <td>${i + 1}</td>
-              <td>${step.action}</td>
-              <td dangerouslySetInnerHTML=${{ __html: (step.expected || "").replace(/\n/g, "<br>") }} />
+              <td class="step-cell" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
+              <td class="step-cell" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
             </tr>
           `
         )}

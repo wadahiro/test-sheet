@@ -700,6 +700,12 @@ body {
   background: var(--bg-subtle);
 }
 
+/* Rendered Markdown in narrow cells: block margins would pad every cell, and the default list indent wastes width */
+.step-cell > :first-child { margin-top: 0; }
+.step-cell > :last-child { margin-bottom: 0; }
+.step-cell p { margin: 0 0 6px; }
+.step-cell ul, .step-cell ol { margin: 0 0 6px; padding-left: 1.3em; }
+
 .notes {
   display: flex;
   gap: 6px;
