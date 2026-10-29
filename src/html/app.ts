@@ -161,8 +161,8 @@ function formatStepsAsMarkdownTable(steps: Step[]): string {
   const lines = ["| # | Action | Expected |", "|:---:|------|----------|"];
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const action = (step.action || "").replace(/\n/g, "<br>");
-    const expected = (step.expected || "").replace(/\n/g, "<br>").replace(/- /g, "• ");
+    const action = escapeMarkdownCell(step.action || "");
+    const expected = escapeMarkdownCell((step.expected || "").replace(/^(\s*)- /gm, "$1• "));
     lines.push(`| ${i + 1} | ${action} | ${expected} |`);
   }
   return lines.join("\n");
