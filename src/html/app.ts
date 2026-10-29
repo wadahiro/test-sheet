@@ -765,17 +765,20 @@ function ScopePage({
         </span>
         <span class="suite-title-right">
           ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>Read as one page</a>` : null}
-          ${hasGuide
-            ? html`<button
-                class=${"header-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
-                aria-pressed=${guideOpen}
-                title=${guideOpen ? "Hide the guide" : "Show the guide beside the test cases"}
-                onClick=${onToggleGuide}
-              >📖 Guide</button>`
-            : null}
           <span class="suite-title-count">
             ${trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count)} test case(s)
           </span>
+          ${hasGuide
+            ? html`<button
+                class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
+                aria-pressed=${guideOpen}
+                title=${guideOpen ? "Hide the guide" : "Show the guide beside the test cases"}
+                onClick=${onToggleGuide}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+                <span>Guide</span>
+              </button>`
+            : null}
           <${CopyButton}
             title="Copy the listed test cases as Markdown"
             getText=${() => (resolved.toMarkdown && !trimmedQuery ? resolved.toMarkdown() : overviewToMarkdown(visibleRows))}

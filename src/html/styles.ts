@@ -663,11 +663,8 @@ body {
   margin: 0;
 }
 
-.guide-toggle {
-  margin-left: 4px;
-}
-
-.guide-toggle-on {
+.guide-toggle-on,
+.guide-toggle-on:hover {
   background: var(--accent-bg);
   color: var(--accent);
   border-color: var(--accent);
