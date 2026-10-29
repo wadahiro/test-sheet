@@ -418,7 +418,7 @@ body {
  */
 .filter-bar {
   position: sticky;
-  top: calc(var(--header-h) + var(--sticky-h));
+  top: calc(var(--header-h) + var(--sticky-h) + var(--scope-extra, 0px));
   z-index: 11;
   height: var(--filter-h);
   display: flex;
@@ -478,7 +478,7 @@ body {
 }
 
 .scope-table thead th {
-  top: calc(var(--header-h) + var(--sticky-h) + var(--filter-h));
+  top: calc(var(--header-h) + var(--sticky-h) + var(--scope-extra, 0px) + var(--filter-h));
 }
 
 .overview-row {
@@ -598,11 +598,47 @@ body {
  */
 .scope-page {
   --guide-depth: 1;
+  --scope-extra: 0px;
+}
+
+/* The pinned guide bar is one more sticky row above the filter, table header and sections */
+.scope-page-guide {
+  --guide-depth: 2;
+  --scope-extra: var(--sticky-h);
 }
 
 .guide,
 .guide h2 {
   scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * var(--guide-depth, 3));
+}
+
+.guide-bar {
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.guide-toggle:hover {
+  color: var(--fg);
+}
+
+.guide-chevron {
+  width: 1em;
+  text-align: center;
 }
 
 .guide-summary {

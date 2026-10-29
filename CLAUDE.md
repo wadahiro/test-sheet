@@ -18,7 +18,7 @@ domain → feature → test suite → section → test case. Domain and feature 
 
 ## Layout invariants
 
-- Sticky `top` is `--header-h + --sticky-h * level` (`sticky-level-0`..`4`). A new hierarchy level needs a matching rule. A scope page (`ScopePage`) has one sticky header above its cards, so its sections and cards pass `level` 1 and 2, whereas the single long page (`#/all`) stacks 3 and 4; guides follow via `--guide-depth`. Anything else that sticks (`.nav-outline`, a table `thead`) offsets by `--header-h` too, and `.app-header` must keep a fixed height rather than growing with its contents.
+- Sticky `top` is `--header-h + --sticky-h * level` (`sticky-level-0`..`4`). A new hierarchy level needs a matching rule. A scope page (`ScopePage`) has one sticky header above its cards, so its sections and cards pass `level` 1 and 2, whereas the single long page (`#/all`) stacks 3 and 4; a suite page with a guide pins one more row (the guide bar), which `--scope-extra` and `--guide-depth` account for, and its sections and cards move down a level; guides follow via `--guide-depth`. Anything else that sticks (`.nav-outline`, a table `thead`) offsets by `--header-h` too, and `.app-header` must keep a fixed height rather than growing with its contents.
 - `jumpToId` nudges a target down by its own sticky header's `top`; elements without one (guides) use `scroll-margin-top` instead. It also opens ancestor `<details>` before measuring.
 - `.nav-outline` is a flex column and only its `ul` scrolls. New head elements need `flex: 0 0 auto`; the `ul` keeps `min-height: 0`.
 

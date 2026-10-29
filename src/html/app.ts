@@ -737,6 +737,16 @@ function ScopePage({
   query: string;
   onQueryChange: (query: string) => void;
 }) {
+  const guideTargetPrefix = route.scope.kind === "suite" ? `suite-${route.scope.idPrefix}-guide` : null;
+  // Opened up front when the route points into the guide, so its headings exist when the page jumps
+  const [guideOpen, setGuideOpen] = useState(() => guideTargetPrefix !== null && !!route.target?.startsWith(guideTargetPrefix));
+  const guideToggled = useRef(false);
+
+  // Opening from the pinned bar can happen far below the guide, so bring the guide into view
+  useEffect(() => {
+    if (guideOpen && guideToggled.current && guideTargetPrefix) jumpToId(guideTargetPrefix);
+  }, [guideOpen]);
+
   const resolved = resolveScope(route.scope, suites);
   if (!resolved) {
     return html`<p class="empty">Not found. <a href=${OVERVIEW_HASH}>Back to all test cases</a></p>`;
@@ -751,9 +761,10 @@ function ScopePage({
   const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
   const visibleIds = new Set(visibleRows.map((row) => row.tcId));
   const suite = route.scope.kind === "suite" ? resolved.suites[0] : null;
+  const hasGuide = !!suite?.guideHtml;
 
   return html`
-    <section class="overview scope-page" id=${resolved.anchorId}>
+    <section class=${"overview scope-page" + (hasGuide ? " scope-page-guide" : "")} id=${resolved.anchorId}>
       <h2 class="overview-title sticky-header sticky-level-0">
         <span class="suite-title-text">
           ${resolved.ancestors.length > 0 ? html`<span class="scope-crumb">${resolved.ancestors.join(" › ")} › </span>` : null}${resolved.title}
@@ -769,7 +780,16 @@ function ScopePage({
           />
         </span>
       </h2>
-      ${suite ? html`<${SuiteGuide} suite=${suite} />` : null}
+      ${suite && hasGuide
+        ? html`<${GuideBar}
+              open=${guideOpen}
+              onToggle=${() => {
+                guideToggled.current = true;
+                setGuideOpen(!guideOpen);
+              }}
+            />
+            ${guideOpen ? html`<${GuideBody} suite=${suite} />` : null}`
+        : null}
       <div class="scope-table-wrap">
         <div class="filter-bar">
           <input
@@ -785,7 +805,7 @@ function ScopePage({
           : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
       </div>
       ${suite && visibleRows.length > 0
-        ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${1} showIndex=${false} />`
+        ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${hasGuide ? 2 : 1} showIndex=${false} />`
         : null}
     </section>
   `;
@@ -801,6 +821,27 @@ function SuiteGuide({ suite }: { suite: SuitePageData }) {
     <summary class="guide-summary">📖 Guide</summary>
     <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
   </details>`;
+}
+
+/**
+ * A suite page's guide, as a bar that stays pinned under the title plus a body that scrolls away
+ * with the page — a <details> cannot do this, since its summary only sticks within its own box.
+ * Pinned, the guide can be opened from anywhere on the page and closed without scrolling back.
+ */
+function GuideBar({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return html`
+    <div class="guide-bar sticky-header sticky-level-1">
+      <button class="guide-toggle" aria-expanded=${open} onClick=${onToggle}>
+        <span class="guide-chevron">${open ? "▾" : "▸"}</span> 📖 Guide
+      </button>
+    </div>
+  `;
+}
+
+function GuideBody({ suite }: { suite: SuitePageData }) {
+  return html`<div class="guide" id=${guideAnchorId(suite.idPrefix)}>
+    <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
+  </div>`;
 }
 
 /** The suite's sections and their cards. `level` is the sections' own sticky level; cards sit one below. */
@@ -1713,7 +1754,7 @@ function App() {
             ? domains.length === 0
               ? html`<p class="empty">No testcases.yaml files found.</p>`
               : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
-            : html`<${ScopePage} route=${route} suites=${suites} rows=${overviewRows} query=${query} onQueryChange=${setQuery} />`}
+            : html`<${ScopePage} key=${route.hash} route=${route} suites=${suites} rows=${overviewRows} query=${query} onQueryChange=${setQuery} />`}
         </div>
       </div>
       ${paletteOpen
