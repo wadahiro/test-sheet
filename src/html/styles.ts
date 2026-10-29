@@ -1366,16 +1366,17 @@ body {
   clip: rect(0 0 0 0);
 }
 
-/* A caveat for whoever runs the case, so it gets a callout rather than muted small print */
+/* A caveat for whoever runs the case, so it gets a callout rather than muted small print. Amber,
+   not the accent blue: run mode marks the current step with a blue edge, and the two must not read alike */
 .notes {
   padding: 8px 12px;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--warn);
   border-radius: 0 4px 4px 0;
   background: var(--bg-subtle);
   font-size: 0.875rem;
 }
 
-.notes .eyebrow { margin-bottom: 2px; }
+.notes .eyebrow { margin-bottom: 2px; color: var(--warn); }
 .notes-body { min-width: 0; }
 .notes-body > :first-child { margin-top: 0; }
 .notes-body > :last-child { margin-bottom: 0; }
