@@ -7,7 +7,7 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - Manage test cases as YAML — no hand-written Markdown
 - Navigate a domain → feature → test suite → section → test case hierarchy
 - Click a domain, feature or test suite to see a table of every case under it; a suite also lists its cases in full below the table
-- Full-text search in a command palette (Cmd+K / Ctrl+K), and a filter on every table
+- Full-text search in a command palette (Cmd+K / Ctrl+K), and a filter on every table; the filter is kept in the address (`?q=`), so a filtered list can be bookmarked or shared and Back returns to it
 - Resizable, collapsible side nav; a docked guide panel to read beside the cases
 - A Run mode toggle in the header adds Pass / Fail buttons to every step: the first unmarked step is highlighted, a failed step takes a note with line breaks and pasted (or dropped, or attached) screenshots, each case gets a PASS / FAIL chip, and copying a case as Markdown includes the results. Markdown cannot carry an image that issue trackers will show (they drop embedded `data:` images, including from a rich-text paste), so the copy marks where each screenshot goes, and each screenshot has Copy image and Download buttons: copy it and paste it at the mark, and the tracker uploads it. Results stay in this browser only; they are a working record, not a test report
 - Each case shows its preconditions, test data, steps and note; a suite page hides the cards of obsolete, superseded and skipped cases by default (they stay in the table)

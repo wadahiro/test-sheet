@@ -844,7 +844,9 @@ function CountLabel({ testCases }: { testCases: TestCase[] }) {
 
 /** Selecting the current target again fires no hashchange, so jump directly in that case */
 function goToTestCase(tcId: string) {
-  const next = testCaseHash(tcId);
+  // The case's address carries the filter it was reached through, so the list stays as it was
+  const filter = location.hash.split("?")[1];
+  const next = testCaseHash(tcId) + (filter ? `?${filter}` : "");
   if (location.hash === next) jumpToId(testCaseAnchorId(tcId));
   else location.hash = next;
 }
@@ -1908,7 +1910,7 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
     const suite = suites.find((candidate) => candidate.testCases.some((tc) => testCaseAnchorId(tc._tcId) === anchor));
     // An unknown id falls back to searching for it rather than to a blank page
     if (!suite) return { ...landing, query: segments[1] };
-    return { ...landing, scope: { kind: "suite", idPrefix: suite.idPrefix }, target: anchor, query: "" };
+    return { ...landing, scope: { kind: "suite", idPrefix: suite.idPrefix }, target: anchor };
   }
   return landing;
 }
@@ -2369,8 +2371,13 @@ function AppHeader({
   `;
 }
 
-function scopeKey(route: Route): string {
-  return `${route.mode}:${JSON.stringify(route.scope)}`;
+/** How long after the last keystroke the filter is written to the address */
+const FILTER_URL_DELAY_MS = 300;
+
+/** The same address with its `?q=` replaced (or dropped, for an empty filter) */
+function hashWithQuery(hash: string, text: string): string {
+  const base = hash.split("?")[0];
+  return text.trim() === "" ? base : `${base}?q=${encodeURIComponent(text)}`;
 }
 
 /** Command-palette entries for the two page-wide views, which have no outline entry of their own */
@@ -2402,12 +2409,30 @@ function App() {
    * Local so typing in the filter box does not push a history entry per keystroke.
    * The route only seeds it — see the effect below.
    */
-  const [filter, setFilter] = useState({ scope: scopeKey(route), text: route.query });
-  // Derived from the route: a page the filter was not typed on starts from the route's own query.
-  // Resetting it in an effect would let the new page render once with the old page's filter, which
-  // can hide the very case being opened or rebuild the list under the jump to it.
-  const query = filter.scope === scopeKey(route) ? filter.text : route.query;
-  const setQuery = useCallback((text: string) => setFilter({ scope: scopeKey(route), text }), [route.hash]);
+  /**
+   * The filter lives in the URL (`?q=`), so a filtered list can be bookmarked or sent, and Back
+   * returns to it as it was. Typing shows at once and reaches the address a moment later, replacing
+   * the current entry rather than adding one per keystroke.
+   */
+  const [typed, setTyped] = useState<{ hash: string; text: string } | null>(null);
+  // Derived: a page reached by navigating starts from its own address, never another page's text
+  const query = typed && typed.hash === route.hash ? typed.text : route.query;
+  const ownHash = useRef<string | null>(null);
+  const urlTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const setQuery = useCallback(
+    (text: string) => {
+      setTyped({ hash: route.hash, text });
+      clearTimeout(urlTimer.current);
+      urlTimer.current = setTimeout(() => {
+        const next = hashWithQuery(location.hash, text);
+        if (next === location.hash) return;
+        // replace, not assign: no history entry per edit. The hashchange it raises is ours to ignore.
+        ownHash.current = next;
+        location.replace(next);
+      }, FILTER_URL_DELAY_MS);
+    },
+    [route.hash]
+  );
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
   const [runModeOn, setRunModeOn] = useState(readRunMode);
@@ -2436,6 +2461,10 @@ function App() {
 
   useEffect(() => {
     function onHashChange() {
+      if (ownHash.current === location.hash) {
+        ownHash.current = null;
+        return;
+      }
       setRoute(parseRoute(location.hash, suites));
     }
     window.addEventListener("hashchange", onHashChange);
@@ -2446,25 +2475,16 @@ function App() {
     if (pageGuideSuite) setLastGuideId(pageGuideSuite.idPrefix);
   }, [pageGuideSuite?.idPrefix]);
 
-  // Runs after the new page is in the DOM, so the scroll target exists. Moving to another page, or
-  // to the page itself, drops the previous filter in favour of the route's own; going to a case or
-  // section within the same page keeps it, so opening a case from a filtered table does not rebuild
-  // the list under the jump. Opening the
-  // guide says nothing about the filter either.
-  const lastScope = useRef(scopeKey(route));
+  // Runs after the new page is in the DOM, so the scroll target exists
   const jumpAfterRender = useRef<Route | null>(null);
   useEffect(() => {
-    const sameScope = lastScope.current === scopeKey(route);
-    lastScope.current = scopeKey(route);
     if (routeTargetsGuide) {
       setGuideOpen(true);
       writeGuideOpen(true);
-    } else if (!sameScope || !route.target || route.query) {
-      setQuery(route.query);
     }
     // A target the filter has hidden (say, from the palette) is not in the DOM: clear the filter
     // and jump once the full list is there
-    if (route.target && !document.getElementById(route.target) && sameScope && !routeTargetsGuide && query.trim() !== "") {
+    if (route.target && !document.getElementById(route.target) && !routeTargetsGuide && query.trim() !== "") {
       jumpAfterRender.current = route;
       setQuery("");
       return;
@@ -2484,8 +2504,7 @@ function App() {
       // Selecting the page already shown fires no hashchange, so apply its effects directly
       if (location.hash === entry.hash) {
         const same = parseRoute(entry.hash, suites);
-        // Re-selecting a case or a guide must not disturb the filter; re-selecting a page resets it
-        if (!same.target) setQuery(same.query);
+        setQuery(same.query);
         scrollToRoute(same);
       } else {
         location.hash = entry.hash;
