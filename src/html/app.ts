@@ -289,7 +289,7 @@ function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
             ${tc.tags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title="Show test cases matching this tag in the Overview">${tag}</a>`)}
           </div>`
         : null}
-      ${tc.legacy_marker ? html`<div class="legacy-marker">元の表記: ${tc.legacy_marker}</div>` : null}
+      ${tc.legacy_marker ? html`<div class="legacy-marker">Original marker: ${tc.legacy_marker}</div>` : null}
       ${tc.preconditions && tc.preconditions.length > 0
         ? html`<div class="preconditions">
             <strong>Preconditions:</strong>
@@ -316,6 +316,62 @@ function CountLabel({ testCases }: { testCases: TestCase[] }) {
   return activeCount === total ? html`${total}` : html`${activeCount} <span class="count-total">(${total})</span>`;
 }
 
+/** Selecting the current target again fires no hashchange, so jump directly in that case */
+function goToTestCase(tcId: string) {
+  const next = `#/tc/${tcId}`;
+  if (location.hash === next) jumpToId(testCaseAnchorId(tcId));
+  else location.hash = next;
+}
+
+/** Why a case is out of active coverage, as a short label; null for an active case */
+function statusLabel(tc: TestCase): string | null {
+  if (tc.status === "obsolete") return "obsolete";
+  if (tc.status === "superseded") return tc.superseded_by ? `superseded \u2192 ${tc.superseded_by}` : "superseded";
+  if (tc.skip) return tc.skip.until ? `skip (until ${tc.skip.until})` : "skip";
+  return null;
+}
+
+/** How the case is run; an unset `automation` means a person runs it by hand */
+function testMethod(tc: TestCase): string {
+  return tc.automation ?? "manual";
+}
+
+/**
+ * Compact table of a section's cases, ahead of the full cards. The sidebar no longer lists
+ * cases, so this is where a reader scans a section and picks one to read.
+ */
+function SectionIndex({ testCases }: { testCases: TestCase[] }) {
+  return html`
+    <table class="overview-table section-index">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Status</th><th>Method</th><th>Tags</th></tr>
+      </thead>
+      <tbody>
+        ${testCases.map((tc) => {
+          const status = statusLabel(tc);
+          return html`
+            <tr key=${tc._tcId} class=${isInactive(tc) ? "row-inactive" : ""} onClick=${() => goToTestCase(tc._tcId)}>
+              <td class="overview-id">
+                <button
+                  class="overview-link"
+                  onClick=${(e: Event) => {
+                    e.stopPropagation();
+                    goToTestCase(tc._tcId);
+                  }}
+                >${tc._tcId}</button>
+              </td>
+              <td class="overview-name">${tc.name}</td>
+              <td class="overview-status">${status ? html`<span class="status-lozenge" title=${tc.reason ?? tc.skip?.reason ?? ""}>${status}</span>` : null}</td>
+              <td class="overview-nowrap">${testMethod(tc)}</td>
+              <td>${(tc.tags ?? []).map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}>${tag}</a>`)}</td>
+            </tr>
+          `;
+        })}
+      </tbody>
+    </table>
+  `;
+}
+
 function CategorySection({ idPrefix, category, testCases }: { idPrefix: string; category: string; testCases: TestCase[] }) {
   return html`
     <section class="category-section" id=${categoryAnchorId(idPrefix, category)}>
@@ -326,6 +382,7 @@ function CategorySection({ idPrefix, category, testCases }: { idPrefix: string; 
           <${CopyButton} title="Copy this section as Markdown" getText=${() => categoryToMarkdown(category, testCases)} />
         </div>
       </div>
+      <${SectionIndex} testCases=${testCases} />
       ${testCases.map((tc) => html`<${TestCaseCard} key=${tc._tcId} tc=${tc} idPrefix=${idPrefix} />`)}
     </section>
   `;
@@ -412,6 +469,9 @@ interface OverviewRow {
   tcId: string;
   anchorId: string;
   name: string;
+  status: string | null;
+  method: string;
+  inactive: boolean;
   tags: string[];
   labels: Record<OverviewLevel, string>;
   /**
@@ -450,6 +510,9 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               tcId: tc._tcId,
               anchorId: testCaseAnchorId(tc._tcId),
               name: tc.name,
+              status: statusLabel(tc),
+              method: testMethod(tc),
+              inactive: isInactive(tc),
               tags: tc.tags ?? [],
               labels,
               keys,
@@ -464,7 +527,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
 
 /** Everything shown in the row, so the filter matches exactly what the reader can see */
 function overviewRowSearchText(row: OverviewRow): string {
-  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, ...row.tags].join(" ");
+  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, ...row.tags].join(" ");
 }
 
 function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
@@ -474,7 +537,7 @@ function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
 }
 
 /** Column headings, shared by the rendered table and the Markdown export so they cannot drift */
-const OVERVIEW_COLUMNS = ["ID", "Domain", "Feature", "Test Suite", "Section", "Name"];
+const OVERVIEW_COLUMNS = ["ID", "Domain", "Feature", "Test Suite", "Section", "Name", "Status", "Method", "Tags"];
 
 function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
@@ -492,8 +555,14 @@ function overviewToMarkdown(rows: OverviewRow[]): string {
     `|${OVERVIEW_COLUMNS.map(() => "---").join("|")}|`,
   ];
   for (const row of rows) {
-    const name = row.tags.length > 0 ? `${row.name} [${row.tags.join(", ")}]` : row.name;
-    const cells = [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), name];
+    const cells = [
+      row.tcId,
+      ...OVERVIEW_LEVELS.map((level) => row.labels[level]),
+      row.name,
+      row.status ?? "",
+      row.method,
+      row.tags.join(", "),
+    ];
     lines.push(`| ${cells.map(escapeMarkdownCell).join(" | ")} |`);
   }
   return lines.join("\n");
@@ -553,7 +622,7 @@ function OverviewTable({
         <tbody>
           ${visibleRows.map(
             (row, i) => html`
-              <tr key=${row.tcId} class="overview-row" onClick=${() => onSelect(row.anchorId)}>
+              <tr key=${row.tcId} class=${"overview-row" + (row.inactive ? " row-inactive" : "")} onClick=${() => onSelect(row.anchorId)}>
                 <td class="overview-id">
                   <button
                     class="overview-link"
@@ -575,11 +644,13 @@ function OverviewTable({
                     </td>
                   `;
                 })}
+                <td class="overview-name">${row.name}</td>
+                <td class="overview-status">${row.status ? html`<span class="status-lozenge">${row.status}</span>` : null}</td>
+                <td class="overview-nowrap">${row.method}</td>
                 <td>
-                  ${row.name}
                   ${row.tags.map(
                     (tag) => html`<button
-                      class="tag-chip tag-chip-inline"
+                      class="tag-chip"
                       key=${tag}
                       title="Filter by this tag"
                       onClick=${(e: Event) => {
@@ -691,7 +762,7 @@ function DomainSection({ group }: { group: DomainGroup }) {
       <h2 class="domain-title sticky-header sticky-level-0">
         <span class="suite-title-text">${group.domainLabel}</span>
         <span class="suite-title-right">
-          <span class="suite-title-count">${domainTestCaseCount(group)}</span>
+          <span class="suite-title-count">${formatCaseCount(domainTestCaseCount(group))}</span>
           <${CopyButton} title="Copy this domain as Markdown" getText=${() => domainToMarkdown(group)} />
         </span>
       </h2>
@@ -710,6 +781,8 @@ interface NavEntry {
   /** Breadcrumb shown in the command palette (e.g. "web › Login › Basic flow"). Undefined for domains. */
   breadcrumb?: string;
   count?: number;
+  /** Anchor of the suite this guide/section/case belongs to, so the outline can open just the active suite */
+  suiteId?: string;
 }
 
 const KIND_LABEL: Record<NavEntry["kind"], string> = {
@@ -742,7 +815,7 @@ function testCaseSearchText(tc: TestCase): string {
 type GuideDetail = "collapsed" | "headings";
 
 /** Flattens every test suite into domain -> feature -> suite -> guide -> section -> test case navigation entries */
-function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): NavEntry[] {
+function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, includeTestCases: boolean): NavEntry[] {
   const entries: NavEntry[] = [];
   const domains = groupByDomainAndFeature(suites);
 
@@ -773,6 +846,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
           breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
           count: suite.testCases.length,
         });
+        const suiteId = suiteAnchorId(suite.idPrefix);
         const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
         if (guideDetail === "collapsed") {
           // Keyed off guideHtml, not guideHeadings: a guide with no h2 still needs an entry
@@ -783,6 +857,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               label: "Guide",
               searchText: `${suite.idPrefix} guide ${suite.guideText}`,
               breadcrumb: guideBreadcrumb,
+              suiteId,
             });
           }
         } else {
@@ -793,6 +868,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               label: heading.text,
               searchText: `${suite.idPrefix} ${heading.text} ${heading.body}`,
               breadcrumb: guideBreadcrumb,
+              suiteId,
             });
           }
         }
@@ -805,7 +881,9 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
             searchText: `${suite.idPrefix} ${category}`,
             breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`,
             count: cases.length,
+            suiteId,
           });
+          if (!includeTestCases) continue;
           for (const tc of cases) {
             entries.push({
               kind: "testcase",
@@ -813,6 +891,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail): Nav
               label: `${tc._tcId}: ${tc.name}`,
               searchText: testCaseSearchText(tc),
               breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName} › ${category}`,
+              suiteId,
             });
           }
         }
@@ -832,14 +911,16 @@ function entryKindClass(kind: NavEntry["kind"]): string {
   return "nav-outline-testcase";
 }
 
-function matchesQuery(entry: NavEntry, query: string): boolean {
-  return entry.searchText.toLowerCase().includes(query.toLowerCase());
+/** Suites are always listed; a suite's guide and sections only while it is the one being read */
+function isEntryVisible(entry: NavEntry, activeSuiteId: string | null): boolean {
+  return entry.suiteId === undefined || entry.suiteId === activeSuiteId;
 }
 
 /**
- * Left-side navigation spanning every test suite.
+ * Left-side navigation: the structure map (domain -> feature -> suite, plus the sections of the
+ * suite being read). Individual test cases are deliberately absent — hundreds of them made the
+ * outline unreadable. Sections list their cases in a table, and the command palette searches them.
  * - Click to jump; the current position is highlighted based on scroll position.
- * - Typing in the search box filters to matching entries (suite/section/test case).
  */
 function NavOutline({
   suites,
@@ -852,10 +933,10 @@ function NavOutline({
   onNavigate: (id: string, kind: NavEntry["kind"]) => void;
   onSetView: (view: RouteView) => void;
 }) {
-  const entries = buildNavEntries(suites, "collapsed");
+  const entries = buildNavEntries(suites, "collapsed", false);
   const [currentId, setCurrentId] = useState<string | null>(entries[0]?.id ?? null);
-  const [query, setQuery] = useState("");
   const suppressUntil = useRef(0);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     function compute() {
@@ -883,6 +964,17 @@ function NavOutline({
     };
   }, [suites, view]);
 
+  // Scrolls the list itself, not the page: scrollIntoView would also move the window
+  useEffect(() => {
+    const list = listRef.current;
+    const current = list?.querySelector<HTMLElement>(".nav-outline-current");
+    if (!list || !current) return;
+    const listBox = list.getBoundingClientRect();
+    const box = current.getBoundingClientRect();
+    if (box.top < listBox.top) list.scrollTop -= listBox.top - box.top;
+    else if (box.bottom > listBox.bottom) list.scrollTop += box.bottom - listBox.bottom;
+  }, [currentId, view]);
+
   const onJump = useCallback(
     (entry: NavEntry) => {
       setCurrentId(entry.id);
@@ -893,8 +985,9 @@ function NavOutline({
     [onNavigate]
   );
 
-  const trimmedQuery = query.trim();
-  const visibleEntries = trimmedQuery ? entries.filter((e) => matchesQuery(e, trimmedQuery)) : entries;
+  const currentEntry = entries.find((e) => e.id === currentId);
+  const activeSuiteId = currentEntry?.kind === "suite" ? currentEntry.id : (currentEntry?.suiteId ?? null);
+  const visibleEntries = entries.filter((e) => isEntryVisible(e, activeSuiteId));
 
   return html`
     <nav class="nav-outline">
@@ -913,27 +1006,20 @@ function NavOutline({
         </button>
       </div>
       <div class="nav-outline-title">Test Cases</div>
-      <input
-        class="nav-search"
-        type="search"
-        placeholder="🔍 Search test suites, sections, test cases"
-        value=${query}
-        onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-      />
-      <ul>
+      <ul ref=${listRef}>
         ${visibleEntries.map(
           (entry) => html`
             <li key=${entry.id} class=${entryKindClass(entry.kind)}>
               <button
                 class=${"nav-outline-item" + (view === "detail" && entry.id === currentId ? " nav-outline-current" : "")}
+                title=${entry.label}
                 onClick=${() => onJump(entry)}
               >
-                ${entry.label}${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
+                <span class="nav-label">${entry.label}</span>${entry.count !== undefined ? html`<span class="count">(${entry.count})</span>` : null}
               </button>
             </li>
           `
         )}
-        ${trimmedQuery && visibleEntries.length === 0 ? html`<li class="nav-empty">No matches</li>` : null}
       </ul>
     </nav>
   `;
@@ -1174,12 +1260,48 @@ function ThemeToggle() {
   `;
 }
 
-function AppHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
+const NAV_COLLAPSED_STORAGE_KEY = "test-sheet-nav-collapsed";
+
+function readNavCollapsed(): boolean {
+  try {
+    return localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeNavCollapsed(collapsed: boolean) {
+  try {
+    localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // Blocked storage (e.g. over file://) just means the choice is not remembered
+  }
+}
+
+function AppHeader({
+  onOpenPalette,
+  navCollapsed,
+  onToggleNav,
+}: {
+  onOpenPalette: () => void;
+  navCollapsed: boolean;
+  onToggleNav: () => void;
+}) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
 
   return html`
     <header class="app-header">
-      <span class="app-header-title">Test Cases</span>
+      <div class="app-header-lead">
+        <button
+          class="header-btn header-btn-icon"
+          title=${navCollapsed ? "Show navigation" : "Hide navigation"}
+          aria-pressed=${navCollapsed}
+          onClick=${onToggleNav}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
+        </button>
+        <span class="app-header-title">Test Cases</span>
+      </div>
       <div class="app-header-actions">
         <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
@@ -1195,8 +1317,9 @@ function AppHeader({ onOpenPalette }: { onOpenPalette: () => void }) {
 function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
-  const entries = buildNavEntries(suites, "headings");
+  const entries = buildNavEntries(suites, "headings", true);
   const overviewRows = buildOverviewRows(suites);
   /**
    * Local so typing in the overview's filter box does not push a history entry per keystroke.
@@ -1269,12 +1392,19 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const toggleNav = useCallback(() => {
+    setNavCollapsed((collapsed) => {
+      writeNavCollapsed(!collapsed);
+      return !collapsed;
+    });
+  }, []);
+
   const domains = groupByDomainAndFeature(suites);
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} />
-      <div class="layout">
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} />
+      <div class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}>
         <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} />
         <div class="app">
           ${route.view === "overview"

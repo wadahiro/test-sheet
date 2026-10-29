@@ -15,6 +15,7 @@ const DARK_THEME_VARS = `
   --success: #3fb950;
   --overlay: rgba(1, 4, 9, 0.7);
   --flash: #4d3800;
+  --inactive-bg: #262c36;
 `;
 
 export const STYLES = `
@@ -34,6 +35,7 @@ export const STYLES = `
   --success: #1a7f37;
   --overlay: rgba(15, 23, 42, 0.45);
   --flash: #fff2ba;
+  --inactive-bg: #eceff2;
   --header-h: 48px;
   --sticky-h: 44px;
 }
@@ -78,6 +80,13 @@ body {
   padding: 0 16px;
   background: var(--bg-subtle);
   border-bottom: 1px solid var(--border);
+}
+
+.app-header-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .app-header-title {
@@ -133,10 +142,14 @@ body {
   align-items: flex-start;
 }
 
+.layout-nav-collapsed .nav-outline {
+  display: none;
+}
+
 /*
- * A column whose head (view toggle, title, search) stays put while only the entry list
- * scrolls — the search box is how you get back to the top of a long outline, so it must not
- * be the first thing that scrolls away.
+ * A column whose head (view toggle, title) stays put while only the entry list
+ * scrolls — the view toggle is how you leave the outline, so it must not be the first thing
+ * that scrolls away.
  */
 .nav-outline {
   position: sticky;
@@ -154,8 +167,7 @@ body {
 
 /* The three pinned rows: they must keep their height rather than shrink to fit the list */
 .view-toggle,
-.nav-outline-title,
-.nav-search {
+.nav-outline-title {
   flex: 0 0 auto;
 }
 
@@ -199,29 +211,6 @@ body {
   padding: 0 8px 8px;
 }
 
-.nav-search {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 10px;
-  margin-bottom: 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.nav-search:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-
-.nav-empty {
-  color: var(--fg-muted);
-  font-size: 0.85rem;
-  padding: 6px 8px;
-}
-
 .nav-outline ul {
   list-style: none;
   margin: 0;
@@ -234,7 +223,9 @@ body {
 }
 
 .nav-outline-item {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   width: 100%;
   text-align: left;
   border: none;
@@ -256,7 +247,17 @@ body {
   font-weight: 600;
 }
 
+/* One line per entry: the label gives way (ellipsis, full text in the title) before the count does */
+.nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nav-outline-item .count {
+  flex: 0 0 auto;
   color: var(--fg-muted);
   font-weight: normal;
 }
@@ -299,12 +300,6 @@ body {
 .nav-outline-category .nav-outline-item {
   padding-left: 36px;
   font-weight: 600;
-}
-
-.nav-outline-testcase .nav-outline-item {
-  padding-left: 48px;
-  font-size: 0.8rem;
-  color: var(--fg-muted);
 }
 
 .app {
@@ -489,14 +484,59 @@ body {
   white-space: nowrap;
 }
 
+/* Wrapping (rather than nowrap) with a cap: with Status/Method/Tags beside it, long suite names
+   would otherwise squeeze Name into a sliver and push the table past the page width */
 .overview-hier {
-  white-space: nowrap;
+  max-width: 9rem;
+  overflow-wrap: break-word;
+}
+
+.overview-name {
+  min-width: 12rem;
+}
+
+.overview-status {
+  max-width: 9rem;
 }
 
 /* Repeated hierarchy values are kept (not merged) so each row reads standalone, but dimmed
    far enough that the eye still picks out where a group starts */
 .overview-repeat {
   color: var(--fg-faint);
+}
+
+.overview-nowrap {
+  white-space: nowrap;
+}
+
+.section-index {
+  margin: 0 0 16px;
+}
+
+.section-index tbody tr {
+  cursor: pointer;
+}
+
+.section-index tbody tr:hover {
+  background: var(--bg-subtle);
+}
+
+/* A filled row rather than reduced opacity, so struck-off cases stay as legible as active ones */
+.row-inactive td {
+  background: var(--inactive-bg);
+}
+
+.status-lozenge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .overview-link {
@@ -757,6 +797,10 @@ body {
   margin-top: 4px;
 }
 
+.overview-table td .tag-chip + .tag-chip {
+  margin-left: 4px;
+}
+
 .tag-chip {
   padding: 1px 8px;
   border: 1px solid var(--border);
@@ -773,11 +817,6 @@ body {
 .tag-chip:hover {
   color: var(--accent);
   border-color: var(--accent);
-}
-
-.tag-chip-inline {
-  margin-left: 6px;
-  vertical-align: middle;
 }
 
 .legacy-marker {
