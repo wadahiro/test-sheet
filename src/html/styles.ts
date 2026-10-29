@@ -37,6 +37,7 @@ export const STYLES = `
   --flash: #fff2ba;
   --inactive-bg: #eceff2;
   --header-h: 48px;
+  --nav-w: 240px;
   --sticky-h: 44px;
 }
 
@@ -142,6 +143,26 @@ body {
   align-items: flex-start;
 }
 
+.nav-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  /* Pointer drags would otherwise scroll the page or select text on touch/trackpad gestures */
+  touch-action: none;
+  z-index: 20;
+}
+
+.nav-resizer:hover,
+.nav-resizer.nav-resizer-active,
+.nav-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.5;
+  outline: none;
+}
+
 .layout-nav-collapsed .nav-outline {
   display: none;
 }
@@ -154,8 +175,8 @@ body {
 .nav-outline {
   position: sticky;
   top: var(--header-h);
-  flex: 0 0 240px;
-  width: 240px;
+  flex: 0 0 var(--nav-w);
+  width: var(--nav-w);
   height: calc(100vh - var(--header-h));
   display: flex;
   flex-direction: column;
@@ -722,10 +743,20 @@ body {
   padding-left: 20px;
 }
 
+/* Fixed layout so every case's table shares the same column edges as they stack down the page;
+   with auto layout each table sized itself to its own content, and the grid jumped between cases */
 .steps-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.9rem;
+}
+
+.steps-table .col-step-no { width: 3rem; }
+.steps-table .col-step-action { width: 40%; }
+
+.steps-table td {
+  overflow-wrap: break-word;
 }
 
 .steps-table th,

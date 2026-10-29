@@ -247,6 +247,11 @@ function CopyButton({ getText, title }: { getText: () => string; title: string }
 function StepsTable({ steps }: { steps: Step[] }) {
   return html`
     <table class="steps-table">
+      <colgroup>
+        <col class="col-step-no" />
+        <col class="col-step-action" />
+        <col />
+      </colgroup>
       <thead>
         <tr><th>#</th><th>Action</th><th>Expected</th></tr>
       </thead>
@@ -927,11 +932,15 @@ function NavOutline({
   view,
   onNavigate,
   onSetView,
+  width,
+  onResize,
 }: {
   suites: SuitePageData[];
   view: RouteView;
   onNavigate: (id: string, kind: NavEntry["kind"]) => void;
   onSetView: (view: RouteView) => void;
+  width: number;
+  onResize: (width: number) => void;
 }) {
   const entries = buildNavEntries(suites, "collapsed", false);
   const [currentId, setCurrentId] = useState<string | null>(entries[0]?.id ?? null);
@@ -1021,6 +1030,7 @@ function NavOutline({
           `
         )}
       </ul>
+      <${NavResizer} width=${width} onResize=${onResize} />
     </nav>
   `;
 }
@@ -1278,6 +1288,74 @@ function writeNavCollapsed(collapsed: boolean) {
   }
 }
 
+const NAV_WIDTH_STORAGE_KEY = "test-sheet-nav-width";
+const NAV_WIDTH_DEFAULT = 240;
+const NAV_WIDTH_MIN = 200;
+const NAV_WIDTH_MAX = 640;
+const NAV_WIDTH_KEY_STEP = 16;
+
+function clampNavWidth(width: number): number {
+  return Math.min(NAV_WIDTH_MAX, Math.max(NAV_WIDTH_MIN, Math.round(width)));
+}
+
+function readNavWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(NAV_WIDTH_STORAGE_KEY));
+    return stored > 0 ? clampNavWidth(stored) : NAV_WIDTH_DEFAULT;
+  } catch {
+    return NAV_WIDTH_DEFAULT;
+  }
+}
+
+function writeNavWidth(width: number) {
+  try {
+    localStorage.setItem(NAV_WIDTH_STORAGE_KEY, String(width));
+  } catch {
+    // Blocked storage (e.g. over file://) just means the width is not remembered
+  }
+}
+
+/** Drag handle on the sidebar's right edge. Arrow keys resize too, and a double click restores the default. */
+function NavResizer({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+  const [dragging, setDragging] = useState(false);
+
+  const onPointerDown = (e: PointerEvent) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setDragging(true);
+    e.preventDefault();
+  };
+  const onPointerMove = (e: PointerEvent) => {
+    if (!dragging) return;
+    // The sidebar starts at the viewport's left edge, so the pointer's x is the new width
+    onResize(clampNavWidth(e.clientX));
+  };
+  const onPointerUp = () => setDragging(false);
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "ArrowLeft") onResize(clampNavWidth(width - NAV_WIDTH_KEY_STEP));
+    else if (e.key === "ArrowRight") onResize(clampNavWidth(width + NAV_WIDTH_KEY_STEP));
+    else return;
+    e.preventDefault();
+  };
+
+  return html`<div
+    class=${"nav-resizer" + (dragging ? " nav-resizer-active" : "")}
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize navigation"
+    aria-valuemin=${NAV_WIDTH_MIN}
+    aria-valuemax=${NAV_WIDTH_MAX}
+    aria-valuenow=${width}
+    tabindex="0"
+    title="Drag to resize (double-click to reset)"
+    onPointerDown=${onPointerDown}
+    onPointerMove=${onPointerMove}
+    onPointerUp=${onPointerUp}
+    onPointerCancel=${onPointerUp}
+    onKeyDown=${onKeyDown}
+    onDblClick=${() => onResize(NAV_WIDTH_DEFAULT)}
+  />`;
+}
+
 function AppHeader({
   onOpenPalette,
   navCollapsed,
@@ -1318,6 +1396,7 @@ function App() {
   const suites = window.__SUITES__;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
+  const [navWidth, setNavWidth] = useState(readNavWidth);
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const entries = buildNavEntries(suites, "headings", true);
   const overviewRows = buildOverviewRows(suites);
@@ -1392,6 +1471,11 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const resizeNav = useCallback((width: number) => {
+    setNavWidth(width);
+    writeNavWidth(width);
+  }, []);
+
   const toggleNav = useCallback(() => {
     setNavCollapsed((collapsed) => {
       writeNavCollapsed(!collapsed);
@@ -1404,8 +1488,8 @@ function App() {
   return html`
     <div>
       <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} />
-      <div class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}>
-        <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} />
+      <div class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")} style=${{ "--nav-w": `${navWidth}px` }}>
+        <${NavOutline} suites=${suites} view=${route.view} onNavigate=${navigate} onSetView=${setView} width=${navWidth} onResize=${resizeNav} />
         <div class="app">
           ${route.view === "overview"
             ? html`<${OverviewTable}
