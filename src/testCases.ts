@@ -159,6 +159,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
     const pt = ptRaw as Record<string, unknown>;
     const category = pt.category as string | undefined;
     const idPrefix = (pt.id_prefix as string | undefined) ?? "";
+    const entryTags = pt.tags;
     const preconditions = pt.preconditions as unknown[] | undefined;
     const patterns = pt.patterns as Array<Record<string, unknown>>;
     const template = pt.template as Record<string, unknown>;
@@ -208,7 +209,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         steps,
         notes: (notes as string) || null,
         id: hasId ? tcId : undefined,
-        tags: mergeTags(template.tags, patternTags),
+        tags: mergeTags(entryTags, template.tags, patternTags),
       });
     }
   }

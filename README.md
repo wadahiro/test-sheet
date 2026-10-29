@@ -98,8 +98,8 @@ and shown in the Overview, where clicking one filters the list. The filter is a 
 so a short tag also matches names that contain it.
 
 To tag every case in a suite, put `tags` under `metadata`; each case gets those tags in addition
-to its own. In `parameterized_tests`, a template's `tags` and a pattern's `tags` are both added to
-each case the pattern expands to, so patterns can differ in tags while sharing one template.
+to its own. In `parameterized_tests`, the entry's own `tags` (next to `category` and `id_prefix`), the template's
+`tags` and a pattern's `tags` are all added to each case the pattern expands to, so patterns can differ in tags while sharing one template.
 
 ```yaml
 metadata:
@@ -108,6 +108,7 @@ metadata:
   tags: [login]
 parameterized_tests:
   - id_prefix: LOGIN-ROLE-
+    tags: [certification]
     patterns:
       - { id: "01", role: admin, tags: [admin_only] }
       - { id: "02", role: user }
