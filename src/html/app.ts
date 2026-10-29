@@ -769,17 +769,21 @@ function ScopePage({
           />
         </span>
       </h2>
-      <input
-        class="overview-search"
-        type="search"
-        placeholder="🔍 Filter by ID, name, section, status, method, or tag"
-        value=${query}
-        onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
-      />
       ${suite ? html`<${SuiteGuide} suite=${suite} />` : null}
-      ${visibleRows.length === 0
-        ? html`<p class="empty">No matches</p>`
-        : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
+      <div class="scope-table-wrap">
+        <div class="filter-bar">
+          <input
+            class="overview-search"
+            type="search"
+            placeholder="🔍 Filter by ID, name, section, status, method, or tag"
+            value=${query}
+            onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
+          />
+        </div>
+        ${visibleRows.length === 0
+          ? html`<p class="empty">No matches</p>`
+          : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
+      </div>
       ${suite && visibleRows.length > 0
         ? html`<${SuiteCategories} suite=${suite} testCases=${suite.testCases.filter((tc) => visibleIds.has(tc._tcId))} level=${1} showIndex=${false} />`
         : null}

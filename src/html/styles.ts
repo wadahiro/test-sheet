@@ -39,6 +39,7 @@ export const STYLES = `
   --header-h: 48px;
   --nav-w: 240px;
   --sticky-h: 44px;
+  --filter-h: 56px;
 }
 
 :root[data-theme="light"] { color-scheme: light; }
@@ -407,10 +408,28 @@ body {
   gap: 12px;
 }
 
+/*
+ * The filter stays under the page title while a long table scrolls, with the table header below
+ * it. It sits in a wrapper that ends with the table, so on a suite page it scrolls away before the
+ * section headers (which stick at the same height) arrive. Like .sticky-header it repaints the
+ * page background across .app's side padding.
+ */
+.filter-bar {
+  position: sticky;
+  top: calc(var(--header-h) + var(--sticky-h));
+  z-index: 11;
+  height: var(--filter-h);
+  display: flex;
+  align-items: center;
+  margin: 0 -32px;
+  padding: 0 32px;
+  background: var(--bg);
+}
+
 .overview-search {
   width: 100%;
+  height: 38px;
   padding: 8px 12px;
-  margin-bottom: 16px;
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 0.9rem;
@@ -454,6 +473,10 @@ body {
   top: calc(var(--header-h) + var(--sticky-h));
   z-index: 9;
   background: var(--bg-subtle);
+}
+
+.scope-table thead th {
+  top: calc(var(--header-h) + var(--sticky-h) + var(--filter-h));
 }
 
 .overview-row {
