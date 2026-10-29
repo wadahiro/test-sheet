@@ -185,6 +185,10 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3): string {
     lines.push("**Test Data:**", "", formatTestData(tc.test_data), "");
   }
 
+  if (tc.tags && tc.tags.length > 0) {
+    lines.push(`**Tags:** ${tc.tags.join(", ")}`, "");
+  }
+
   lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps), "");
 
   if (tc.notes) {
@@ -280,6 +284,11 @@ function TestCaseCard({ tc }: { tc: TestCase; idPrefix: string }) {
           ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
           : null}
       </h4>
+      ${tc.tags && tc.tags.length > 0
+        ? html`<div class="tags">
+            ${tc.tags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title="Show test cases matching this tag in the Overview">${tag}</a>`)}
+          </div>`
+        : null}
       ${tc.legacy_marker ? html`<div class="legacy-marker">元の表記: ${tc.legacy_marker}</div>` : null}
       ${tc.preconditions && tc.preconditions.length > 0
         ? html`<div class="preconditions">
@@ -403,6 +412,7 @@ interface OverviewRow {
   tcId: string;
   anchorId: string;
   name: string;
+  tags: string[];
   labels: Record<OverviewLevel, string>;
   /**
    * Full-path identity per level. Compared against the previous *visible* row to decide
@@ -440,6 +450,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               tcId: tc._tcId,
               anchorId: testCaseAnchorId(tc._tcId),
               name: tc.name,
+              tags: tc.tags ?? [],
               labels,
               keys,
             });
@@ -453,7 +464,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
 
 /** Everything shown in the row, so the filter matches exactly what the reader can see */
 function overviewRowSearchText(row: OverviewRow): string {
-  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name].join(" ");
+  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, ...row.tags].join(" ");
 }
 
 function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
@@ -481,7 +492,8 @@ function overviewToMarkdown(rows: OverviewRow[]): string {
     `|${OVERVIEW_COLUMNS.map(() => "---").join("|")}|`,
   ];
   for (const row of rows) {
-    const cells = [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name];
+    const name = row.tags.length > 0 ? `${row.name} [${row.tags.join(", ")}]` : row.name;
+    const cells = [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), name];
     lines.push(`| ${cells.map(escapeMarkdownCell).join(" | ")} |`);
   }
   return lines.join("\n");
@@ -563,7 +575,20 @@ function OverviewTable({
                     </td>
                   `;
                 })}
-                <td>${row.name}</td>
+                <td>
+                  ${row.name}
+                  ${row.tags.map(
+                    (tag) => html`<button
+                      class="tag-chip tag-chip-inline"
+                      key=${tag}
+                      title="Filter by this tag"
+                      onClick=${(e: Event) => {
+                        e.stopPropagation();
+                        onQueryChange(tag);
+                      }}
+                    >${tag}</button>`
+                  )}
+                </td>
               </tr>
             `
           )}
@@ -705,6 +730,7 @@ function testCaseSearchText(tc: TestCase): string {
   if (tc.test_data) parts.push(formatTestData(tc.test_data));
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
+  if (tc.tags) parts.push(...tc.tags);
   return parts.join(" ");
 }
 

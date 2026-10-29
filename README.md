@@ -63,6 +63,34 @@ test_cases:
 
 See `examples/` for complete samples.
 
+### Markdown in steps and notes
+
+`action`, `expected` and `notes` are rendered as Markdown (lists, nested lists, `**bold**`,
+`~~strikethrough~~`, `` `code` ``, links).
+
+- In `action` and `expected`, a newline starts a new line. In `notes`, a single newline is just
+  a soft wrap and a blank line starts a paragraph, so hard-wrapped text reflows.
+- Raw HTML is shown as text, so `<tenantId>` appears as written. HTML tags such as `<br>` are not
+  interpreted; use Markdown instead.
+- `**bold**` also works right next to Japanese text, where CommonMark would leave the asterisks.
+  Single-asterisk emphasis still follows CommonMark, so footnote-style marks such as `条件*1と条件*2`
+  turn into italics; write `\*` for a literal asterisk.
+- `~x~` is not strikethrough (only `~~x~~` is), so ranges like `1~3` stay intact, and email
+  addresses are not turned into links.
+
+### Tags
+
+```yaml
+test_cases:
+  - name: Can log in with a valid ID and password
+    tags: [smoke, db_upgrade]
+```
+
+`tags` is a list of non-empty strings (quote values such as `"2024"` that YAML would read as
+numbers). Tags are shown under the test case title, included in search and in the Markdown copy,
+and shown in the Overview, where clicking one filters the list. The filter is a plain text match,
+so a short tag also matches names that contain it.
+
 ### Test case IDs
 
 Each test case gets an ID (`LOGIN-001`, `LOGIN-002`, ...) built from `metadata.id_prefix` and

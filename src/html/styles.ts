@@ -750,6 +750,36 @@ body {
   color: var(--accent);
 }
 
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tag-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.tag-chip-inline {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .legacy-marker {
   margin-top: 4px;
   font-size: 0.8rem;

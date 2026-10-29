@@ -243,6 +243,19 @@ function assignTestCaseIds(testCases: TestCase[], idPrefix = "TC", sourceFile?: 
   return withIds;
 }
 
+function validateTags(testCases: TestCase[], sourceFile: string): void {
+  for (const tc of testCases) {
+    if (tc.tags === undefined || tc.tags === null) continue;
+    const valid = Array.isArray(tc.tags) && tc.tags.every((tag) => typeof tag === "string" && tag.trim() !== "");
+    if (!valid) {
+      throw new Error(
+        `Invalid tags on test case "${tc.name}" in ${sourceFile}: ` +
+          `tags must be a list of non-empty strings (quote values like "2024" that YAML would read as numbers).`,
+      );
+    }
+  }
+}
+
 function sortByCategoryOrder(testCases: TestCase[], categoryOrder: string[] | undefined): TestCase[] {
   if (!categoryOrder || categoryOrder.length === 0) {
     return testCases;
@@ -338,6 +351,7 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
 
   const categoryOrder = yamlData.metadata?.category_order;
   const sortedCases = sortByCategoryOrder(mergedCases, categoryOrder);
+  validateTags(sortedCases, yamlFile);
   const testCases = assignTestCaseIds(sortedCases, idPrefix, yamlFile);
 
   return { metadata: yamlData.metadata, testCases, guideContent, watchFiles };
