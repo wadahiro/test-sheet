@@ -2,10 +2,11 @@
 // and inlined into the generated HTML.
 
 import { h, render, createContext } from "preact";
-import { useState, useCallback, useEffect, useRef, useContext } from "preact/hooks";
+import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
-import { blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
+import { caseRunKey, countCasesPerRun, deleteRunData, defaultRunName, readRunIndex, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, touchRun, withNewRun, withoutRun, withRenamedRun, writeRunIndex, type RunIndex, type RunMeta } from "./runStore";
+import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
 const html = htmBind.bind(h);
 
@@ -109,7 +110,7 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: 
  * headingLevel is threaded down from whichever level was copied, so a domain-level copy
  * still nests its sections and test cases below the domain heading.
  */
-function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { images?: Record<number, RunImage[]> }) | null = null): string {
+function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { images?: Record<number, RunImage[]>; runName?: string }) | null = null): string {
   const recorded = run && caseOutcome(run.results) !== "none" ? run : null;
   const lines: string[] = [];
   lines.push(`${"#".repeat(headingLevel)} ${tc._tcId}`, "", `**${tc.name}**`, "");
@@ -131,7 +132,8 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
     const label = outcome === "pass" ? "Pass" : outcome === "fail" ? "Fail" : "In progress";
     const marked = recorded.results.filter((result) => result !== "").length;
     const when = recorded.recordedAt ? `, recorded ${recorded.recordedAt.slice(0, 10)}` : "";
-    lines.push(`**Result:** ${label} (${marked}/${recorded.results.length} run${when})`, "");
+    const named = recorded.runName ? `, run "${recorded.runName}"` : "";
+    lines.push(`**Result:** ${label} (${marked}/${recorded.results.length} run${named}${when})`, "");
   }
 
   lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps, recorded), "");
@@ -201,8 +203,13 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
   `;
 }
 
-/** Whether cards record Pass/Fail per step; shared by context so it need not be threaded through every list */
-const RunContext = createContext(false);
+/** The run cards record into, or null when run mode is off (or no run is chosen); shared by context so it need not be threaded through every list */
+interface ActiveRun {
+  id: string;
+  name: string;
+}
+
+const RunContext = createContext<ActiveRun | null>(null);
 
 type StepResult = "" | "p" | "f";
 
@@ -224,18 +231,8 @@ function stepsFingerprint(steps: Step[]): string {
   return String(hash);
 }
 
-/**
- * Over file:// every local HTML file shares one storage origin, so two sheets with the same case
- * ids would overwrite each other's results; the path keeps them apart.
- */
-function runNamespace(): string {
-  let hash = 5381;
-  for (const ch of location.pathname) hash = ((hash << 5) + hash + ch.charCodeAt(0)) | 0;
-  return (hash >>> 0).toString(36);
-}
-
-function runKey(tc: TestCase): string {
-  return `test-sheet-run:${runNamespace()}:${tc._tcId}`;
+function runKey(runId: string, tc: TestCase): string {
+  return caseRunKey(runId, tc._tcId);
 }
 
 /** The first version of this feature only ticked steps, under a key without a namespace */
@@ -253,10 +250,10 @@ function emptyRun(tc: TestCase): RunState {
   return { results: tc.steps.map(() => ""), notes: {}, recordedAt: null };
 }
 
-function readRun(tc: TestCase): RunState {
+function readRun(runId: string, tc: TestCase): RunState {
   const fingerprint = stepsFingerprint(tc.steps);
   try {
-    const raw = localStorage.getItem(runKey(tc));
+    const raw = localStorage.getItem(runKey(runId, tc));
     if (raw) {
       const stored = JSON.parse(raw) as StoredRun;
       if (stored.h !== fingerprint || stored.r.length !== tc.steps.length) return emptyRun(tc);
@@ -273,7 +270,7 @@ function readRun(tc: TestCase): RunState {
       if (old.h === fingerprint) {
         const migrated: RunState = { ...emptyRun(tc), recordedAt: new Date().toISOString() };
         for (const i of old.done) if (i < migrated.results.length) migrated.results[i] = "p";
-        writeRun(tc, migrated);
+        writeRun(runId, tc, migrated);
         return migrated;
       }
     }
@@ -283,10 +280,10 @@ function readRun(tc: TestCase): RunState {
   return emptyRun(tc);
 }
 
-function writeRun(tc: TestCase, run: RunState) {
+function writeRun(runId: string, tc: TestCase, run: RunState) {
   try {
     if (run.results.every((result) => result === "")) {
-      localStorage.removeItem(runKey(tc));
+      localStorage.removeItem(runKey(runId, tc));
       return;
     }
     const stored: StoredRun = {
@@ -296,7 +293,8 @@ function writeRun(tc: TestCase, run: RunState) {
       n: Object.fromEntries(Object.entries(run.notes).filter(([, text]) => text !== "")),
       t: run.recordedAt ?? new Date().toISOString(),
     };
-    localStorage.setItem(runKey(tc), JSON.stringify(stored));
+    localStorage.setItem(runKey(runId, tc), JSON.stringify(stored));
+    touchRun(runId);
   } catch {
     // Blocked storage (e.g. over file://): the marks last for this visit only
   }
@@ -339,18 +337,25 @@ function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
   return `${results.filter((result) => result !== "").length}/${results.length} run`;
 }
 
-function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
-  const [run, setRun] = useState<RunState>(() => (enabled ? readRun(tc) : emptyRun(tc)));
+function useCaseRun(tc: TestCase, active: ActiveRun | null): CaseRun | null {
+  const runId = active?.id ?? null;
+  // Tagged with the run it was read for: after a switch the old run's marks must not show, even
+  // for the one render before the new run's are read
+  const [loaded, setLoaded] = useState<{ runId: string | null; state: RunState }>(() => ({
+    runId,
+    state: runId ? readRun(runId, tc) : emptyRun(tc),
+  }));
+  const run = loaded.runId === runId ? loaded.state : emptyRun(tc);
   const [images, setImages] = useState<Record<number, RunImage[]>>({});
   const urls = useRef<string[]>([]);
-  const caseKey = `${runNamespace()}:${tc._tcId}`;
+  const caseKey = `${runNamespace()}:${runId}:${tc._tcId}`;
 
   useEffect(() => {
-    if (enabled) setRun(readRun(tc));
-  }, [enabled, tc._tcId]);
+    if (runId) setLoaded({ runId, state: readRun(runId, tc) });
+  }, [runId, tc._tcId]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!runId) return;
     let cancelled = false;
     loadImages(caseKey, stepsFingerprint(tc.steps)).then((stored) => {
       if (cancelled) return;
@@ -364,17 +369,19 @@ function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
     });
     return () => {
       cancelled = true;
+      // The next run's thumbnails must not appear beside this run's, nor its object URLs linger
+      urls.current.forEach((url) => URL.revokeObjectURL(url));
+      urls.current = [];
+      setImages({});
     };
-  }, [enabled, caseKey]);
+  }, [runId, caseKey]);
 
-  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
-
-  if (!enabled) return null;
+  if (!runId) return null;
 
   const update = (next: RunState) => {
     const stamped = { ...next, recordedAt: new Date().toISOString() };
-    setRun(stamped);
-    writeRun(tc, stamped);
+    setLoaded({ runId, state: stamped });
+    writeRun(runId, tc, stamped);
   };
   const dropImages = (steps: number[]) => {
     const gone = steps.flatMap((step) => images[step] ?? []);
@@ -406,7 +413,7 @@ function useCaseRun(tc: TestCase, enabled: boolean): CaseRun | null {
         const url = URL.createObjectURL(blob);
         urls.current.push(url);
         added.push({ id, url, blob });
-        await saveImage({ id, caseKey, step: index, fingerprint: stepsFingerprint(tc.steps), blob });
+        await saveImage({ id, caseKey, run: runId, step: index, fingerprint: stepsFingerprint(tc.steps), blob });
       }
       if (added.length > 0) {
         setImages((current) => ({ ...current, [index]: [...(current[index] ?? []), ...added] }));
@@ -761,7 +768,8 @@ function inactiveNote(tc: TestCase): string | null {
 
 /** `level` is the card header's position in the stack of sticky headers above it */
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
-  const run = useCaseRun(tc, useContext(RunContext));
+  const activeRun = useContext(RunContext);
+  const run = useCaseRun(tc, activeRun);
   const outcome = run ? caseOutcome(run.results) : "none";
   const hasShots = !!run && Object.values(run.images).some((list) => list.length > 0);
   const inactive = isInactive(tc);
@@ -784,7 +792,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
         </span>
         ${run && outcome !== "none"
           ? html`<span class="run-status">
-              <span class=${`run-chip run-chip-${outcome}`} title="Recorded in this browser only">${outcomeLabel(outcome, run.results)}</span>
+              <span class=${`run-chip run-chip-${outcome}`} title=${`Recorded in run "${activeRun?.name ?? ""}" (this browser only)`}>${outcomeLabel(outcome, run.results)}</span>
               <button class="link-btn" onClick=${run.reset}>Reset</button>
             </span>`
           : null}
@@ -795,7 +803,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           <${CopyButton}
             iconOnly=${true}
             title=${hasShots ? "Copy this test case as Markdown (copy each screenshot separately)" : "Copy this test case as Markdown"}
-            getText=${() => testCaseToMarkdown(tc, 3, run)}
+            getText=${() => testCaseToMarkdown(tc, 3, run && { ...run, runName: activeRun?.name })}
           />
         </span>
       </header>
@@ -2320,18 +2328,176 @@ function Resizer({
   />`;
 }
 
+function formatRunTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * The saved runs of this sheet: pick one to resume, start a new one, rename or delete. Runs are
+ * shared by every tab, so the one chosen here is the one recorded into everywhere.
+ */
+function RunMenu({
+  index,
+  totalCases,
+  onSelect,
+  onCreate,
+  onRename,
+  onDelete,
+  onClose,
+}: {
+  index: RunIndex;
+  totalCases: number;
+  onSelect: (id: string) => void;
+  onCreate: (name: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [counts] = useState(countCasesPerRun);
+  const [newName, setNewName] = useState(() => (index.runs.length === 0 ? defaultRunName() : ""));
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const newRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // With no run yet the thing to do is name one; otherwise start on the run in use
+    if (index.runs.length === 0) newRef.current?.select();
+    else menuRef.current?.querySelector<HTMLElement>('[aria-current="true"]')?.focus();
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      // The pill that opens this menu closes it itself; counting that click as "outside" would reopen it
+      if (!menuRef.current?.contains(target) && !(target as HTMLElement).closest?.(".run-pill")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.isComposing) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const askDelete = async (run: RunMeta) => {
+    setBusy(run.id);
+    const screenshots = await countImagesWithPrefix(runImagePrefix(run.id));
+    setBusy(null);
+    const cases = counts[run.id] ?? 0;
+    // A deleted run cannot be got back, screenshots included
+    if (confirm(`Delete run "${run.name}"?\n${plural(cases, "case")} with results and ${plural(screenshots, "screenshot")} will be removed. This cannot be undone.`)) {
+      await onDelete(run.id);
+    }
+  };
+
+  return html`
+    <div class="run-menu" ref=${menuRef} role="dialog" aria-label="Test runs">
+      <div class="run-menu-head">
+        <span>Test runs</span>
+        <span class="run-menu-note">saved in this browser</span>
+      </div>
+      ${index.runs.length === 0
+        ? html`<p class="run-menu-empty">No runs yet. Name one to start recording results.</p>`
+        : html`<ul class="run-menu-list">
+            ${[...index.runs]
+              .sort((a, b) => b.u.localeCompare(a.u))
+              .map((run) => {
+                const isActive = run.id === index.last;
+                return html`<li key=${run.id} class=${"run-row" + (isActive ? " run-row-active" : "")}>
+                  ${renaming === run.id
+                    ? html`<input
+                        class="run-rename"
+                        value=${renameText}
+                        maxlength="80"
+                        aria-label="Run name"
+                        onInput=${(e: Event) => setRenameText((e.target as HTMLInputElement).value)}
+                        onKeyDown=${(e: KeyboardEvent) => {
+                          if (e.isComposing) return;
+                          if (e.key === "Enter") {
+                            onRename(run.id, renameText);
+                            setRenaming(null);
+                          } else if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setRenaming(null);
+                          }
+                        }}
+                        ref=${(el: HTMLInputElement | null) => el?.focus()}
+                      />`
+                    : html`<button class="run-pick" aria-current=${isActive} onClick=${() => onSelect(run.id)}>
+                        <span class="run-mark" aria-hidden="true">${isActive ? "●" : "○"}</span>
+                        <span class="run-text">
+                          <span class="run-name" title=${run.name}>${run.name}</span>
+                          <span class="run-meta">${counts[run.id] ?? 0} of ${totalCases} cases run · ${formatRunTime(run.u)}</span>
+                        </span>
+                      </button>`}
+                  <span class="run-actions">
+                    <button class="link-btn" onClick=${() => { setRenaming(run.id); setRenameText(run.name); }}>Rename</button>
+                    <button class="link-btn link-btn-danger" disabled=${busy === run.id} onClick=${() => askDelete(run)}>Delete</button>
+                  </span>
+                </li>`;
+              })}
+          </ul>`}
+      <form
+        class="run-new"
+        onSubmit=${(e: Event) => {
+          e.preventDefault();
+          onCreate(newName);
+        }}
+      >
+        <input
+          ref=${newRef}
+          class="run-new-input"
+          value=${newName}
+          maxlength="80"
+          placeholder='New run, e.g. "2.3 regression"'
+          aria-label="New run name"
+          onInput=${(e: Event) => setNewName((e.target as HTMLInputElement).value)}
+        />
+        <button type="submit" class="copy-btn">Create</button>
+      </form>
+    </div>
+  `;
+}
+
 function AppHeader({
   onOpenPalette,
   navCollapsed,
   onToggleNav,
   runModeOn,
   onToggleRunMode,
+  runIndex,
+  activeRun,
+  totalCases,
+  runMenuOpen,
+  onRunMenuOpen,
+  onSelectRun,
+  onCreateRun,
+  onRenameRun,
+  onDeleteRun,
 }: {
   onOpenPalette: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
   runModeOn: boolean;
   onToggleRunMode: () => void;
+  runIndex: RunIndex;
+  activeRun: ActiveRun | null;
+  totalCases: number;
+  runMenuOpen: boolean;
+  onRunMenuOpen: (open: boolean) => void;
+  onSelectRun: (id: string) => void;
+  onCreateRun: (name: string) => void;
+  onRenameRun: (id: string, name: string) => void;
+  onDeleteRun: (id: string) => Promise<void>;
 }) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
 
@@ -2358,6 +2524,31 @@ function AppHeader({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
           <span>Run mode</span>
         </button>
+        ${runModeOn
+          ? html`<div class="run-anchor">
+              <button
+                class=${"header-btn run-pill" + (activeRun ? "" : " run-pill-none")}
+                aria-haspopup="dialog"
+                aria-expanded=${runMenuOpen}
+                title=${activeRun ? `Recording into "${activeRun.name}". Click to switch, create or delete runs.` : "No run chosen: nothing is being recorded"}
+                onClick=${() => onRunMenuOpen(!runMenuOpen)}
+              >
+                <span class="run-pill-name">${activeRun ? activeRun.name : "No run — choose or create"}</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              ${runMenuOpen
+                ? html`<${RunMenu}
+                    index=${runIndex}
+                    totalCases=${totalCases}
+                    onSelect=${onSelectRun}
+                    onCreate=${onCreateRun}
+                    onRename=${onRenameRun}
+                    onDelete=${onDeleteRun}
+                    onClose=${() => onRunMenuOpen(false)}
+                  />`
+                : null}
+            </div>`
+          : null}
         <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>Search</span>
@@ -2450,6 +2641,13 @@ function App() {
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
   const [runModeOn, setRunModeOn] = useState(readRunMode);
+  const [runIndex, setRunIndex] = useState(readRunIndex);
+  const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const activeRun = useMemo<ActiveRun | null>(() => {
+    const run = runIndex.runs.find((candidate) => candidate.id === runIndex.last);
+    return run ? { id: run.id, name: run.name } : null;
+  }, [runIndex.last, runIndex.runs]);
+  const totalCases = useMemo(() => suites.reduce((sum, suite) => sum + suite.testCases.length, 0), [suites]);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
   const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
@@ -2558,6 +2756,44 @@ function App() {
       writeRunMode(!on);
       return !on;
     });
+    // Turning it on with no run yet is the moment to name one, never to create one unseen
+    if (!runModeOn && runIndex.runs.length === 0) setRunMenuOpen(true);
+  }, [runModeOn, runIndex.runs.length]);
+
+  const commitRunIndex = useCallback((next: RunIndex) => {
+    writeRunIndex(next);
+    setRunIndex(next);
+  }, []);
+  const selectRun = useCallback(
+    (id: string) => {
+      commitRunIndex({ ...runIndex, last: id });
+      setRunMenuOpen(false);
+    },
+    [runIndex, commitRunIndex]
+  );
+  const createRun = useCallback(
+    (name: string) => {
+      commitRunIndex(withNewRun(runIndex, name));
+      setRunMenuOpen(false);
+    },
+    [runIndex, commitRunIndex]
+  );
+  const renameRun = useCallback((id: string, name: string) => commitRunIndex(withRenamedRun(runIndex, id, name)), [runIndex, commitRunIndex]);
+  const deleteRun = useCallback(
+    async (id: string) => {
+      await deleteRunData(id);
+      commitRunIndex(withoutRun(rereadRunIndex(), id));
+    },
+    [commitRunIndex]
+  );
+
+  // The runs are shared by every tab: a run chosen, created or deleted in another one reaches this one
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === runIndexKey()) setRunIndex(rereadRunIndex());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const toggleInactive = useCallback(() => {
@@ -2588,8 +2824,8 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runModeOn=${runModeOn} onToggleRunMode=${toggleRunMode} />
-      <${RunContext.Provider} value=${runModeOn}>
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runModeOn=${runModeOn} onToggleRunMode=${toggleRunMode} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${RunContext.Provider} value=${runModeOn ? activeRun : null}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}

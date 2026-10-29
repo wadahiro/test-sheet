@@ -5,8 +5,10 @@
 
 export interface StoredImage {
   id: string;
-  /** `<namespace>:<case id>` of the case the image belongs to */
+  /** `<namespace>:<run id>:<case id>` of the run and case the image belongs to */
   caseKey: string;
+  /** The run it belongs to; absent on images saved before runs existed */
+  run?: string;
   step: number;
   /** Fingerprint of the case's steps when the image was attached, so edited cases drop stale images */
   fingerprint: string;
@@ -108,4 +110,39 @@ export async function blobToPng(blob: Blob): Promise<Blob> {
   canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
   const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   return png ?? blob;
+}
+
+/** Image records whose key starts with the prefix, found by a range over the case index */
+function prefixRange(prefix: string): IDBKeyRange {
+  return IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+}
+
+export async function removeImagesWithPrefix(prefix: string): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  const images = (await done(db.transaction(STORE).objectStore(STORE).index("caseKey").getAll(prefixRange(prefix)))) ?? [];
+  for (const image of images as StoredImage[]) await removeImage(image.id);
+}
+
+export async function countImagesWithPrefix(prefix: string): Promise<number> {
+  const db = await openDb();
+  if (!db) return 0;
+  return (await done(db.transaction(STORE).objectStore(STORE).index("caseKey").count(prefixRange(prefix)))) ?? 0;
+}
+
+/**
+ * Screenshots saved before runs existed are keyed `<namespace>:<case id>`; give them to the first
+ * run, rekeyed, so they stay with the marks that were migrated alongside them.
+ */
+export async function retagLegacyImages(namespace: string, runId: string): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  const all = (await done(db.transaction(STORE).objectStore(STORE).index("caseKey").getAll(prefixRange(`${namespace}:`)))) ?? [];
+  for (const image of all as StoredImage[]) {
+    if (image.run) continue;
+    const tcId = image.caseKey.slice(namespace.length + 1);
+    const caseKey = `${namespace}:${runId}:${tcId}`;
+    await removeImage(image.id);
+    await saveImage({ ...image, id: image.id.replace(image.caseKey, caseKey), caseKey, run: runId });
+  }
 }
