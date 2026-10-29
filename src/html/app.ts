@@ -825,12 +825,14 @@ function GuidePanel({
   limit,
   onClose,
   onResize,
+  onResetWidth,
 }: {
   suite: SuitePageData;
   width: number;
   limit: number;
   onClose: () => void;
   onResize: (width: number) => void;
+  onResetWidth: () => void;
 }) {
   return html`
     <aside
@@ -840,7 +842,7 @@ function GuidePanel({
         if (e.key === "Escape") onClose();
       }}
     >
-      <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label="Resize guide" onResize=${onResize} />
+      <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label="Resize guide" onResize=${onResize} onReset=${onResetWidth} />
       <div class="guide-panel-head">
         <span class="guide-panel-title" title=${`${suite.idPrefix}: ${suite.typeName}`}>📖 Guide · ${suite.typeName}</span>
         <button class="header-btn header-btn-icon" title="Close the guide" aria-label="Close the guide" onClick=${onClose}>✕</button>
@@ -1615,7 +1617,8 @@ interface PanelSize {
 }
 
 const NAV_SIZE: PanelSize = { storageKey: "test-sheet-nav-width", defaultWidth: 240, min: 200, max: 640 };
-const GUIDE_SIZE: PanelSize = { storageKey: "test-sheet-guide-width", defaultWidth: 380, min: 280, max: 720 };
+// No fixed default: until the reader drags it, the guide takes half of what the sidebar leaves
+const GUIDE_SIZE: PanelSize = { storageKey: "test-sheet-guide-width", defaultWidth: 0, min: 280, max: 1200 };
 const PANEL_KEY_STEP = 16;
 /** What the cases keep when both side panels are open, so the steps table never collapses */
 const MAIN_MIN_WIDTH = 480;
@@ -1630,6 +1633,24 @@ function readPanelWidth(size: PanelSize): number {
     return stored > 0 ? clampWidth(size, stored) : size.defaultWidth;
   } catch {
     return size.defaultWidth;
+  }
+}
+
+/** The width the reader chose, or null when they never did and the default applies */
+function readStoredPanelWidth(size: PanelSize): number | null {
+  try {
+    const stored = Number(localStorage.getItem(size.storageKey));
+    return stored > 0 ? clampWidth(size, stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPanelWidth(size: PanelSize) {
+  try {
+    localStorage.removeItem(size.storageKey);
+  } catch {
+    // Blocked storage: nothing was remembered to forget
   }
 }
 
@@ -1653,6 +1674,7 @@ function Resizer({
   limit,
   label,
   onResize,
+  onReset,
 }: {
   edge: "start" | "end";
   width: number;
@@ -1661,6 +1683,8 @@ function Resizer({
   limit?: number;
   label: string;
   onResize: (width: number) => void;
+  /** Double click; defaults to resizing to the size's own default width */
+  onReset?: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const clamp = (value: number) => clampWidth(size, value, limit);
@@ -1701,7 +1725,7 @@ function Resizer({
     onPointerUp=${onPointerUp}
     onPointerCancel=${onPointerUp}
     onKeyDown=${onKeyDown}
-    onDblClick=${() => onResize(size.defaultWidth)}
+    onDblClick=${onReset ?? (() => onResize(size.defaultWidth))}
   />`;
 }
 
@@ -1772,7 +1796,7 @@ function App() {
    */
   const [query, setQuery] = useState(route.query);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
-  const [guideWidth, setGuideWidth] = useState(() => readPanelWidth(GUIDE_SIZE));
+  const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
   const [guideDismissedOn, setGuideDismissedOn] = useState<string | null>(null);
   const viewportWidth = useViewportWidth();
@@ -1791,7 +1815,9 @@ function App() {
   const routeTargetsGuide = !!pageGuideSuite && !!route.target?.startsWith(`suite-${pageGuideSuite.idPrefix}-guide`);
   // Derived rather than set in an effect, so the panel is already in the DOM when the route's scroll runs
   const guidePanelOpen = !!guideSuite && (guideOpen || (routeTargetsGuide && guideDismissedOn !== route.hash));
-  const guideLimit = Math.max(GUIDE_SIZE.min, viewportWidth - (navCollapsed ? 0 : navWidth) - MAIN_MIN_WIDTH);
+  const spaceBesideNav = viewportWidth - (navCollapsed ? 0 : navWidth);
+  const guideLimit = Math.max(GUIDE_SIZE.min, spaceBesideNav - MAIN_MIN_WIDTH);
+  const guideShownWidth = clampWidth(GUIDE_SIZE, guideWidth ?? Math.round(spaceBesideNav / 2), guideLimit);
 
   useEffect(() => {
     function onHashChange() {
@@ -1859,6 +1885,11 @@ function App() {
     writePanelWidth(GUIDE_SIZE, width);
   }, []);
 
+  const resetGuideWidth = useCallback(() => {
+    setGuideWidth(null);
+    clearPanelWidth(GUIDE_SIZE);
+  }, []);
+
   const resizeNav = useCallback((width: number) => {
     setNavWidth(width);
     writePanelWidth(NAV_SIZE, width);
@@ -1878,7 +1909,7 @@ function App() {
       <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} />
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
-        style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${Math.min(guideWidth, guideLimit)}px` }}
+        style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
       >
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} />
         <div class="app">
@@ -1899,10 +1930,11 @@ function App() {
         ${guidePanelOpen && guideSuite
           ? html`<${GuidePanel}
               suite=${guideSuite}
-              width=${Math.min(guideWidth, guideLimit)}
+              width=${guideShownWidth}
               limit=${guideLimit}
               onClose=${() => setGuide(false)}
               onResize=${resizeGuide}
+              onResetWidth=${resetGuideWidth}
             />`
           : null}
       </div>
