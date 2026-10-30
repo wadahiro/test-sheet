@@ -3,6 +3,7 @@
 // that suit documents are tightened: raw HTML is shown as text, and GFM's lenient rules are narrowed.
 
 import { Marked, type Tokens } from "marked";
+import { autolinkExtension, type AutolinkRule } from "../autolinks";
 
 const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -25,10 +26,12 @@ function escapeLoneDashes(markdown: string): string {
 export interface CaseMarkdownOptions {
   /** true turns a single newline into <br>, for table cells where each line is meant as its own line */
   breaks: boolean;
+  /** Reference numbers to turn into links, from the suite's and the command line's configuration */
+  autolinks?: AutolinkRule[];
 }
 
-export function createCaseMarkdown({ breaks }: CaseMarkdownOptions): Marked {
-  return new Marked({
+export function createCaseMarkdown({ breaks, autolinks = [] }: CaseMarkdownOptions): Marked {
+  const marked = new Marked({
     gfm: true,
     breaks,
     hooks: {
@@ -72,4 +75,5 @@ export function createCaseMarkdown({ breaks }: CaseMarkdownOptions): Marked {
       },
     },
   });
+  return marked.use(autolinkExtension(autolinks));
 }

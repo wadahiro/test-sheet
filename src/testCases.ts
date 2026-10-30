@@ -1,5 +1,6 @@
 // Loading and normalizing logic for testcases.yaml.
 
+import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
 import { readFileSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { parse } from "yaml";
@@ -60,6 +61,8 @@ export interface Metadata {
   category_order?: string[];
   /** Tags every test case in the suite inherits */
   tags?: string[];
+  /** Reference numbers to link, as `{ pattern, url }` pairs; checked by parseAutolinkRules */
+  autolinks?: unknown;
 }
 
 export interface TestCasesFileData {
@@ -341,6 +344,8 @@ export interface LoadedTestCases {
   metadata: Metadata;
   testCases: TestCase[];
   guideContent: string;
+  /** The suite's valid autolink rules; a malformed one has already been reported and left out */
+  autolinks: AutolinkRule[];
   /** Files to watch (the YAML itself plus any referenced guides) */
   watchFiles: string[];
 }
@@ -377,7 +382,9 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
   const taggedCases = suiteTags ? sortedCases.map((tc) => ({ ...tc, tags: mergeTags(suiteTags, tc.tags) })) : sortedCases;
   const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
 
-  return { metadata: yamlData.metadata, testCases, guideContent, watchFiles };
+  const autolinks = parseAutolinkRules(yamlData.metadata.autolinks, `${yamlFile} (metadata)`);
+
+  return { metadata: yamlData.metadata, testCases, guideContent, autolinks, watchFiles };
 }
 
 /**

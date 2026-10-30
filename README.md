@@ -12,6 +12,7 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - A Record button in the header turns recording on by choosing a run: its menu lists the saved runs (several can run side by side, say one per theme being tested) to resume, create, rename or delete, plus a "Not recording" entry to go back to just reading. While recording the button shows the run's name and every step gets Pass / Fail buttons: the first unmarked step is highlighted, a failed step takes a note with line breaks and pasted (or dropped, or attached) screenshots, each case gets a PASS / FAIL chip, and copying a case as Markdown includes the results. Markdown cannot carry an image that issue trackers will show (they drop embedded `data:` images, including from a rich-text paste), so the copy marks where each screenshot goes, and each screenshot has Copy image and Download buttons: copy it and paste it at the mark, and the tracker uploads it. The run in use is shared by every tab, and results stay in this browser only; they are a working record, not a test report
 - Each case shows its preconditions, test data, steps and note; a suite page hides the cards of obsolete, superseded and skipped cases by default (they stay in the table)
 - The interface is in English or Japanese, chosen from the browser's language on the first visit and switchable from the globe icon in the header; more languages can be added with a JSON file (see [Languages](#languages)). Markdown copied from the page follows the language chosen
+- Ticket numbers written as plain text become links to your issue tracker from one setting (see [Linking ticket numbers](#linking-ticket-numbers-autolinks))
 - Copy any section or test suite as Markdown (for pasting into a PR or issue comment)
 - Auto-reloads the browser whenever a `testcases.yaml` is saved
 - Can also render to a single self-contained HTML file (for CI artifacts or static distribution)
@@ -172,6 +173,35 @@ rejected at load time.
 
 An explicit `id` must start with `<metadata.id_prefix>-`, and IDs must be unique across every
 `testcases.yaml` under the scan root — a suite whose IDs collide with an earlier one fails to load.
+
+### Linking ticket numbers (`autolinks`)
+
+Write a ticket number as plain text and let the configuration say where it leads, as GitHub and GitLab
+do with autolink references. When the tracker moves, one setting changes instead of every case.
+
+```yaml
+metadata:
+  autolinks:
+    - pattern: "PROJ-\\d+"                       # a regular expression
+      url: "https://tracker.example.com/browse/{0}"  # {0} is the match, {1}… its capture groups
+    - pattern: "BUG#(\\d+)"
+      url: "https://bugs.example.com/show?id={1}"
+```
+
+To share rules across many `testcases.yaml` files, give them on the command line instead (repeatable;
+a suite's own rules are tried first):
+
+```bash
+bun run src/cli.ts ./tests --autolink 'PROJ-\d+' 'https://tracker.example.com/browse/{0}'
+```
+
+- Applies to the steps (action and expected), notes, test data and guides, in the page and in `--out` files.
+- Left alone inside code spans and code blocks, inside the text or target of a Markdown link, and inside
+  a URL. A match must stand alone: `XPROJ-1` and `PROJ-1abc` are not links.
+- Preconditions, names and the copied Markdown stay plain text; a tracker autolinks the numbers itself
+  when you paste.
+- A rule that cannot work (invalid regular expression, a URL that is not `http(s)://`, a `{n}` the pattern
+  has no group for) is reported when the file is loaded and left out; the rest still apply.
 
 ### Directory hierarchy, domain, and feature
 

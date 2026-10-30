@@ -20,6 +20,7 @@ import { loadAllTestSuites } from "./testCases";
 import { generateHtml } from "./html/generate";
 import type { LocaleDefinition } from "./html/i18n";
 import { loadLocaleFile, localeTemplate } from "./locales";
+import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
 
 interface CliArgs {
   rootDir: string;
@@ -27,6 +28,7 @@ interface CliArgs {
   outFile: string | null;
   exclude: string[];
   localeFiles: string[];
+  autolinks: AutolinkRule[];
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -35,6 +37,7 @@ function parseArgs(argv: string[]): CliArgs {
   let outFile: string | null = null;
   const exclude: string[] = [];
   const localeFiles: string[] = [];
+  const autolinks: AutolinkRule[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -55,6 +58,14 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       localeFiles.push(file);
+    } else if (argv[i] === "--autolink") {
+      const pattern = argv[++i];
+      const url = argv[++i];
+      if (!pattern || !url) {
+        console.error("Error: --autolink requires a pattern and a URL template");
+        process.exit(1);
+      }
+      autolinks.push(...parseAutolinkRules([{ pattern, url }], `--autolink "${pattern}"`));
     } else if (argv[i] === "--print-locale") {
       // Starting point for a translation: every key, in English, as a locale file
       process.stdout.write(localeTemplate(argv[++i] || "xx"));
@@ -72,6 +83,10 @@ Options:
                          Matched relative to the root directory; repeatable.
   --locale <file>        Add a UI language (or adjust a built-in one) from a JSON file.
                          Repeatable. English and Japanese are built in.
+  --autolink <pattern> <url>
+                         Link text matching the regular expression to the URL template, where
+                         {0} is the match and {1}… are its capture groups. Applies to every suite,
+                         after each suite's own metadata.autolinks; repeatable.
   --print-locale [code]  Print a locale file with every UI string in English, to translate
 
 Examples:
@@ -86,7 +101,7 @@ Examples:
     }
   }
 
-  return { rootDir, port, outFile, exclude, localeFiles };
+  return { rootDir, port, outFile, exclude, localeFiles, autolinks };
 }
 
 async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
@@ -99,14 +114,14 @@ async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
   return locales;
 }
 
-async function generateStatic(rootDir: string, outFile: string, exclude: string[], locales: LocaleDefinition[]) {
+async function generateStatic(rootDir: string, outFile: string, exclude: string[], locales: LocaleDefinition[], autolinks: AutolinkRule[]) {
   const suites = await loadAllTestSuites(rootDir, exclude);
-  const html = await generateHtml(suites, { liveReload: false, locales });
+  const html = await generateHtml(suites, { liveReload: false, locales, autolinks });
   await Bun.write(outFile, html);
   console.log(`Generated: ${outFile}`);
 }
 
-function serve(rootDir: string, port: number, exclude: string[], locales: LocaleDefinition[]) {
+function serve(rootDir: string, port: number, exclude: string[], locales: LocaleDefinition[], autolinks: AutolinkRule[]) {
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
   const server = Bun.serve({
@@ -124,7 +139,7 @@ function serve(rootDir: string, port: number, exclude: string[], locales: Locale
       if (url.pathname === "/" || url.pathname === "/index.html") {
         try {
           const suites = await loadAllTestSuites(rootDir, exclude);
-          const html = await generateHtml(suites, { liveReload: true, locales });
+          const html = await generateHtml(suites, { liveReload: true, locales, autolinks });
           return new Response(html, {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           });
@@ -176,15 +191,15 @@ function serve(rootDir: string, port: number, exclude: string[], locales: Locale
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude, localeFiles } = parseArgs(process.argv.slice(2));
+  const { rootDir, port, outFile, exclude, localeFiles, autolinks } = parseArgs(process.argv.slice(2));
   const locales = await loadLocales(localeFiles);
 
   if (outFile) {
-    await generateStatic(rootDir, outFile, exclude, locales);
+    await generateStatic(rootDir, outFile, exclude, locales, autolinks);
     return;
   }
 
-  serve(rootDir, port, exclude, locales);
+  serve(rootDir, port, exclude, locales, autolinks);
 }
 
 main().catch((err) => {

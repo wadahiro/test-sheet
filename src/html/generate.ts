@@ -9,6 +9,7 @@ import { STYLES } from "./styles";
 import { createCaseMarkdown } from "./caseMarkdown";
 import { formatTestData } from "./caseFormat";
 import type { LocaleDefinition } from "./i18n";
+import { autolinkExtension, type AutolinkRule } from "../autolinks";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -67,12 +68,13 @@ function splitByH2(markdown: string, marked: Marked): string[] {
  */
 async function renderGuideWithHeadings(
   markdown: string,
-  idPrefix: string
+  idPrefix: string,
+  autolinks: AutolinkRule[]
 ): Promise<{ html: string; headings: GuideHeading[] }> {
   const headings: GuideHeading[] = [];
   let h2Index = 0;
 
-  const marked = new Marked({
+  const marked = new Marked(autolinkExtension(autolinks), {
     renderer: {
       heading(token) {
         const text = this.parser.parseInline(token.tokens);
@@ -96,13 +98,22 @@ async function renderGuideWithHeadings(
   return { html, headings };
 }
 
-// Notes are often hard-wrapped in the YAML source; Markdown turns a single newline into a soft wrap
-// and a blank line into a paragraph, so the text reflows to the page instead of keeping the source width.
-const notesMarked = createCaseMarkdown({ breaks: false });
-// Step cells are short, and a newline there has always meant a new line, so it stays one
-const stepMarked = createCaseMarkdown({ breaks: true });
+interface CaseRenderers {
+  /** Notes are often hard-wrapped in the YAML source; Markdown turns a single newline into a soft wrap
+   *  and a blank line into a paragraph, so the text reflows to the page instead of keeping the source width. */
+  notes: Marked;
+  /** Step cells are short, and a newline there has always meant a new line, so it stays one */
+  step: Marked;
+}
 
-async function renderTestCase(tc: TestSuiteTestCases["testCases"][number]) {
+function caseRenderers(autolinks: AutolinkRule[]): CaseRenderers {
+  return {
+    notes: createCaseMarkdown({ breaks: false, autolinks }),
+    step: createCaseMarkdown({ breaks: true, autolinks }),
+  };
+}
+
+async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { notes: notesMarked, step: stepMarked }: CaseRenderers) {
   const testDataMarkdown = formatTestData(tc.test_data);
   return {
     ...tc,
@@ -123,6 +134,8 @@ export interface GenerateHtmlOptions {
   liveReload?: boolean;
   /** Languages offered besides the built-in ones; see src/locales.ts */
   locales?: LocaleDefinition[];
+  /** Autolink rules for every suite, after each suite's own (`metadata.autolinks`) */
+  autolinks?: AutolinkRule[];
 }
 
 /** JSON inside a <script> block ends at the first "</script>", whatever string it sits in */
@@ -131,14 +144,17 @@ function jsonForScript(value: unknown): string {
 }
 
 export async function generateHtml(suites: TestSuiteTestCases[], options: GenerateHtmlOptions = {}): Promise<string> {
-  const { liveReload = false, locales = [] } = options;
+  const { liveReload = false, locales = [], autolinks: globalAutolinks = [] } = options;
   const bundledJs = await bundleApp();
 
   const pageSuites = await Promise.all(
     suites.map(async (suite) => {
       const idPrefix = suite.metadata.id_prefix;
+      // The suite's own rules come first, so where two match the same text its more specific one wins
+      const autolinks = [...suite.autolinks, ...globalAutolinks];
+      const renderers = caseRenderers(autolinks);
       const { html: guideHtml, headings: guideHeadings } = suite.guideContent
-        ? await renderGuideWithHeadings(suite.guideContent, idPrefix)
+        ? await renderGuideWithHeadings(suite.guideContent, idPrefix, autolinks)
         : { html: "", headings: [] };
 
       return {
@@ -148,7 +164,7 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         featureLabel: suite.featureLabel,
         typeName: suite.metadata.type_name,
         idPrefix,
-        testCases: await Promise.all(suite.testCases.map(renderTestCase)),
+        testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase(tc, renderers))),
         guideHtml,
         guideHeadings,
         /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */
