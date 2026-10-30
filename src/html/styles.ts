@@ -823,6 +823,8 @@ body {
   overflow: hidden;
   border-left: 1px solid var(--border);
   background: var(--bg-subtle);
+  /* Above every sticky header and table head (up to 14) that the page's cases can slide under it */
+  z-index: 15;
 }
 
 .guide-panel-head {
