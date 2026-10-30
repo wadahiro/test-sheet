@@ -12,6 +12,7 @@ export const ja: Record<MessageKey, string> = {
   "nav.show": "ナビゲーションを表示",
   "nav.hide": "ナビゲーションを隠す",
   "nav.resize": "ナビゲーションの幅を変更",
+  "nav.breadcrumb": "パンくずリスト",
   "theme.toLight": "ライトテーマに切り替え",
   "theme.toDark": "ダークテーマに切り替え",
   "lang.title": "言語",

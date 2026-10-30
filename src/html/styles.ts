@@ -99,18 +99,75 @@ body {
 }
 
 .app-header-lead {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
+.app-crumbs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-crumbs ol {
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * The path is cut from its outer end: the page's own title is what the reader came for, so the levels
+ * above give up width first (their shrink factor dwarfs the title's) and drop out below 700px. Cutting
+ * the joined string at its end instead would remove exactly that title.
+ */
+.crumb {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb-ancestor {
+  flex: 0 100 auto;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+}
+
+.crumb-ancestor::after {
+  content: "›";
+  margin: 0 8px;
+  color: var(--fg-faint);
+}
+
+.crumb-ancestor a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumb-ancestor a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.crumb-current {
+  flex: 0 1 auto;
+}
+
 .app-header-title {
-  font-size: 0.95rem;
+  margin: 0;
+  font-size: 1rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 700px) {
+  .crumb-ancestor { display: none; }
 }
 
 .app-header-actions {
@@ -310,6 +367,16 @@ body {
 }
 
 /*
+ * A scope page has no title band of its own to keep clear of the app header, and its filter bar
+ * already pads the input by 9px, so the gap is dropped there. --stick-top is restated because a
+ * custom property computed at :root does not see this override of --page-gap.
+ */
+.app-scope {
+  --page-gap: 0px;
+  --stick-top: var(--header-h);
+}
+
+/*
  * Stacked sticky headers for the hierarchy (domain -> feature -> test suite -> section).
  * Each level shares the same height (--sticky-h); top is offset by the level index so
  * headers stack instead of overlapping, starting below the global menu bar (--header-h).
@@ -420,27 +487,16 @@ body {
 
 /* Overview: a flat table of every test case, so it needs no sticky stacking beyond its own header */
 
-.overview-title {
-  font-size: 1.6rem;
-  border-bottom: 4px solid var(--accent);
-  /* No gap below: the filter bar pins right under this title, so any gap here would close up
-     the moment the page scrolls */
-  margin: 0;
-  padding-left: 0;
-  padding-right: 0;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 /*
- * The filter stays under the page title while a long table scrolls, with the table header below
- * it. It sits in a wrapper that ends with the table, so on a suite page it scrolls away before the
- * section headers (which stick at the same height) arrive. Like .sticky-header it repaints the
- * page background across .app's side padding.
+ * The first thing to stick on a scope page (the page's title lives in the app header), with the table
+ * header below it. It sits in a wrapper that ends with the table, so on a suite page it scrolls away
+ * before the section headers (which stick at the same height) arrive. Like .sticky-header it repaints
+ * the page background across .app's side padding. Its height is fixed, so its contents cannot wrap:
+ * the container queries below shrink them instead.
  */
 .filter-bar {
   position: sticky;
-  top: calc(var(--stick-top) + var(--sticky-h));
+  top: var(--stick-top);
   z-index: 11;
   height: var(--filter-h);
   display: flex;
@@ -537,7 +593,7 @@ body {
 .run-anchor { position: relative; }
 
 .run-btn {
-  max-width: clamp(7rem, 30vw, 16rem);
+  max-width: clamp(7rem, 30vw, 12rem);
   gap: 6px;
 }
 
@@ -696,7 +752,7 @@ body {
 }
 
 .scope-table thead th {
-  top: calc(var(--stick-top) + var(--sticky-h) + var(--filter-h));
+  top: calc(var(--stick-top) + var(--filter-h));
 }
 
 .overview-row {
@@ -749,10 +805,21 @@ body {
   margin-bottom: 24px;
 }
 
-.scope-crumb {
-  color: var(--fg-muted);
-  font-weight: 500;
+.filter-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 12px;
 }
+
+.filter-count {
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.filter-count-short { display: none; }
 
 .scope-link {
   font-size: 0.8rem;
@@ -793,6 +860,27 @@ body {
  * page, and it would add a nested scroller. Same breakpoint as .cards, so both change together.
  */
 .scope-table-wrap { container: scope-table / inline-size; }
+
+/* The actions beside the filter input shrink to icons and a bare number before the input is squeezed */
+@container scope-table (max-width: 760px) {
+  .filter-actions { gap: 8px; margin-left: 8px; }
+  .filter-actions .scope-link { display: none; }
+  .filter-count-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .filter-count-short { display: inline; }
+  .filter-actions .copy-btn > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
 
 @container scope-table (max-width: 600px) {
   .scope-table, .scope-table tbody, .scope-table tr, .scope-table td, .scope-table th { display: block; }
@@ -943,6 +1031,8 @@ body {
   .guide-panel,
   .nav-outline,
   .filter-bar,
+  .app-header-actions,
+  .app-header-lead .header-btn,
   .test-case-actions {
     display: none;
   }

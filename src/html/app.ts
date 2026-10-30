@@ -1176,11 +1176,17 @@ function overviewToMarkdown(rows: OverviewRow[]): string {
   return lines.join("\n");
 }
 
+/** One step of the path shown in the app header; the last is the page itself and has no link */
+interface Crumb {
+  label: string;
+  hash?: string;
+}
+
 /** What a scope page covers: its title, where it sits in the tree, and which rows and suites are in it */
 interface ResolvedScope {
   title: string;
-  /** Labels of the levels above this one, outermost first */
-  ancestors: string[];
+  /** The levels above this one, outermost first, each a link to its own page */
+  ancestors: Crumb[];
   /** Element ID of the scope's page, so the sidebar's scroll tracking has an anchor to resolve */
   anchorId: string;
   suites: SuitePageData[];
@@ -1205,7 +1211,10 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
     if (!suite) return null;
     return {
       title: `${suite.idPrefix}: ${suite.typeName}`,
-      ancestors: [suite.domainLabel, suite.featureLabel],
+      ancestors: [
+        { label: suite.domainLabel, hash: domainHash(suite.domain) },
+        { label: suite.featureLabel, hash: featureHash(suite.domain, suite.feature) },
+      ],
       anchorId: suiteAnchorId(suite.idPrefix),
       suites: [suite],
       count: suiteTestCaseCount(suite),
@@ -1233,7 +1242,7 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
     if (!domain || !feature) return null;
     return {
       title: feature.featureLabel,
-      ancestors: [domain.domainLabel],
+      ancestors: [{ label: domain.domainLabel, hash: domainHash(domain.domain) }],
       anchorId: featureAnchorId(domain.domain, feature.feature),
       suites: feature.suites,
       count: featureTestCaseCount(feature),
@@ -1275,13 +1284,22 @@ function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth:
   `;
 }
 
+/** The full sentence, or just the number where the filter bar is too narrow for it (see the container query) */
+function CaseCountLabel({ shown }: { shown: string }) {
+  const full = t("scope.count", { count: shown });
+  return html`<span class="filter-count" title=${full}>
+    <span class="filter-count-full">${full}</span>
+    <span class="filter-count-short" aria-hidden="true">${shown}</span>
+  </span>`;
+}
+
 /**
  * The page for one node of the tree: its cases as a table, and for a suite the guide and the
  * case cards below it. The filter narrows the table and, on a suite, the cards with the same rule.
  */
 function ScopePage({
   route,
-  suites,
+  resolved,
   rows,
   query,
   onQueryChange,
@@ -1291,7 +1309,7 @@ function ScopePage({
   onToggleInactive,
 }: {
   route: Route;
-  suites: SuitePageData[];
+  resolved: ResolvedScope | null;
   rows: OverviewRow[];
   query: string;
   onQueryChange: (query: string) => void;
@@ -1300,11 +1318,10 @@ function ScopePage({
   showInactive: boolean;
   onToggleInactive: () => void;
 }) {
-  const resolved = resolveScope(route.scope, suites);
   if (!resolved) {
     return html`<p class="empty">${t("scope.notFound")} <a href=${OVERVIEW_HASH}>${t("scope.backToAll")}</a></p>`;
   }
-  if (suites.length === 0) {
+  if (window.__SUITES__.length === 0) {
     return html`<p class="empty">${t("scope.noFiles")}</p>`;
   }
 
@@ -1329,32 +1346,6 @@ function ScopePage({
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
-      <h2 class="overview-title sticky-header sticky-level-0">
-        <span class="suite-title-text">
-          ${resolved.ancestors.length > 0 ? html`<span class="scope-crumb">${resolved.ancestors.join(" › ")} › </span>` : null}${resolved.title}
-        </span>
-        <span class="suite-title-right">
-          ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
-          <span class="suite-title-count">
-            ${t("scope.count", { count: trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count) })}
-          </span>
-          ${hasGuide
-            ? html`<button
-                class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
-                aria-pressed=${guideOpen}
-                title=${guideOpen ? t("guide.hide") : t("guide.show")}
-                onClick=${onToggleGuide}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
-                <span>${t("guide.label")}</span>
-              </button>`
-            : null}
-          <${CopyButton}
-            title=${t("copy.listed")}
-            getText=${() => (resolved.toMarkdown && !trimmedQuery ? resolved.toMarkdown() : overviewToMarkdown(visibleRows))}
-          />
-        </span>
-      </h2>
       <div class="scope-table-wrap">
         <div class="filter-bar">
           <input
@@ -1370,6 +1361,25 @@ function ScopePage({
                 ${t("filter.showInactive")}
               </label>`
             : null}
+          <div class="filter-actions">
+            ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
+            <${CaseCountLabel} shown=${trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count)} />
+            ${hasGuide
+              ? html`<button
+                  class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
+                  aria-pressed=${guideOpen}
+                  title=${guideOpen ? t("guide.hide") : t("guide.show")}
+                  onClick=${onToggleGuide}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+                  <span>${t("guide.label")}</span>
+                </button>`
+              : null}
+            <${CopyButton}
+              title=${t("copy.listed")}
+              getText=${() => (resolved.toMarkdown && !trimmedQuery ? resolved.toMarkdown() : overviewToMarkdown(visibleRows))}
+            />
+          </div>
         </div>
         ${visibleRows.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
@@ -1382,7 +1392,7 @@ function ScopePage({
           </p>`
         : null}
       ${suite && cardCases.length > 0
-        ? html`<${SuiteCategories} suite=${suite} testCases=${cardCases} level=${1} showIndex=${false} />`
+        ? html`<${SuiteCategories} suite=${suite} testCases=${cardCases} level=${0} showIndex=${false} />`
         : null}
     </section>
   `;
@@ -2588,6 +2598,8 @@ function RunMenu({
 }
 
 function AppHeader({
+  crumbs,
+  pageHeading,
   onOpenPalette,
   navCollapsed,
   onToggleNav,
@@ -2604,6 +2616,10 @@ function AppHeader({
   lang,
   onChangeLang,
 }: {
+  /** Where the reader is, outermost first; the last is the page and is not a link */
+  crumbs: Crumb[];
+  /** Whether the page's own title is the document's heading (the single long page has headings of its own) */
+  pageHeading: boolean;
   lang: string;
   onChangeLang: (code: string) => void;
   onOpenPalette: () => void;
@@ -2622,6 +2638,8 @@ function AppHeader({
 }) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
   const runButtonRef = useRef<HTMLButtonElement>(null);
+  const current = crumbs[crumbs.length - 1];
+  const Heading = pageHeading ? "h1" : "span";
 
   return html`
     <header class="app-header">
@@ -2634,7 +2652,12 @@ function AppHeader({
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
         </button>
-        <span class="app-header-title">${t("app.title")}</span>
+        <nav class="app-crumbs" aria-label=${t("nav.breadcrumb")} title=${crumbs.map((crumb) => crumb.label).join(" › ")}>
+          <ol>
+            ${crumbs.slice(0, -1).map((crumb) => html`<li key=${crumb.label} class="crumb crumb-ancestor"><a href=${crumb.hash}>${crumb.label}</a></li>`)}
+            <li class="crumb crumb-current" aria-current="page"><${Heading} class="app-header-title">${current.label}</${Heading}></li>
+          </ol>
+        </nav>
       </div>
       <div class="app-header-actions">
         <div class="run-anchor">
@@ -2944,24 +2967,31 @@ function App() {
   }, []);
 
   const domains = groupByDomainAndFeature(suites);
+  const resolvedScope = route.mode === "table" ? resolveScope(route.scope, suites) : null;
+  const crumbs: Crumb[] =
+    route.mode === "full"
+      ? [{ label: t("view.onePage") }]
+      : resolvedScope
+        ? [...resolvedScope.ancestors, { label: resolvedScope.title }]
+        : [{ label: t("app.title") }];
 
   return html`
     <div>
-      <${AppHeader} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode === "table"} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
       >
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} />
-        <div class="app">
+        <div class=${"app" + (route.mode === "table" ? " app-scope" : "")}>
           ${route.mode === "full"
             ? domains.length === 0
               ? html`<p class="empty">${t("scope.noFiles")}</p>`
               : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
             : html`<${ScopePage}
                 route=${route}
-                suites=${suites}
+                resolved=${resolvedScope}
                 rows=${overviewRows}
                 query=${query}
                 onQueryChange=${setQuery}

@@ -17,6 +17,7 @@ export const en = {
   "nav.show": "Show navigation",
   "nav.hide": "Hide navigation",
   "nav.resize": "Resize navigation",
+  "nav.breadcrumb": "Breadcrumb",
   "theme.toLight": "Switch to light theme",
   "theme.toDark": "Switch to dark theme",
   "lang.title": "Language",
