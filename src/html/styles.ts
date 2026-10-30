@@ -303,7 +303,9 @@ body {
 .app {
   flex: 1;
   min-width: 0;
-  padding: 24px 32px 80px;
+  /* No top padding: the first sticky header pins right under the app header, so any gap above it
+     would close up the moment the page scrolls and the heading would jump */
+  padding: 0 32px 80px;
 }
 
 /*
@@ -656,6 +658,8 @@ body {
   border-collapse: separate;
   border-spacing: 0;
   border: 1px solid var(--border);
+  /* The top edge belongs to the sticky thead instead, so it stays when the table scrolls under the header */
+  border-top: none;
   font-size: 0.9rem;
 }
 
@@ -681,6 +685,7 @@ body {
   top: calc(var(--header-h) + var(--sticky-h));
   z-index: 9;
   background: var(--bg-subtle);
+  border-top: 1px solid var(--border);
 }
 
 .scope-table thead th {
@@ -785,6 +790,7 @@ body {
 @container scope-table (max-width: 600px) {
   .scope-table, .scope-table tbody, .scope-table tr, .scope-table td, .scope-table th { display: block; }
   /* Kept for assistive technology, hidden visually */
+  .scope-table { border-top: 1px solid var(--border); }
   .scope-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .scope-table .overview-row {
     display: grid;
