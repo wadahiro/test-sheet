@@ -1037,7 +1037,15 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
           }}
         >${plan ? html`<span class="plan-caret" aria-hidden="true">${plan.open ? "▾" : "▸"}</span>` : null}<${Highlight} text=${row.tcId} query=${query} /></button>
       </td>
-      <td class="overview-name"><${Highlight} text=${row.name} query=${query} /></td>
+      <td
+        class=${"overview-name" + (plan ? " plan-name" : "")}
+        onClick=${plan
+          ? () => {
+              // Not while the name is being selected to copy
+              if (!window.getSelection()?.toString()) plan.onToggleOpen();
+            }
+          : undefined}
+      ><${Highlight} text=${row.name} query=${query} /></td>
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
       <td class="overview-method overview-nowrap" data-label=${t("col.method")}><${Highlight} text=${row.method} query=${query} /></td>
       <td class="overview-tags">

@@ -751,6 +751,9 @@ body {
   .plan-done-text { display: none; }
 }
 
+/* The name opens the case as the ID does, for the mouse; the ID button stays the one keyboard and assistive technology use */
+.plan-name { cursor: pointer; }
+
 .plan-caret {
   display: inline-block;
   width: 1em;
