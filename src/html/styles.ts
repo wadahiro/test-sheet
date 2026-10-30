@@ -712,6 +712,8 @@ body {
 .plan-detail td { padding: 0 8px 8px; border-top: none; }
 .plan-detail .test-case { margin-bottom: 0; }
 .plan-detail .test-case-head { position: static; }
+/* Planning stays on the plan page, so the card's link to its own page is not offered, and a plan has nothing to copy per case */
+.plan-detail .test-case-actions { display: none; }
 
 /* A section heading row has no sticky header of its own for jumpToId to nudge by, so it clears the stack here */
 .plan-table .scope-group { scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--plan-thead-h, 38px)); }
