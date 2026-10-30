@@ -47,6 +47,9 @@ export const STYLES = `
   --danger: #cf222e;
   --danger-bg: #ffebe9;
   --header-h: 48px;
+  /* Breathing room between the app header and the first sticky header; sticky tops start below it */
+  --page-gap: 16px;
+  --stick-top: calc(var(--header-h) + var(--page-gap));
   --nav-w: 240px;
   --guide-w: 380px;
   --sticky-h: 44px;
@@ -303,9 +306,7 @@ body {
 .app {
   flex: 1;
   min-width: 0;
-  /* No top padding: the first sticky header pins right under the app header, so any gap above it
-     would close up the moment the page scrolls and the heading would jump */
-  padding: 0 32px 80px;
+  padding: var(--page-gap) 32px 80px;
 }
 
 /*
@@ -328,11 +329,17 @@ body {
   padding-right: 32px;
 }
 
-.sticky-level-0 { top: calc(var(--header-h) + var(--sticky-h) * 0); z-index: 14; }
-.sticky-level-1 { top: calc(var(--header-h) + var(--sticky-h) * 1); z-index: 13; }
-.sticky-level-2 { top: calc(var(--header-h) + var(--sticky-h) * 2); z-index: 12; }
-.sticky-level-3 { top: calc(var(--header-h) + var(--sticky-h) * 3); z-index: 11; }
-.sticky-level-4 { top: calc(var(--header-h) + var(--sticky-h) * 4); z-index: 10; }
+.sticky-level-0 {
+  top: calc(var(--stick-top) + var(--sticky-h) * 0);
+  z-index: 14;
+  /* The gap above the first header stays open when scrolled, so it is painted over: otherwise cases
+     would scroll through it, visible between the app header and this one */
+  box-shadow: 0 calc(-1 * var(--page-gap)) 0 var(--bg);
+}
+.sticky-level-1 { top: calc(var(--stick-top) + var(--sticky-h) * 1); z-index: 13; }
+.sticky-level-2 { top: calc(var(--stick-top) + var(--sticky-h) * 2); z-index: 12; }
+.sticky-level-3 { top: calc(var(--stick-top) + var(--sticky-h) * 3); z-index: 11; }
+.sticky-level-4 { top: calc(var(--stick-top) + var(--sticky-h) * 4); z-index: 10; }
 
 .domain-section {
   margin-bottom: 40px;
@@ -433,7 +440,7 @@ body {
  */
 .filter-bar {
   position: sticky;
-  top: calc(var(--header-h) + var(--sticky-h));
+  top: calc(var(--stick-top) + var(--sticky-h));
   z-index: 11;
   height: var(--filter-h);
   display: flex;
@@ -682,14 +689,14 @@ body {
 
 .overview-table thead th {
   position: sticky;
-  top: calc(var(--header-h) + var(--sticky-h));
+  top: calc(var(--stick-top) + var(--sticky-h));
   z-index: 9;
   background: var(--bg-subtle);
   border-top: 1px solid var(--border);
 }
 
 .scope-table thead th {
-  top: calc(var(--header-h) + var(--sticky-h) + var(--filter-h));
+  top: calc(var(--stick-top) + var(--sticky-h) + var(--filter-h));
 }
 
 .overview-row {
@@ -845,7 +852,7 @@ body {
  */
 .guide,
 .guide h2 {
-  scroll-margin-top: calc(var(--header-h) + var(--sticky-h) * var(--guide-depth, 3));
+  scroll-margin-top: calc(var(--stick-top) + var(--sticky-h) * var(--guide-depth, 3));
 }
 
 /*
