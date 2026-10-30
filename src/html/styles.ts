@@ -1758,11 +1758,6 @@ body {
   font-family: monospace;
 }
 
-.count-total {
-  color: var(--fg-muted);
-  font-weight: normal;
-}
-
 /* Command palette (Cmd+K / Ctrl+K) */
 
 .palette-overlay {

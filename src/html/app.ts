@@ -867,11 +867,13 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   `;
 }
 
-/** Renders a count as "active (total)" when some cases are obsolete/superseded/skipped, otherwise just the total. */
+/** The cases a heading lists, with a unit: a bare number beside a title does not say what it counts */
+function caseCountText(n: number | string, plural: number = Number(n)): string {
+  return tn("scope.count", plural, { count: n });
+}
+
 function CountLabel({ testCases }: { testCases: TestCase[] }) {
-  const total = testCases.length;
-  const activeCount = testCases.filter((tc) => !isInactive(tc)).length;
-  return activeCount === total ? html`${total}` : html`${activeCount} <span class="count-total">(${total})</span>`;
+  return html`${caseCountText(testCases.length)}`;
 }
 
 /** Selecting the current target again fires no hashchange, so jump directly in that case */
@@ -1286,7 +1288,7 @@ function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth:
 
 /** How many cases the table lists; while filtering, "matching / all in this scope" */
 function CaseCountLabel({ shown, total, filtered }: { shown: number; total: number; filtered: boolean }) {
-  return html`<span class="filter-count">${tn("scope.count", shown, { count: filtered ? `${shown} / ${total}` : shown })}</span>`;
+  return html`<span class="filter-count">${caseCountText(filtered ? `${shown} / ${total}` : shown, shown)}</span>`;
 }
 
 /**
@@ -1531,7 +1533,7 @@ function FeatureSection({ domain, group }: { domain: string; group: FeatureGroup
       <h2 class="feature-title sticky-header sticky-level-1">
         <span class="suite-title-text">${group.featureLabel}</span>
         <span class="suite-title-right">
-          <span class="suite-title-count">${formatCaseCount(featureTestCaseCount(group))}</span>
+          <span class="suite-title-count">${caseCountText(featureTestCaseCount(group).total)}</span>
           <${CopyButton} title=${t("copy.feature")} getText=${() => featureToMarkdown(group)} />
         </span>
       </h2>
@@ -1546,7 +1548,7 @@ function DomainSection({ group }: { group: DomainGroup }) {
       <h2 class="domain-title sticky-header sticky-level-0">
         <span class="suite-title-text">${group.domainLabel}</span>
         <span class="suite-title-right">
-          <span class="suite-title-count">${formatCaseCount(domainTestCaseCount(group))}</span>
+          <span class="suite-title-count">${caseCountText(domainTestCaseCount(group).total)}</span>
           <${CopyButton} title=${t("copy.domain")} getText=${() => domainToMarkdown(group)} />
         </span>
       </h2>
