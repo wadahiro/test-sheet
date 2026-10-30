@@ -5,7 +5,7 @@ import { h, render, createContext } from "preact";
 import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
-import { caseRunKey, countCasesPerRun, deleteRunData, readRunIndex, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writeRunIndex, type RunIndex, type RunMeta } from "./runStore";
+import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
@@ -955,9 +955,40 @@ const indexColumns = (): string[] => [t("col.id"), t("col.name"), t("col.status"
  * One case as a table row. With `onTag` a tag chip filters the table it sits in; without it the
  * chip links to the overview filtered by that tag, for tables that have no filter of their own.
  */
-function IndexRow({ row, onTag, query = "" }: { row: IndexRowData; onTag?: (tag: string) => void; query?: string }) {
+/** What the plan page adds to a row: the case's decision and reason, and how to change them */
+interface PlanCells {
+  decision: Decision | undefined;
+  reason: string;
+  onDecide: (decision: Decision | undefined) => void;
+  onReason: (reason: string) => void;
+}
+
+/** Committed when focus leaves, not per keystroke, so typing (an IME's composition included) is never rewritten under the cursor */
+function ReasonInput({ id, reason, onReason }: { id: string; reason: string; onReason: (reason: string) => void }) {
+  const [text, setText] = useState(reason);
+  useEffect(() => setText(reason), [reason]);
+  return html`<input
+    class="plan-reason"
+    value=${text}
+    maxlength="300"
+    placeholder=${t("plan.reasonPlaceholder")}
+    aria-label=${t("plan.reasonLabel", { id })}
+    onInput=${(e: Event) => setText((e.target as HTMLInputElement).value)}
+    onChange=${(e: Event) => onReason((e.target as HTMLInputElement).value)}
+  />`;
+}
+
+function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?: (tag: string) => void; query?: string; plan?: PlanCells }) {
+  const decisionButton = (decision: Decision, label: string) => html`<button
+    class=${"decision-btn decision-" + decision + (plan?.decision === decision ? " decision-on" : "")}
+    aria-pressed=${plan?.decision === decision}
+    onClick=${() => plan?.onDecide(plan.decision === decision ? undefined : decision)}
+  >${label}</button>`;
   return html`
-    <tr class=${"overview-row" + (row.inactive ? " row-inactive" : "")} onClick=${() => goToTestCase(row.tcId)}>
+    <tr
+      class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "")}
+      onClick=${plan ? undefined : () => goToTestCase(row.tcId)}
+    >
       <td class="overview-id">
         <button
           class="overview-link"
@@ -979,6 +1010,18 @@ function IndexRow({ row, onTag, query = "" }: { row: IndexRowData; onTag?: (tag:
           )}
         </div>
       </td>
+      ${plan
+        ? html`<td class="overview-decision">
+              ${row.inactive
+                ? html`<span class="plan-yaml">—</span>`
+                : html`<div class="decision-group" role="group" aria-label=${t("plan.decisionLabel", { id: row.tcId })}>${decisionButton("r", t("plan.run"))}${decisionButton("s", t("plan.skip"))}</div>`}
+            </td>
+            <td class="overview-reason">
+              ${row.inactive
+                ? html`<span class="plan-yaml">${row.statusTitle}</span>`
+                : html`<${ReasonInput} id=${row.tcId} reason=${plan.reason} onReason=${plan.onReason} />`}
+            </td>`
+        : null}
     </tr>
   `;
 }
@@ -1283,15 +1326,16 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
 }
 
 /** Rows of the table, with a heading row ahead of each section naming where it sits below the scope */
-function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth: number; onTag: (tag: string) => void; query: string }) {
+function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; depth: number; onTag: (tag: string) => void; query: string; plan?: (row: OverviewRow) => PlanCells }) {
+  const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : indexColumns();
   const sectionCount = new Set(rows.map((row) => row.keys.category)).size;
   // A suite with a single section would just repeat its own page title
   const showGroups = !(depth === OVERVIEW_LEVELS.length - 1 && sectionCount === 1);
 
   return html`
-    <table class="overview-table scope-table">
+    <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")}>
       <thead>
-        <tr>${indexColumns().map((column) => html`<th key=${column}>${column}</th>`)}</tr>
+        <tr>${columns.map((column) => html`<th key=${column}>${column}</th>`)}</tr>
       </thead>
       <tbody>
         ${rows.map((row, i) => {
@@ -1299,12 +1343,12 @@ function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth:
           return html`
             ${startsGroup
               ? html`<tr key=${"group:" + row.keys.category} class="scope-group">
-                  <th colspan=${indexColumns().length}>
+                  <th colspan=${columns.length}>
                     <a href=${sectionHash(row.idPrefix, row.labels.category)}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
                   </th>
                 </tr>`
               : null}
-            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} />
+            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} plan=${plan?.(row)} />
           `;
         })}
       </tbody>
@@ -1331,6 +1375,10 @@ function ScopePage({
   onToggleGuide,
   showInactive,
   onToggleInactive,
+  plan,
+  planHasRun,
+  scopeOnly,
+  onToggleScopeOnly,
 }: {
   route: Route;
   resolved: ResolvedScope | null;
@@ -1341,6 +1389,11 @@ function ScopePage({
   onToggleGuide: () => void;
   showInactive: boolean;
   onToggleInactive: () => void;
+  plan: Plan;
+  /** The run's plan has at least one case to run, so there is a list to narrow the page to */
+  planHasRun: boolean;
+  scopeOnly: boolean;
+  onToggleScopeOnly: () => void;
 }) {
   if (!resolved) {
     return html`<p class="empty">${t("scope.notFound")} <a href=${OVERVIEW_HASH}>${t("scope.backToAll")}</a></p>`;
@@ -1350,7 +1403,11 @@ function ScopePage({
   }
 
   const { rowKey } = resolved;
-  const scopeRows = rowKey ? rows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rows;
+  const pageRows = rowKey ? rows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rows;
+  // The case the route points at stays, so a link to a case outside the plan still lands on it
+  const scopeRows = scopeOnly ? pageRows.filter((row) => plan.d[row.tcId] === "r" || testCaseAnchorId(row.tcId) === route.target) : pageRows;
+  const skippedCount = pageRows.filter((row) => plan.d[row.tcId] === "s").length;
+  const undecidedCount = pageRows.filter((row) => !row.inactive && !plan.d[row.tcId]).length;
   const trimmedQuery = query.trim();
   const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
   const visibleIds = new Set(visibleRows.map((row) => row.tcId));
@@ -1382,7 +1439,13 @@ function ScopePage({
           ${hasInactive
             ? html`<label class="filter-toggle" title=${t("filter.showInactiveTitle")}>
                 <input type="checkbox" checked=${showInactive} onChange=${onToggleInactive} />
-                ${t("filter.showInactive")}
+                <span class="filter-toggle-text">${t("filter.showInactive")}</span>
+              </label>`
+            : null}
+          ${planHasRun
+            ? html`<label class="filter-toggle" title=${t("scope.onlyTitle")}>
+                <input type="checkbox" checked=${scopeOnly} onChange=${onToggleScopeOnly} />
+                <span class="filter-toggle-text">${t("scope.only")}</span>
               </label>`
             : null}
           <div class="filter-actions">
@@ -1415,9 +1478,207 @@ function ScopePage({
             <button class="link-btn" onClick=${onToggleInactive}>${t("hidden.show")}</button>
           </p>`
         : null}
+      ${scopeOnly && skippedCount + undecidedCount > 0
+        ? html`<p class="hidden-note">
+            ${t("plan.hidden", { skipped: skippedCount, undecided: undecidedCount })}${" "}
+            <button class="link-btn" onClick=${onToggleScopeOnly}>${t("hidden.show")}</button>${" · "}
+            <a class="scope-link" href=${PLAN_HASH}>${t("plan.edit")}</a>
+          </p>`
+        : null}
       ${suite && cardCases.length > 0
         ? html`<${SuiteCategories} suite=${suite} testCases=${cardCases} level=${0} showIndex=${false} />`
         : null}
+    </section>
+  `;
+}
+
+/** The cases a run's plan covers: those carrying one of its tags, or all of them when it names none */
+function planRange(rows: OverviewRow[], plan: Plan): OverviewRow[] {
+  return plan.tags.length === 0 ? rows : rows.filter((row) => row.tags.some((tag) => plan.tags.includes(tag)));
+}
+
+/** An inactive case has its reason in the YAML already, so it is not asked to be decided */
+function tallyPlan(rows: OverviewRow[], plan: Plan) {
+  const live = rows.filter((row) => !row.inactive);
+  return {
+    run: live.filter((row) => plan.d[row.tcId] === "r").length,
+    skip: live.filter((row) => plan.d[row.tcId] === "s").length,
+    undecided: live.filter((row) => !plan.d[row.tcId]).length,
+    inactive: rows.length - live.length,
+  };
+}
+
+function withDecisions(plan: Plan, ids: string[], decision: Decision | undefined, reason?: string): Plan {
+  const d = { ...plan.d };
+  const why = { ...plan.why };
+  for (const id of ids) {
+    if (decision) d[id] = decision;
+    else delete d[id];
+    if (reason) why[id] = reason;
+  }
+  return { ...plan, d, why };
+}
+
+/** A reviewer reads this to judge the selection, so it lists the whole range and says what is missing */
+function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], sheetIds: Set<string>): string {
+  const inRange = planRange(rows, plan);
+  const rangeIds = new Set(inRange.map((row) => row.tcId));
+  const tally = tallyPlan(inRange, plan);
+  const decisionText = (row: OverviewRow) =>
+    row.inactive
+      ? t("plan.inactiveWith", { status: row.status ?? "" })
+      : plan.d[row.tcId] === "r"
+        ? t("plan.run")
+        : plan.d[row.tcId] === "s"
+          ? t("plan.skip")
+          : `**${t("plan.undecided")}**`;
+  const tableRows = (list: OverviewRow[]) =>
+    list.map((row) => {
+      const cells = [
+        row.tcId,
+        OVERVIEW_LEVELS.map((level) => row.labels[level]).join(" › "),
+        row.name,
+        decisionText(row),
+        row.inactive ? row.statusTitle : (plan.why[row.tcId] ?? ""),
+      ];
+      return `| ${cells.map(escapeMarkdownCell).join(" | ")} |`;
+    });
+  const columns = [t("col.id"), t("col.location"), t("col.name"), t("col.decision"), t("col.reason")];
+  const header = [`| ${columns.join(" | ")} |`, `|${columns.map(() => "---").join("|")}|`];
+
+  const undecided = inRange.filter((row) => !row.inactive && !plan.d[row.tcId]).map((row) => row.tcId);
+  const skippedBare = inRange.filter((row) => plan.d[row.tcId] === "s" && !plan.why[row.tcId]?.trim()).map((row) => row.tcId);
+  const outside = rows.filter((row) => plan.d[row.tcId] && !rangeIds.has(row.tcId));
+  const gone = Object.keys(plan.d).filter((id) => !sheetIds.has(id));
+
+  const lines = [
+    `# ${t("plan.review.title", { name: runName })}`,
+    "",
+    `> ${t("plan.review.summary", {
+      range: plan.tags.length === 0 ? t("plan.review.allTags") : plan.tags.map((tag) => `\`${tag}\``).join(", "),
+      total: inRange.length,
+      run: tally.run,
+      skip: tally.skip,
+      inactive: tally.inactive,
+      undecided: tally.undecided,
+    })}`,
+    "",
+    ...header,
+    ...tableRows(inRange),
+  ];
+  if (undecided.length > 0 || skippedBare.length > 0) {
+    lines.push("", `## ${t("plan.review.attention")}`, "");
+    if (undecided.length > 0) lines.push(`- ${t("plan.review.undecidedList", { n: undecided.length, ids: undecided.join(", ") })}`);
+    if (skippedBare.length > 0) lines.push(`- ${t("plan.review.skipNoReason", { n: skippedBare.length, ids: skippedBare.join(", ") })}`);
+  }
+  if (outside.length > 0) {
+    lines.push("", `## ${t("plan.review.outside", { n: outside.length })}`, "", ...header, ...tableRows(outside));
+  }
+  if (gone.length > 0) lines.push("", `> ${t("plan.review.gone", { n: gone.length, ids: gone.join(", ") })}`);
+  return lines.join("\n");
+}
+
+/**
+ * Where the person planning a run chooses what it covers. The range is a set of exact tags rather
+ * than the filter's text: that text also matches names and translated labels, so it could not name
+ * the same cases twice. Decisions are kept per case, so a case added to the sheet later is undecided.
+ */
+function PlanPage({
+  run,
+  plan,
+  rows,
+  sheetIds,
+  query,
+  onQueryChange,
+  onPlan,
+}: {
+  run: ActiveRun | null;
+  plan: Plan;
+  rows: OverviewRow[];
+  sheetIds: Set<string>;
+  query: string;
+  onQueryChange: (query: string) => void;
+  onPlan: (change: (current: Plan) => Plan) => void;
+}) {
+  if (!run) return html`<p class="empty">${t("plan.needRun")}</p>`;
+
+  const allTags = [...new Set(rows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
+  const rangeRows = planRange(rows, plan);
+  const trimmedQuery = query.trim();
+  const listed = filterOverviewRows(rangeRows, trimmedQuery);
+  const decidable = listed.filter((row) => !row.inactive).map((row) => row.tcId);
+  const tally = tallyPlan(rangeRows, plan);
+
+  const skipListed = () => {
+    const reason = window.prompt(t("plan.skipPrompt", { n: decidable.length }), "");
+    if (reason === null) return;
+    onPlan((current) => withDecisions(current, decidable, "s", reason.trim()));
+  };
+  const cellsFor = (row: OverviewRow): PlanCells => ({
+    decision: plan.d[row.tcId],
+    reason: plan.why[row.tcId] ?? "",
+    onDecide: (decision) => onPlan((current) => withDecisions(current, [row.tcId], decision)),
+    onReason: (reason) =>
+      onPlan((current) => {
+        const why = { ...current.why };
+        if (reason.trim()) why[row.tcId] = reason.trim();
+        else delete why[row.tcId];
+        return { ...current, why };
+      }),
+  });
+
+  return html`
+    <section class="overview scope-page plan-page" id="plan">
+      <div class="plan-head">
+        <div class="plan-range">
+          <span class="plan-label">${t("plan.range")}</span>
+          ${plan.tags.map(
+            (tag) => html`<span class="tag-chip plan-range-chip" key=${tag}>
+              ${tag}
+              <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))}>×</button>
+            </span>`
+          )}
+          <select
+            class="plan-tag-add"
+            aria-label=${t("plan.addTag")}
+            value=""
+            onChange=${(e: Event) => {
+              const select = e.target as HTMLSelectElement;
+              const tag = select.value;
+              select.value = "";
+              if (tag) onPlan((current) => ({ ...current, tags: [...current.tags, tag] }));
+            }}
+          >
+            <option value="">${t("plan.addTag")}</option>
+            ${allTags.filter((tag) => !plan.tags.includes(tag)).map((tag) => html`<option key=${tag} value=${tag}>${tag}</option>`)}
+          </select>
+          ${plan.tags.length === 0 ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
+        </div>
+        <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
+        <div class="plan-actions">
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, "r"))}>${t("plan.runListed")}</button>
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${skipListed}>${t("plan.skipListed")}</button>
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, undefined))}>${t("plan.clearListed")}</button>
+          <${CopyButton} title=${t("plan.copyReviewTitle")} getText=${() => planReviewToMarkdown(run.name, plan, rows, sheetIds)} />
+        </div>
+      </div>
+      <div class="scope-table-wrap">
+        <div class="filter-bar">
+          <input
+            class="overview-search"
+            type="search"
+            placeholder=${t("filter.placeholder")}
+            value=${query}
+            onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
+          />
+          <div class="filter-actions">
+            <${CaseCountLabel} shown=${listed.length} total=${rangeRows.length} filtered=${trimmedQuery !== ""} />
+          </div>
+        </div>
+        ${listed.length === 0
+          ? html`<p class="empty">${t("filter.none")}</p>`
+          : html`<${ScopeTable} rows=${listed} depth=${0} onTag=${onQueryChange} query=${trimmedQuery} plan=${cellsFor} />`}
+      </div>
     </section>
   `;
 }
@@ -1585,6 +1846,7 @@ function DomainSection({ group }: { group: DomainGroup }) {
 
 const OVERVIEW_HASH = "#/overview";
 const ALL_HASH = "#/all";
+const PLAN_HASH = "#/plan";
 
 function domainHash(domain: string): string {
   return `#/d/${encodeURIComponent(domain)}`;
@@ -1812,7 +2074,8 @@ function NavOutline({
     count: suites.reduce((sum, suite) => sum + suiteTestCaseCount(suite).active, 0),
   };
   const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
-  const selectedId = scopeEntryId(route.scope);
+  // The plan page is not a node of the tree, so nothing in the outline is its page
+  const selectedId = route.mode === "plan" ? "" : scopeEntryId(route.scope);
   const tracksScroll = route.mode === "full" || route.scope.kind === "suite";
   const [currentId, setCurrentId] = useState<string>(selectedId);
   const suppressUntil = useRef(0);
@@ -1913,8 +2176,8 @@ type Scope =
 
 interface Route {
   scope: Scope;
-  /** `table` lists the scope's cases; `full` is the single long page of everything (`#/all`) */
-  mode: "table" | "full";
+  /** `table` lists the scope's cases; `full` is the single long page of everything (`#/all`); `plan` is where a run's cases are chosen */
+  mode: "table" | "full" | "plan";
   /** Element to scroll to once the page has rendered; null scrolls to the top */
   target: string | null;
   /** Filter seeded from `?q=<query>`; empty when unfiltered */
@@ -1933,6 +2196,7 @@ const ALL_SCOPE: Scope = { kind: "all" };
  *
  *   #/overview[?q=]                    all test cases, table only (the landing page)
  *   #/all  (and #/)                    everything on one page
+ *   #/plan                             choose which cases the active run covers
  *   #/d/<domain>   #/f/<domain>/<feature>   #/s/<idPrefix>
  *   #/s/<idPrefix>/section/<name>      a suite page scrolled to one section
  *   #/s/<idPrefix>/guide[/<n>]         a suite page scrolled to its guide (or the nth guide heading)
@@ -1954,6 +2218,7 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
   const segments = path.split("/").slice(1).map(safeDecode);
 
   if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "" };
+  if (segments[0] === "plan") return { ...landing, mode: "plan", query: "" };
 
   if (segments[0] === "d" && segments.length === 2) {
     return { ...landing, scope: { kind: "domain", domain: segments[1] } };
@@ -2307,6 +2572,25 @@ function writeShowInactive(show: boolean) {
   }
 }
 
+const SCOPE_ONLY_STORAGE_KEY = "test-sheet-in-scope-only";
+
+/** On unless turned off: a plan that says what to run is there to narrow the pages */
+function readScopeOnly(): boolean {
+  try {
+    return localStorage.getItem(SCOPE_ONLY_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeScopeOnly(on: boolean) {
+  try {
+    localStorage.setItem(SCOPE_ONLY_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    // Blocked storage just means the choice is not remembered
+  }
+}
+
 const GUIDE_OPEN_STORAGE_KEY = "test-sheet-guide-open";
 
 function readGuideOpen(): boolean {
@@ -2506,7 +2790,7 @@ function RunMenu({
   /** `byKeyboard` is true for Esc, where focus should return to the button that opened the menu */
   onClose: (byKeyboard: boolean) => void;
 }) {
-  const [counts] = useState(countCasesPerRun);
+  const [recorded] = useState(recordedCaseIds);
   const [newName, setNewName] = useState(() => (index.runs.length === 0 ? defaultName() : ""));
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
@@ -2538,7 +2822,7 @@ function RunMenu({
     setBusy(run.id);
     const screenshots = await countImagesWithPrefix(runImagePrefix(run.id));
     setBusy(null);
-    const cases = counts[run.id] ?? 0;
+    const cases = recorded[run.id]?.size ?? 0;
     // A deleted run cannot be got back, screenshots included
     const stops = run.id === index.last ? t("runs.stops") : "";
     if (confirm(t("runs.confirmDelete", { name: run.name, cases: tn("unit.case", cases), shots: tn("unit.screenshot", screenshots), stops }))) {
@@ -2568,6 +2852,12 @@ function RunMenu({
               .sort((a, b) => b.u.localeCompare(a.u))
               .map((run) => {
                 const isActive = run.id === index.last;
+                const marked = recorded[run.id] ?? new Set<string>();
+                const planned = Object.entries(readPlan(run.id).d).filter(([, decision]) => decision === "r").map(([id]) => id);
+                const meta =
+                  planned.length > 0
+                    ? t("runs.metaPlan", { done: planned.filter((id) => marked.has(id)).length, total: planned.length, time: formatRunTime(run.u) })
+                    : t("runs.meta", { done: marked.size, total: totalCases, time: formatRunTime(run.u) });
                 return html`<li key=${run.id} class=${"run-row" + (isActive ? " run-row-active" : "")}>
                   ${renaming === run.id
                     ? html`<input
@@ -2592,10 +2882,11 @@ function RunMenu({
                         <span class="run-mark" aria-hidden="true">${isActive ? "●" : "○"}</span>
                         <span class="run-text">
                           <span class="run-name" title=${run.name}>${run.name}</span>
-                          <span class="run-meta">${t("runs.meta", { done: counts[run.id] ?? 0, total: totalCases, time: formatRunTime(run.u) })}</span>
+                          <span class="run-meta">${meta}</span>
                         </span>
                       </button>`}
                   <span class="run-actions">
+                    ${isActive ? html`<a class="link-btn" href=${PLAN_HASH} onClick=${() => onClose(false)}>${t("plan.open")}</a>` : null}
                     <button class="link-btn" onClick=${() => { setRenaming(run.id); setRenameText(run.name); }}>${t("runs.rename")}</button>
                     <button class="link-btn link-btn-danger" disabled=${busy === run.id} onClick=${() => askDelete(run)}>${t("runs.delete")}</button>
                   </span>
@@ -2763,6 +3054,14 @@ const allTestCasesEntry = (): NavEntry => ({
   searchText: `${t("view.all")} overview index list table all test cases`,
 });
 
+const planEntry = (): NavEntry => ({
+  kind: "view",
+  id: PLAN_HASH,
+  hash: PLAN_HASH,
+  label: t("plan.title"),
+  searchText: `${t("plan.title")} plan tailoring scope select skip review`,
+});
+
 const onePageEntry = (): NavEntry => ({
   kind: "view",
   id: ALL_HASH,
@@ -2815,6 +3114,32 @@ function App() {
     const run = runIndex.runs.find((candidate) => candidate.id === runIndex.last);
     return run ? { id: run.id, name: run.name } : null;
   }, [runIndex.last, runIndex.runs]);
+  const activeRunId = activeRun?.id ?? null;
+  const sheetIds = useMemo(() => new Set(suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId))), [suites]);
+  const [planStore, setPlanStore] = useState<{ runId: string | null; plan: Plan }>(() => ({ runId: activeRunId, plan: activeRunId ? readPlan(activeRunId) : emptyPlan() }));
+  // Read afresh when the run in use changes, so a plan is never shown against another run
+  const plan = planStore.runId === activeRunId ? planStore.plan : activeRunId ? readPlan(activeRunId) : emptyPlan();
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  const updatePlan = useCallback(
+    (change: (current: Plan) => Plan) => {
+      if (!activeRunId) return;
+      const next = { ...change(planRef.current), u: new Date().toISOString() };
+      planRef.current = next;
+      writePlan(activeRunId, next, sheetIds);
+      setPlanStore({ runId: activeRunId, plan: next });
+    },
+    [activeRunId, sheetIds]
+  );
+  const planHasRun = Object.values(plan.d).includes("r");
+  const [scopeOnlyPref, setScopeOnlyPref] = useState(readScopeOnly);
+  const scopeOnly = planHasRun && scopeOnlyPref;
+  const toggleScopeOnly = useCallback(() => {
+    setScopeOnlyPref((on) => {
+      writeScopeOnly(!on);
+      return !on;
+    });
+  }, []);
   const [lang, setLang] = useState(currentLocaleCode);
   const changeLang = useCallback((code: string) => {
     applyLocale(findLocale(code));
@@ -2964,10 +3289,11 @@ function App() {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === runIndexKey()) setRunIndex(rereadRunIndex());
+      if (activeRunId && e.key === planKey(activeRunId)) setPlanStore({ runId: activeRunId, plan: readPlan(activeRunId) });
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [activeRunId]);
 
   const toggleInactive = useCallback(() => {
     setShowInactive((show) => {
@@ -2998,25 +3324,37 @@ function App() {
   const crumbs: Crumb[] =
     route.mode === "full"
       ? [{ label: t("view.onePage") }]
-      : resolvedScope
+      : route.mode === "plan"
+        ? [{ label: activeRun ? t("plan.pageTitle", { name: activeRun.name }) : t("plan.title") }]
+        : resolvedScope
         ? [...resolvedScope.ancestors, { label: resolvedScope.title }]
         : [{ label: t("app.title") }];
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode === "table"} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
       >
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} />
-        <div class=${"app" + (route.mode === "table" ? " app-scope" : "")}>
+        <div class=${"app" + (route.mode !== "full" ? " app-scope" : "")}>
           ${route.mode === "full"
             ? domains.length === 0
               ? html`<p class="empty">${t("scope.noFiles")}</p>`
               : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
-            : html`<${ScopePage}
+            : route.mode === "plan"
+              ? html`<${PlanPage}
+                  run=${activeRun}
+                  plan=${plan}
+                  rows=${overviewRows}
+                  sheetIds=${sheetIds}
+                  query=${query}
+                  onQueryChange=${setQuery}
+                  onPlan=${updatePlan}
+                />`
+              : html`<${ScopePage}
                 route=${route}
                 resolved=${resolvedScope}
                 rows=${overviewRows}
@@ -3026,6 +3364,10 @@ function App() {
                 onToggleGuide=${() => setGuide(!guidePanelOpen)}
                 showInactive=${showInactive}
                 onToggleInactive=${toggleInactive}
+                plan=${plan}
+                planHasRun=${planHasRun}
+                scopeOnly=${scopeOnly}
+                onToggleScopeOnly=${toggleScopeOnly}
               />`}
         </div>
         ${guidePanelOpen && guideSuite
@@ -3042,7 +3384,7 @@ function App() {
       </${RunContext.Provider}>
       ${paletteOpen
         ? html`<${CommandPalette}
-            entries=${[allTestCasesEntry(), onePageEntry(), ...entries]}
+            entries=${[allTestCasesEntry(), onePageEntry(), planEntry(), ...entries]}
             overviewRows=${overviewRows}
             onClose=${() => setPaletteOpen(false)}
             onJump=${navigate}

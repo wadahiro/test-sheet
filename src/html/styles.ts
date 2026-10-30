@@ -526,6 +526,15 @@ body {
   color: var(--fg);
 }
 
+/* In the narrow table layout the toggles' labels give way (full text in the title) before the input does */
+@container scope-table (max-width: 600px) {
+  .filter-toggle-text {
+    max-width: 5.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 .filter-toggle {
   display: flex;
   flex: 0 0 auto;
@@ -536,6 +545,118 @@ body {
   color: var(--fg-muted);
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* The plan page: what a run covers, chosen per case, with the reason beside each choice */
+.plan-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 0 12px;
+}
+
+.plan-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.plan-range-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.plan-chip-x {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+.plan-chip-x:hover { color: var(--danger); }
+
+.plan-tag-add {
+  max-width: 14rem;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.plan-note {
+  font-size: 0.8rem;
+  color: var(--fg-faint);
+}
+
+.plan-summary {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-actions .copy-btn:disabled { opacity: 0.5; cursor: default; }
+
+.decision-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.decision-btn {
+  border: none;
+  background: var(--bg);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.decision-btn + .decision-btn { border-left: 1px solid var(--border); }
+.decision-btn:hover { background: var(--bg-hover); }
+.decision-r.decision-on { background: var(--success-bg); color: var(--success); font-weight: 600; }
+.decision-s.decision-on { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+
+/* A case still to be decided is marked at the row's edge, so it stands out in a long list */
+.plan-undecided td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+
+.plan-reason {
+  width: 100%;
+  min-width: 10rem;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.plan-yaml {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
 }
 
 .hidden-note {
@@ -553,6 +674,7 @@ body {
   cursor: pointer;
 }
 
+a.link-btn { text-decoration: none; }
 .link-btn:hover { text-decoration: underline; }
 .link-btn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 .link-btn-danger:hover { color: var(--danger); }
@@ -903,6 +1025,11 @@ body {
   .scope-table .overview-method { grid-area: method; font-size: 0.8rem; color: var(--fg-muted); }
   .scope-table .overview-method::before { content: attr(data-label) ": "; }
   .scope-table .overview-tags { grid-area: tags; }
+  .plan-table .overview-row {
+    grid-template-areas: "id name name name" "id status method tags" "id decision reason reason";
+  }
+  .plan-table .overview-decision { grid-area: decision; }
+  .plan-table .overview-reason { grid-area: reason; }
   /* The row carries the inactive fill now that its cells have no box of their own */
   .scope-table .row-inactive { background: var(--inactive-bg); }
   .scope-table .row-inactive td { background: none; }

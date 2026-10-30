@@ -1,6 +1,7 @@
 metadata:
   type_name: Password Reset
   id_prefix: PWRESET
+  tags: [auth]
 test_cases:
   - name: A reset link is sent to a registered email address
     category: Basic flow

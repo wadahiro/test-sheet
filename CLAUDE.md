@@ -25,6 +25,11 @@ domain → feature → test suite → section → test case. Domain and feature 
 - A case card's header band is its `.sticky-header` (the deepest level); `jumpToId` reads its `top`, so keep it a descendant of the card. The narrow step layout keys off the cards' own width (`.cards` container query), not the viewport, because the sidebar and guide panel set it.
 - `.nav-outline` is a flex column and only its `ul` scrolls. New head elements need `flex: 0 0 auto`; the `ul` keeps `min-height: 0`.
 
+## Runs and plans
+
+- A run's per-case results live under `test-sheet-run:<ns>:<run>:`, and `recordedCaseIds` counts every key there as a recorded case. Anything else a run stores (its plan: `test-sheet-plan:<ns>:<run>`) needs its own prefix, and `deleteRunData` must remove it.
+- A plan's range is a set of exact tags, never the filter's text: that text also matches names and translated labels, so it could not name the same cases twice. A case with no decision is undecided, so one added to the sheet later is seen as new rather than silently in or out. Inactive cases carry their reason in the YAML and are not decided.
+
 ## Theming
 
 - Never hardcode a color; use the `:root` variables. `--bg` must match `body`'s background — `.sticky-header` repaints it to cover content scrolling underneath.

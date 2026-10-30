@@ -181,21 +181,77 @@ export function touchRun(runId: string) {
   }
 }
 
-/** How many cases have results in each run, from one walk over the stored keys */
-export function countCasesPerRun(): Record<string, number> {
-  const counts: Record<string, number> = {};
+/** Which cases have results in each run, from one walk over the stored keys */
+export function recordedCaseIds(): Record<string, Set<string>> {
+  const recorded: Record<string, Set<string>> = {};
   try {
     const prefix = `test-sheet-run:${runNamespace()}:`;
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix)) continue;
-      const runId = key.slice(prefix.length).split(":")[0];
-      counts[runId] = (counts[runId] ?? 0) + 1;
+      const [runId, ...rest] = key.slice(prefix.length).split(":");
+      (recorded[runId] ??= new Set()).add(rest.join(":"));
     }
   } catch {
-    // Blocked storage: no counts
+    // Blocked storage: nothing recorded
   }
-  return counts;
+  return recorded;
+}
+
+/**
+ * Which cases a run is to cover, decided by the person planning it. Kept under its own prefix: the
+ * per-case results above are found by walking `test-sheet-run:<ns>:<run>:`, so a plan stored beneath
+ * it would be counted as a recorded case.
+ */
+export type Decision = "r" | "s";
+
+export interface Plan {
+  v: 1;
+  /** The range being planned: cases carrying any of these exact tags; none means the whole sheet */
+  tags: string[];
+  /** Run or skip, per case; a case with no entry is undecided, so one added to the sheet later is seen as such */
+  d: Record<string, Decision>;
+  /** Why a case is run or skipped, optional on either decision */
+  why: Record<string, string>;
+  /** Last changed, ISO */
+  u: string;
+}
+
+export const emptyPlan = (): Plan => ({ v: 1, tags: [], d: {}, why: {}, u: "" });
+
+export function planKey(runId: string): string {
+  return `test-sheet-plan:${runNamespace()}:${runId}`;
+}
+
+function isRecordOf<T>(value: unknown, check: (item: unknown) => item is T): value is Record<string, T> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every(check);
+}
+
+export function readPlan(runId: string): Plan {
+  try {
+    const raw = localStorage.getItem(planKey(runId));
+    if (!raw) return emptyPlan();
+    const data: Partial<Plan> = JSON.parse(raw);
+    return {
+      v: 1,
+      tags: Array.isArray(data.tags) ? data.tags.filter((tag): tag is string => typeof tag === "string") : [],
+      d: isRecordOf(data.d, (item): item is Decision => item === "r" || item === "s") ? data.d : {},
+      why: isRecordOf(data.why, (item): item is string => typeof item === "string") ? data.why : {},
+      u: typeof data.u === "string" ? data.u : "",
+    };
+  } catch {
+    return emptyPlan();
+  }
+}
+
+/** Decisions for cases no longer in the sheet are dropped on the way out, so a plan does not grow stale */
+export function writePlan(runId: string, plan: Plan, knownIds: Set<string>) {
+  const keep = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => knownIds.has(id)));
+  try {
+    localStorage.setItem(planKey(runId), JSON.stringify({ ...plan, d: keep(plan.d), why: keep(plan.why) }));
+  } catch {
+    // Blocked storage: the plan lasts for this visit only, like the runs themselves
+  }
 }
 
 /** Removes a run's results and screenshots; the caller updates the index */
@@ -206,6 +262,7 @@ export async function deleteRunData(runId: string): Promise<void> {
       const key = localStorage.key(i);
       if (key?.startsWith(prefix)) localStorage.removeItem(key);
     }
+    localStorage.removeItem(planKey(runId));
   } catch {
     // Blocked storage: nothing was stored
   }
