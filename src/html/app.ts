@@ -196,11 +196,38 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return html`${parts}`;
 }
 
+/**
+ * `navigator.clipboard` exists only in a secure context, so a page opened over plain http on a name
+ * other than localhost (the serve mode's address on a LAN, say) has none and would fail without a
+ * word. A hidden textarea and `execCommand` still work there.
+ */
+async function writeClipboardText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.setAttribute("readonly", "");
+    box.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(box);
+    box.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      box.remove();
+    }
+  }
+}
+
 function CopyButton({ getText, title, iconOnly = false }: { getText: () => string; title: string; iconOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const onClick = useCallback(() => {
-    navigator.clipboard.writeText(getText()).then(() => {
+    writeClipboardText(getText()).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
