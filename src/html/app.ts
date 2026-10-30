@@ -1630,6 +1630,20 @@ function PlanPage({
   // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
   const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
   useEffect(() => setOpened(new Map()), [resolved?.anchorId]);
+  // The controls stay in view while the table scrolls, but how tall they are depends on how the range
+  // chips wrap, so the table head's offset (--filter-h) follows the measured height
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  const hasBar = !!run && !!resolved;
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const measure = () => setBarHeight(bar.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [hasBar]);
   if (!run) return html`<p class="empty">${t("plan.needRun")}</p>`;
   if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${PLAN_HASH}>${t("scope.backToAll")}</a></p>`;
 
@@ -1664,7 +1678,8 @@ function PlanPage({
   });
 
   return html`
-    <section class="overview scope-page plan-page" id="plan">
+    <section class="overview scope-page plan-page" id="plan" style=${{ "--filter-h": barHeight > 0 ? `${barHeight}px` : undefined }}>
+      <div class="plan-bar" ref=${barRef}>
       <div class="plan-head">
         <div class="plan-range">
           <span class="plan-label">${t("plan.range")}</span>
@@ -1691,14 +1706,7 @@ function PlanPage({
           ${plan.tags.length === 0 ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
         </div>
         <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
-        <div class="plan-actions">
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, "r"))}>${t("plan.runListed")}</button>
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${skipListed}>${t("plan.skipListed")}</button>
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, undefined))}>${t("plan.clearListed")}</button>
-          <${CopyButton} title=${t("plan.copyReviewTitle")} getText=${() => planReviewToMarkdown(run.name, plan, rows, sheetIds)} />
-        </div>
       </div>
-      <div class="scope-table-wrap">
         <div class="filter-bar">
           <input
             class="overview-search"
@@ -1710,7 +1718,15 @@ function PlanPage({
           <div class="filter-actions">
             <${CaseCountLabel} shown=${listed.length} total=${partRows.length} filtered=${trimmedQuery !== ""} />
           </div>
+        <div class="plan-actions">
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, "r"))}>${t("plan.runListed")}</button>
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${skipListed}>${t("plan.skipListed")}</button>
+          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, undefined))}>${t("plan.clearListed")}</button>
+          <${CopyButton} title=${t("plan.copyReviewTitle")} getText=${() => planReviewToMarkdown(run.name, plan, rows, sheetIds)} />
         </div>
+        </div>
+      </div>
+      <div class="scope-table-wrap">
         ${listed.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
           : html`<${ScopeTable} rows=${listed} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} plan=${cellsFor} />`}

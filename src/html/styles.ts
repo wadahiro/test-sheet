@@ -551,11 +551,45 @@ body {
 }
 
 /* The plan page: what a run covers, chosen per case, with the reason beside each choice */
-.plan-head {
+/*
+ * Everything that controls the plan sticks together, so it stays in view however far the table scrolls.
+ * Its height varies with how the range chips and buttons wrap, so the page measures it into --filter-h
+ * (which the table head's offset is built from) rather than fixing it. It is its own container, as the
+ * wrap is for the other scope pages, so the filter row's actions shrink by its width.
+ */
+.plan-bar {
+  position: sticky;
+  top: var(--stick-top);
+  z-index: 12;
+  container: scope-table / inline-size;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 0 12px;
+  gap: 6px;
+  margin: 0 -32px;
+  padding: 12px 32px 0;
+  background: var(--bg);
+}
+
+.plan-bar .filter-bar {
+  position: static;
+  height: auto;
+  min-height: var(--filter-h-min, 56px);
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 0;
+}
+
+.plan-bar .overview-search { flex: 1 1 14rem; }
+
+.plan-bar .filter-actions { margin-left: 4px; }
+
+.plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
 }
 
 .plan-range {
@@ -616,6 +650,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .plan-actions .copy-btn:disabled { opacity: 0.5; cursor: default; }
