@@ -1284,13 +1284,10 @@ function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth:
   `;
 }
 
-/** The full sentence, or just the number where the filter bar is too narrow for it (see the container query) */
+/** A bare number: the sentence it stands for is its tooltip and label, because the bar has no room to spell it out */
 function CaseCountLabel({ shown }: { shown: string }) {
   const full = t("scope.count", { count: shown });
-  return html`<span class="filter-count" title=${full}>
-    <span class="filter-count-full">${full}</span>
-    <span class="filter-count-short" aria-hidden="true">${shown}</span>
-  </span>`;
+  return html`<span class="filter-count" title=${full} aria-label=${full}>${shown}</span>`;
 }
 
 /**
@@ -1669,7 +1666,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
           // Not part of the display label, but lets searching by idPrefix (e.g. "CR") match the suite itself
           searchText: `${suite.idPrefix} ${suite.typeName}`,
           breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
-          count: suite.testCases.length,
+          count: suiteTestCaseCount(suite).active,
         });
         const suiteId = suiteAnchorId(suite.idPrefix);
         const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
@@ -1710,7 +1707,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
             label: category,
             searchText: `${suite.idPrefix} ${category}`,
             breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`,
-            count: cases.length,
+            count: cases.filter((tc) => !isInactive(tc)).length,
             suiteId,
           });
           if (!includeTestCases) continue;

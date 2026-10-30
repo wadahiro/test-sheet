@@ -50,7 +50,7 @@ export const ja: Record<MessageKey, string> = {
   "filter.placeholder": "🔍 ID、名前、セクション、状態、方法、タグで絞り込み",
   "filter.none": "該当なし",
   "filter.byTag": "このタグで絞り込む",
-  "filter.showInactive": "無効なカードも表示",
+  "filter.showInactive": "無効なケースも表示",
   "filter.showInactiveTitle": "廃止・置き換え済み・スキップのケースは、表には常に表示されます",
   "hidden.one": "無効なケース {n} 件は下に表示していません。表には残っています。",
   "hidden.other": "無効なケース {n} 件は下に表示していません。表には残っています。",

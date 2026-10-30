@@ -819,7 +819,6 @@ body {
   white-space: nowrap;
 }
 
-.filter-count-short { display: none; }
 
 .scope-link {
   font-size: 0.8rem;
@@ -861,18 +860,10 @@ body {
  */
 .scope-table-wrap { container: scope-table / inline-size; }
 
-/* The actions beside the filter input shrink to icons and a bare number before the input is squeezed */
+/* The actions beside the filter input shrink to icons before the input is squeezed */
 @container scope-table (max-width: 760px) {
   .filter-actions { gap: 8px; margin-left: 8px; }
   .filter-actions .scope-link { display: none; }
-  .filter-count-full {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-  }
-  .filter-count-short { display: inline; }
   .filter-actions .copy-btn > span:last-child {
     position: absolute;
     width: 1px;
