@@ -67,10 +67,13 @@ function splitByH2(markdown: string, marked: Marked): string[] {
  * Also returns the list of embedded headings (used to build a table of contents).
  */
 async function renderGuideWithHeadings(
-  markdown: string,
+  source: string,
   idPrefix: string,
   autolinks: AutolinkRule[]
 ): Promise<{ html: string; headings: GuideHeading[] }> {
+  // The suite already names its guide (panel title, "Guide" summary), so a file's own leading H1 would
+  // only repeat it in the largest type on the page. Only that first line goes; a later H1 is content.
+  const markdown = source.replace(/^\s*#[ \t]+[^\n]*(?:\n|$)/, "");
   const headings: GuideHeading[] = [];
   let h2Index = 0;
 

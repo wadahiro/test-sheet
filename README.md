@@ -235,7 +235,7 @@ metadata:
 ```
 
 Markdown files listed in `guides` are embedded at the top of the test suite, collapsed by
-default. Their H2 headings are searchable from the command palette along with the prose under
+default. A leading `# Title` line is not shown, since the page already labels the guide. Their H2 headings are searchable from the command palette along with the prose under
 each one.
 
 ### Ordering sections (`category_order`)
