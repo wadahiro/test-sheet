@@ -1482,7 +1482,7 @@ function ScopePage({
         ? html`<p class="hidden-note">
             ${t("plan.hidden", { skipped: skippedCount, undecided: undecidedCount })}${" "}
             <button class="link-btn" onClick=${onToggleScopeOnly}>${t("hidden.show")}</button>${" · "}
-            <a class="scope-link" href=${PLAN_HASH}>${t("plan.edit")}</a>
+            <a class="scope-link" href=${planHashForScope(route.scope)}>${t("plan.edit")}</a>
           </p>`
         : null}
       ${suite && cardCases.length > 0
@@ -1585,6 +1585,7 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
  */
 function PlanPage({
   run,
+  resolved,
   plan,
   rows,
   sheetIds,
@@ -1593,6 +1594,8 @@ function PlanPage({
   onPlan,
 }: {
   run: ActiveRun | null;
+  /** The part of the sheet being planned, chosen in the outline; the whole sheet when it is "all" */
+  resolved: ResolvedScope | null;
   plan: Plan;
   rows: OverviewRow[];
   sheetIds: Set<string>;
@@ -1601,11 +1604,14 @@ function PlanPage({
   onPlan: (change: (current: Plan) => Plan) => void;
 }) {
   if (!run) return html`<p class="empty">${t("plan.needRun")}</p>`;
+  if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${PLAN_HASH}>${t("scope.backToAll")}</a></p>`;
 
   const allTags = [...new Set(rows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
   const rangeRows = planRange(rows, plan);
+  const { rowKey } = resolved;
+  const partRows = rowKey ? rangeRows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rangeRows;
   const trimmedQuery = query.trim();
-  const listed = filterOverviewRows(rangeRows, trimmedQuery);
+  const listed = filterOverviewRows(partRows, trimmedQuery);
   const decidable = listed.filter((row) => !row.inactive).map((row) => row.tcId);
   const tally = tallyPlan(rangeRows, plan);
 
@@ -1672,12 +1678,12 @@ function PlanPage({
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
           <div class="filter-actions">
-            <${CaseCountLabel} shown=${listed.length} total=${rangeRows.length} filtered=${trimmedQuery !== ""} />
+            <${CaseCountLabel} shown=${listed.length} total=${partRows.length} filtered=${trimmedQuery !== ""} />
           </div>
         </div>
         ${listed.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
-          : html`<${ScopeTable} rows=${listed} depth=${0} onTag=${onQueryChange} query=${trimmedQuery} plan=${cellsFor} />`}
+          : html`<${ScopeTable} rows=${listed} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} plan=${cellsFor} />`}
       </div>
     </section>
   `;
@@ -2037,6 +2043,23 @@ function isEntryVisible(entry: NavEntry, activeSuiteId: string | null): boolean 
 }
 
 /** The sidebar entry that stands for the page a route shows */
+/**
+ * While planning, the outline picks which part of the sheet is being planned rather than leaving for
+ * that part's page. Cases and guides are not parts of the plan, so they still open as they are.
+ */
+function planHashFor(entry: NavEntry, suites: SuitePageData[]): string {
+  if (entry.kind === "testcase" || entry.kind === "guide") return entry.hash;
+  const target = parseRoute(entry.hash, suites);
+  if (target.mode !== "table") return entry.hash;
+  return planHashForScope(target.scope);
+}
+
+/** The plan page for the same part of the sheet as a scope page */
+function planHashForScope(scope: Scope): string {
+  const part = scope.kind === "domain" ? domainHash(scope.domain) : scope.kind === "feature" ? featureHash(scope.domain, scope.feature) : scope.kind === "suite" ? suiteHash(scope.idPrefix) : "";
+  return PLAN_HASH + part.replace(/^#/, "");
+}
+
 function scopeEntryId(scope: Scope): string {
   if (scope.kind === "domain") return domainAnchorId(scope.domain);
   if (scope.kind === "feature") return featureAnchorId(scope.domain, scope.feature);
@@ -2074,9 +2097,8 @@ function NavOutline({
     count: suites.reduce((sum, suite) => sum + suiteTestCaseCount(suite).active, 0),
   };
   const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
-  // The plan page is not a node of the tree, so nothing in the outline is its page
-  const selectedId = route.mode === "plan" ? "" : scopeEntryId(route.scope);
-  const tracksScroll = route.mode === "full" || route.scope.kind === "suite";
+  const selectedId = scopeEntryId(route.scope);
+  const tracksScroll = route.mode === "full" || (route.mode === "table" && route.scope.kind === "suite");
   const [currentId, setCurrentId] = useState<string>(selectedId);
   const suppressUntil = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
@@ -2196,7 +2218,7 @@ const ALL_SCOPE: Scope = { kind: "all" };
  *
  *   #/overview[?q=]                    all test cases, table only (the landing page)
  *   #/all  (and #/)                    everything on one page
- *   #/plan                             choose which cases the active run covers
+ *   #/plan[/d/…|/f/…|/s/…]             choose which cases the active run covers, for all or one part of the sheet
  *   #/d/<domain>   #/f/<domain>/<feature>   #/s/<idPrefix>
  *   #/s/<idPrefix>/section/<name>      a suite page scrolled to one section
  *   #/s/<idPrefix>/guide[/<n>]         a suite page scrolled to its guide (or the nth guide heading)
@@ -2218,7 +2240,11 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
   const segments = path.split("/").slice(1).map(safeDecode);
 
   if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "" };
-  if (segments[0] === "plan") return { ...landing, mode: "plan", query: "" };
+  if (segments[0] === "plan") {
+    // What follows is the part of the sheet being planned, in the same grammar as the pages it narrows
+    const inner = segments.length > 1 ? parseRoute(`#/${segments.slice(1).map(encodeURIComponent).join("/")}`, suites) : null;
+    return { ...landing, mode: "plan", scope: inner?.mode === "table" ? inner.scope : ALL_SCOPE, query: "" };
+  }
 
   if (segments[0] === "d" && segments.length === 2) {
     return { ...landing, scope: { kind: "domain", domain: segments[1] } };
@@ -3213,18 +3239,20 @@ function App() {
     }
   }, [query]);
 
+  const planning = route.mode === "plan";
   const navigate = useCallback(
     (entry: NavEntry) => {
+      const hash = planning ? planHashFor(entry, suites) : entry.hash;
       // Selecting the page already shown fires no hashchange, so apply its effects directly
-      if (location.hash === entry.hash) {
-        const same = parseRoute(entry.hash, suites);
+      if (location.hash === hash) {
+        const same = parseRoute(hash, suites);
         if (same.query) setQuery(same.query);
         scrollToRoute(same);
       } else {
-        location.hash = entry.hash;
+        location.hash = hash;
       }
     },
-    [suites, setQuery]
+    [suites, setQuery, planning]
   );
 
   const setGuide = useCallback(
@@ -3320,12 +3348,15 @@ function App() {
   }, []);
 
   const domains = groupByDomainAndFeature(suites);
-  const resolvedScope = route.mode === "table" ? resolveScope(route.scope, suites) : null;
+  const resolvedScope = route.mode !== "full" ? resolveScope(route.scope, suites) : null;
   const crumbs: Crumb[] =
     route.mode === "full"
       ? [{ label: t("view.onePage") }]
       : route.mode === "plan"
-        ? [{ label: activeRun ? t("plan.pageTitle", { name: activeRun.name }) : t("plan.title") }]
+        ? [
+            { label: activeRun ? t("plan.pageTitle", { name: activeRun.name }) : t("plan.title"), hash: resolvedScope && route.scope.kind !== "all" ? PLAN_HASH : undefined },
+            ...(resolvedScope && route.scope.kind !== "all" ? [{ label: resolvedScope.title }] : []),
+          ]
         : resolvedScope
         ? [...resolvedScope.ancestors, { label: resolvedScope.title }]
         : [{ label: t("app.title") }];
@@ -3347,6 +3378,7 @@ function App() {
             : route.mode === "plan"
               ? html`<${PlanPage}
                   run=${activeRun}
+                  resolved=${resolvedScope}
                   plan=${plan}
                   rows=${overviewRows}
                   sheetIds=${sheetIds}
