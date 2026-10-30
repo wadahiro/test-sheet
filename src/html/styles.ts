@@ -657,6 +657,30 @@ body {
   font-size: 0.85rem;
 }
 
+.plan-done {
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+@media (max-width: 700px) {
+  .plan-done-text { display: none; }
+}
+
+.plan-caret {
+  display: inline-block;
+  width: 1em;
+  margin-right: 2px;
+  color: var(--fg-muted);
+}
+
+/* A case opened in place: its card sits in a table cell, so its header must not join the sticky stack */
+.plan-detail td { padding: 0 8px 8px; border-top: none; }
+.plan-detail .test-case { margin-bottom: 0; }
+.plan-detail .test-case-head { position: static; }
+
+/* A section heading row has no sticky header of its own for jumpToId to nudge by, so it clears the stack here */
+.plan-table .scope-group { scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--plan-thead-h, 38px)); }
+
 .plan-yaml {
   font-size: 0.8rem;
   color: var(--fg-muted);

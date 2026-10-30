@@ -228,6 +228,10 @@ run's row in that menu (or `#/plan`):
    every case in it with its decision and reason, then what needs attention (undecided cases, skips with no
    reason), decisions outside the current range, and decisions for cases no longer in the sheet.
 
+While planning, the side nav chooses which part of the sheet is listed (its numbers read in-range/total once a
+tag range is set), a case's ID opens its steps in place, and section headings scroll within the page, so
+nothing leaves the plan until **Done planning** in the header (which returns to the cases of that part).
+
 A plan belongs to its run and is kept in this browser with it. A case added to the sheet later is undecided.
 
 ### Directory hierarchy, domain, and feature

@@ -961,6 +961,9 @@ interface PlanCells {
   reason: string;
   onDecide: (decision: Decision | undefined) => void;
   onReason: (reason: string) => void;
+  /** Whether the case's steps are shown below its row; an ID opens them here instead of leaving the plan */
+  open: boolean;
+  onToggleOpen: () => void;
 }
 
 /** Committed when focus leaves, not per keystroke, so typing (an IME's composition included) is never rewritten under the cursor */
@@ -992,11 +995,14 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
       <td class="overview-id">
         <button
           class="overview-link"
+          aria-expanded=${plan ? plan.open : undefined}
+          title=${plan ? t("plan.toggleCase", { id: row.tcId }) : undefined}
           onClick=${(e: Event) => {
             e.stopPropagation();
-            goToTestCase(row.tcId);
+            if (plan) plan.onToggleOpen();
+            else goToTestCase(row.tcId);
           }}
-        ><${Highlight} text=${row.tcId} query=${query} /></button>
+        >${plan ? html`<span class="plan-caret" aria-hidden="true">${plan.open ? "▾" : "▸"}</span>` : null}<${Highlight} text=${row.tcId} query=${query} /></button>
       </td>
       <td class="overview-name"><${Highlight} text=${row.name} query=${query} /></td>
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
@@ -1155,6 +1161,8 @@ interface OverviewRow {
   tags: string[];
   /** Suite this case belongs to, for linking to its sections */
   idPrefix: string;
+  /** The case itself, for the plan page to show it in place */
+  tc: TestCase;
   labels: Record<OverviewLevel, string>;
   /**
    * Full-path identity per level. Compared against the previous *visible* row to decide
@@ -1197,6 +1205,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               inactive: isInactive(tc),
               tags: tc.tags ?? [],
               idPrefix: suite.idPrefix,
+              tc,
               labels,
               keys,
             });
@@ -1340,15 +1349,27 @@ function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; 
       <tbody>
         ${rows.map((row, i) => {
           const startsGroup = showGroups && (i === 0 || rows[i - 1].keys.category !== row.keys.category);
+          const cells = plan?.(row);
+          // Planning stays on the plan page: its section headings are targets here, as on a suite page
+          const groupHref = plan ? PLAN_HASH + sectionHash(row.idPrefix, row.labels.category).replace(/^#/, "") : sectionHash(row.idPrefix, row.labels.category);
           return html`
             ${startsGroup
-              ? html`<tr key=${"group:" + row.keys.category} class="scope-group">
+              ? html`<tr key=${"group:" + row.keys.category} class="scope-group" id=${plan ? categoryAnchorId(row.idPrefix, row.labels.category) : undefined}>
                   <th colspan=${columns.length}>
-                    <a href=${sectionHash(row.idPrefix, row.labels.category)}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
+                    <a href=${groupHref}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
                   </th>
                 </tr>`
               : null}
-            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} plan=${plan?.(row)} />
+            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} plan=${cells} />
+            ${cells?.open
+              ? html`<tr key=${"detail:" + row.tcId} class="plan-detail">
+                  <td colspan=${columns.length}>
+                    <div class="cards">
+                      <${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${0} /></${RunContext.Provider}>
+                    </div>
+                  </td>
+                </tr>`
+              : null}
           `;
         })}
       </tbody>
@@ -1586,6 +1607,7 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
 function PlanPage({
   run,
   resolved,
+  target,
   plan,
   rows,
   sheetIds,
@@ -1596,6 +1618,8 @@ function PlanPage({
   run: ActiveRun | null;
   /** The part of the sheet being planned, chosen in the outline; the whole sheet when it is "all" */
   resolved: ResolvedScope | null;
+  /** A case the route points at, shown open so the jump lands on its card */
+  target: string | null;
   plan: Plan;
   rows: OverviewRow[];
   sheetIds: Set<string>;
@@ -1603,6 +1627,9 @@ function PlanPage({
   onQueryChange: (query: string) => void;
   onPlan: (change: (current: Plan) => Plan) => void;
 }) {
+  // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
+  const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
+  useEffect(() => setOpened(new Map()), [resolved?.anchorId]);
   if (!run) return html`<p class="empty">${t("plan.needRun")}</p>`;
   if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${PLAN_HASH}>${t("scope.backToAll")}</a></p>`;
 
@@ -1620,6 +1647,7 @@ function PlanPage({
     if (reason === null) return;
     onPlan((current) => withDecisions(current, decidable, "s", reason.trim()));
   };
+  const isOpen = (row: OverviewRow) => opened.get(row.tcId) ?? (target !== null && testCaseAnchorId(row.tcId) === target);
   const cellsFor = (row: OverviewRow): PlanCells => ({
     decision: plan.d[row.tcId],
     reason: plan.why[row.tcId] ?? "",
@@ -1631,6 +1659,8 @@ function PlanPage({
         else delete why[row.tcId];
         return { ...current, why };
       }),
+    open: isOpen(row),
+    onToggleOpen: () => setOpened((current) => new Map(current).set(row.tcId, !isOpen(row))),
   });
 
   return html`
@@ -2069,16 +2099,23 @@ function planRangeCountsOf(rows: OverviewRow[], plan: Plan): Map<string, number>
  * that part's page. Cases and guides are not parts of the plan, so they still open as they are.
  */
 function planHashFor(entry: NavEntry, suites: SuitePageData[]): string {
-  if (entry.kind === "testcase" || entry.kind === "guide") return entry.hash;
+  // A guide is a reading surface tied to the browsing pages, so it still opens there
+  if (entry.kind === "guide") return entry.hash;
   const target = parseRoute(entry.hash, suites);
   if (target.mode !== "table") return entry.hash;
+  // A section or a case is a target within its suite's page, here as there
+  if (entry.kind === "category" || entry.kind === "testcase") return PLAN_HASH + entry.hash.replace(/^#/, "");
   return planHashForScope(target.scope);
+}
+
+/** The browsing page of a scope: where planning ends up, and the inverse of planHashForScope */
+function scopeHashFor(scope: Scope): string {
+  return scope.kind === "domain" ? domainHash(scope.domain) : scope.kind === "feature" ? featureHash(scope.domain, scope.feature) : scope.kind === "suite" ? suiteHash(scope.idPrefix) : OVERVIEW_HASH;
 }
 
 /** The plan page for the same part of the sheet as a scope page */
 function planHashForScope(scope: Scope): string {
-  const part = scope.kind === "domain" ? domainHash(scope.domain) : scope.kind === "feature" ? featureHash(scope.domain, scope.feature) : scope.kind === "suite" ? suiteHash(scope.idPrefix) : "";
-  return PLAN_HASH + part.replace(/^#/, "");
+  return PLAN_HASH + (scope.kind === "all" ? "" : scopeHashFor(scope).replace(/^#/, ""));
 }
 
 function scopeEntryId(scope: Scope): string {
@@ -2123,7 +2160,8 @@ function NavOutline({
   };
   const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
   const inRange = (entry: NavEntry): number | undefined => (planRangeCounts && entry.rangeKey ? (planRangeCounts.get(entry.rangeKey) ?? 0) : undefined);
-  const selectedId = scopeEntryId(route.scope);
+  // Planning does not scroll-track, so a section picked in the outline is what stays highlighted
+  const selectedId = route.mode === "plan" && route.target && entries.some((entry) => entry.id === route.target) ? route.target : scopeEntryId(route.scope);
   const tracksScroll = route.mode === "full" || (route.mode === "table" && route.scope.kind === "suite");
   const [currentId, setCurrentId] = useState<string>(selectedId);
   const suppressUntil = useRef(0);
@@ -2244,7 +2282,8 @@ const ALL_SCOPE: Scope = { kind: "all" };
  *
  *   #/overview[?q=]                    all test cases, table only (the landing page)
  *   #/all  (and #/)                    everything on one page
- *   #/plan[/d/…|/f/…|/s/…]             choose which cases the active run covers, for all or one part of the sheet
+ *   #/plan[/d/…|/f/…|/s/…[/section/<name>]|/tc/<id>]
+ *                                      choose which cases the active run covers, for all or one part of the sheet
  *   #/d/<domain>   #/f/<domain>/<feature>   #/s/<idPrefix>
  *   #/s/<idPrefix>/section/<name>      a suite page scrolled to one section
  *   #/s/<idPrefix>/guide[/<n>]         a suite page scrolled to its guide (or the nth guide heading)
@@ -2269,7 +2308,8 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
   if (segments[0] === "plan") {
     // What follows is the part of the sheet being planned, in the same grammar as the pages it narrows
     const inner = segments.length > 1 ? parseRoute(`#/${segments.slice(1).map(encodeURIComponent).join("/")}`, suites) : null;
-    return { ...landing, mode: "plan", scope: inner?.mode === "table" ? inner.scope : ALL_SCOPE, query: "" };
+    const part = inner?.mode === "table" ? inner : null;
+    return { ...landing, mode: "plan", scope: part?.scope ?? ALL_SCOPE, target: part?.target ?? null, query: "" };
   }
 
   if (segments[0] === "d" && segments.length === 2) {
@@ -2970,6 +3010,7 @@ function RunMenu({
 function AppHeader({
   crumbs,
   pageHeading,
+  planExitHash,
   onOpenPalette,
   navCollapsed,
   onToggleNav,
@@ -2990,6 +3031,8 @@ function AppHeader({
   crumbs: Crumb[];
   /** Whether the page's own title is the document's heading (the single long page has headings of its own) */
   pageHeading: boolean;
+  /** Where "Done planning" leads while the plan page is shown; null elsewhere */
+  planExitHash: string | null;
   lang: string;
   onChangeLang: (code: string) => void;
   onOpenPalette: () => void;
@@ -3030,6 +3073,9 @@ function AppHeader({
         </nav>
       </div>
       <div class="app-header-actions">
+        ${planExitHash
+          ? html`<a class="header-btn header-btn-on plan-done" href=${planExitHash} title=${t("plan.doneTitle")}><span aria-hidden="true">✓</span><span class="plan-done-text">${t("plan.done")}</span></a>`
+          : null}
         <div class="run-anchor">
           <button
             ref=${runButtonRef}
@@ -3390,7 +3436,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
@@ -3406,6 +3452,7 @@ function App() {
               ? html`<${PlanPage}
                   run=${activeRun}
                   resolved=${resolvedScope}
+                  target=${route.target}
                   plan=${plan}
                   rows=${overviewRows}
                   sheetIds=${sheetIds}
