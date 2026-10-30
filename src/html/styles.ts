@@ -309,11 +309,12 @@ body {
   white-space: nowrap;
 }
 
+/* The item aligns its text on the baseline, which would leave the icon riding above the numbers */
 .nav-guide {
   flex: 0 0 auto;
-  display: inline-flex;
-  margin-left: 6px;
-  color: var(--fg-faint);
+  align-self: center;
+  display: flex;
+  color: var(--fg-muted);
 }
 
 .nav-outline-item .count {
