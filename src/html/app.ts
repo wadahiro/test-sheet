@@ -1185,10 +1185,10 @@ function escapeMarkdownCell(value: string): string {
 
 /** Renders the overview as a Markdown table. Repeated values are written out in full, since
  *  the dimming that stands in for them on screen has no Markdown equivalent. */
-function overviewToMarkdown(rows: OverviewRow[]): string {
+function overviewToMarkdown(rows: OverviewRow[], title: string): string {
   const columns = overviewColumns();
   const lines = [
-    `# ${t("md.overview")}`,
+    `# ${title}`,
     "",
     `> ${t("md.caseCount", { count: rows.length })}`,
     "",
@@ -1228,8 +1228,6 @@ interface ResolvedScope {
   rowKey?: { level: OverviewLevel; value: string };
   /** How many leading levels of the hierarchy this scope already fixes (all=0 … suite=3) */
   depth: number;
-  /** Markdown for the Copy button; absent for "all", whose copy follows the filtered table */
-  toMarkdown?: () => string;
 }
 
 function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | null {
@@ -1253,7 +1251,6 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
       count: suiteTestCaseCount(suite),
       rowKey: { level: "suite", value: `${suite.domain}\u0000${suite.feature}\u0000${suite.idPrefix}` },
       depth: 3,
-      toMarkdown: () => allTestCasesToMarkdown(suite),
     };
   }
   const domain = domains.find((d) => d.domain === scope.domain);
@@ -1267,7 +1264,6 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
       count: domainTestCaseCount(domain),
       rowKey: { level: "domain", value: domain.domain },
       depth: 1,
-      toMarkdown: () => domainToMarkdown(domain),
     };
   }
   if (scope.kind === "feature") {
@@ -1281,7 +1277,6 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
       count: featureTestCaseCount(feature),
       rowKey: { level: "feature", value: `${domain.domain}\u0000${feature.feature}` },
       depth: 2,
-      toMarkdown: () => featureToMarkdown(feature),
     };
   }
   return null;
@@ -1406,7 +1401,7 @@ function ScopePage({
               : null}
             <${CopyButton}
               title=${t("copy.listed")}
-              getText=${() => (resolved.toMarkdown && !trimmedQuery ? resolved.toMarkdown() : overviewToMarkdown(visibleRows))}
+              getText=${() => overviewToMarkdown(visibleRows, resolved.title)}
             />
           </div>
         </div>

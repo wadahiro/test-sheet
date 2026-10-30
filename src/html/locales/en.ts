@@ -148,7 +148,6 @@ export const en = {
   "copy.domain": "Copy this domain as Markdown",
 
   // Markdown export
-  "md.overview": "Overview",
   "md.caseCount": "{count} test case(s)",
   "md.suiteTitle": "{prefix}: {type} Test Procedure",
   "md.section": "Section: {name}",

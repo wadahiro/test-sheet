@@ -133,7 +133,6 @@ export const ja: Record<MessageKey, string> = {
   "copy.feature": "この機能を Markdown でコピー",
   "copy.domain": "このドメインを Markdown でコピー",
 
-  "md.overview": "一覧",
   "md.caseCount": "テストケース {count} 件",
   "md.suiteTitle": "{prefix}: {type} テスト手順",
   "md.section": "セクション: {name}",
