@@ -692,6 +692,56 @@ body {
   font-size: 0.85rem;
 }
 
+/* Ticking several cases to give them a decision or a reason together */
+.plan-select-cell { width: 1%; text-align: center; }
+.plan-select { cursor: pointer; }
+.scope-group .plan-select { margin-right: 8px; vertical-align: middle; }
+
+.plan-decision-filter {
+  flex: 0 0 auto;
+  padding: 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.plan-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-bg);
+}
+
+.plan-selection-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.plan-selected-count { font-size: 0.85rem; font-weight: 600; color: var(--accent); }
+
+.plan-bulk-reason {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.plan-overwrite { margin-left: 0; }
+
 .plan-done {
   white-space: nowrap;
   text-decoration: none;
@@ -1090,8 +1140,10 @@ a.link-btn { text-decoration: none; }
   .scope-table .overview-method::before { content: attr(data-label) ": "; }
   .scope-table .overview-tags { grid-area: tags; }
   .plan-table .overview-row {
-    grid-template-areas: "id name name name" "id status method tags" "id decision reason reason";
+    grid-template-columns: max-content max-content auto auto 1fr;
+    grid-template-areas: "sel id name name name" "sel id status method tags" "sel id decision reason reason";
   }
+  .plan-table .plan-select-cell { grid-area: sel; }
   .plan-table .overview-decision { grid-area: decision; }
   .plan-table .overview-reason { grid-area: reason; }
   /* The row carries the inactive fill now that its cells have no box of their own */

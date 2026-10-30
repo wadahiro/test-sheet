@@ -219,9 +219,13 @@ run's row in that menu (or `#/plan`):
 
 1. Add one or more tags under **Range**: the cases carrying any of them are what is being reviewed
    (no tag means the whole sheet). The filter box narrows the list further.
-2. Mark each case **Run** or **Skip**, or use *Run listed* / *Skip listed…* / *Clear listed* on what the
-   filter shows. A reason can be written beside either choice; *Skip listed…* asks for one to give them all.
-   Obsolete, superseded and skipped cases already carry a reason in the YAML and are not asked about.
+2. Mark each case **Run** or **Skip** and, if you like, write a reason beside it. To do several at once,
+   tick them (the checkbox on a row, on a section heading, or in the table head for everything listed;
+   Shift-click ticks a stretch) and use the bar that appears: **Run**, **Skip**, **Clear decision**, or
+   **Reason only**, with one reason for all of them (reasons already used are offered). A reason fills only
+   cases that have none, unless *Overwrite reasons* is ticked, and **Undo** takes the last bulk change
+   back. The filter box and the decision filter next to it decide what is listed. Obsolete, superseded and
+   skipped cases already carry a reason in the YAML and are not asked about.
 3. Testers then see only the cases marked Run on every page (the **In scope only** switch beside the filter
    turns that off; it appears once a plan has a case to run), and the run's progress counts against them.
 4. *Copy* on the plan page copies a review sheet in Markdown for someone to check the selection: the range,

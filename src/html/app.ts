@@ -964,6 +964,26 @@ interface PlanCells {
   /** Whether the case's steps are shown below its row; an ID opens them here instead of leaving the plan */
   open: boolean;
   onToggleOpen: () => void;
+  /** Ticked for a bulk action; `shift` extends the choice from the last row ticked */
+  selected: boolean;
+  onSelect: (shift: boolean) => void;
+}
+
+/** What the table needs to tick rows in bulk: the ticked set, and a way to tick or clear several at once */
+interface PlanSelect {
+  selected: Set<string>;
+  /** Cases that can be ticked in the table as listed (inactive ones cannot) */
+  listedIds: string[];
+  onMany: (ids: string[], on: boolean) => void;
+}
+
+/** A checkbox that can show "some", which the DOM only allows as a property */
+function TriCheck({ checked, some, label, onChange }: { checked: boolean; some: boolean; label: string; onChange: (on: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = some;
+  }, [some]);
+  return html`<input ref=${ref} type="checkbox" class="plan-select" checked=${checked} aria-label=${label} onChange=${(e: Event) => onChange((e.target as HTMLInputElement).checked)} />`;
 }
 
 /** Committed when focus leaves, not per keystroke, so typing (an IME's composition included) is never rewritten under the cursor */
@@ -992,6 +1012,19 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
       class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "")}
       onClick=${plan ? undefined : () => goToTestCase(row.tcId)}
     >
+      ${plan
+        ? html`<td class="plan-select-cell">
+            ${row.inactive
+              ? null
+              : html`<input
+                  type="checkbox"
+                  class="plan-select"
+                  checked=${plan.selected}
+                  aria-label=${t("plan.selectCase", { id: row.tcId })}
+                  onClick=${(e: MouseEvent) => plan.onSelect(e.shiftKey)}
+                />`}
+          </td>`
+        : null}
       <td class="overview-id">
         <button
           class="overview-link"
@@ -1335,8 +1368,28 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
 }
 
 /** Rows of the table, with a heading row ahead of each section naming where it sits below the scope */
-function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; depth: number; onTag: (tag: string) => void; query: string; plan?: (row: OverviewRow) => PlanCells }) {
+function ScopeTable({
+  rows,
+  depth,
+  onTag,
+  query,
+  plan,
+  planSelect,
+}: {
+  rows: OverviewRow[];
+  depth: number;
+  onTag: (tag: string) => void;
+  query: string;
+  plan?: (row: OverviewRow) => PlanCells;
+  planSelect?: PlanSelect;
+}) {
   const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : indexColumns();
+  const span = columns.length + (plan ? 1 : 0);
+  const tickState = (ids: string[]) => {
+    const ticked = ids.filter((id) => planSelect?.selected.has(id)).length;
+    return { all: ids.length > 0 && ticked === ids.length, some: ticked > 0 && ticked < ids.length };
+  };
+  const headerState = tickState(planSelect?.listedIds ?? []);
   const sectionCount = new Set(rows.map((row) => row.keys.category)).size;
   // A suite with a single section would just repeat its own page title
   const showGroups = !(depth === OVERVIEW_LEVELS.length - 1 && sectionCount === 1);
@@ -1344,7 +1397,14 @@ function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; 
   return html`
     <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")}>
       <thead>
-        <tr>${columns.map((column) => html`<th key=${column}>${column}</th>`)}</tr>
+        <tr>
+          ${plan && planSelect
+            ? html`<th class="plan-select-cell"><${TriCheck} checked=${headerState.all} some=${headerState.some} label=${t("plan.selectListed")} onChange=${(on: boolean) => planSelect.onMany(planSelect.listedIds, on)} /></th>`
+            : plan
+              ? html`<th></th>`
+              : null}
+          ${columns.map((column) => html`<th key=${column}>${column}</th>`)}
+        </tr>
       </thead>
       <tbody>
         ${rows.map((row, i) => {
@@ -1355,7 +1415,14 @@ function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; 
           return html`
             ${startsGroup
               ? html`<tr key=${"group:" + row.keys.category} class="scope-group" id=${plan ? categoryAnchorId(row.idPrefix, row.labels.category) : undefined}>
-                  <th colspan=${columns.length}>
+                  <th colspan=${span}>
+                    ${plan && planSelect
+                      ? (() => {
+                          const ids = rows.filter((other) => other.keys.category === row.keys.category && !other.inactive).map((other) => other.tcId);
+                          const state = tickState(ids);
+                          return html`<${TriCheck} checked=${state.all} some=${state.some} label=${t("plan.selectSection", { name: row.labels.category })} onChange=${(on: boolean) => planSelect.onMany(ids, on)} />`;
+                        })()
+                      : null}
                     <a href=${groupHref}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
                   </th>
                 </tr>`
@@ -1363,7 +1430,7 @@ function ScopeTable({ rows, depth, onTag, query, plan }: { rows: OverviewRow[]; 
             <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} plan=${cells} />
             ${cells?.open
               ? html`<tr key=${"detail:" + row.tcId} class="plan-detail">
-                  <td colspan=${columns.length}>
+                  <td colspan=${span}>
                     <div class="cards">
                       <${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${0} /></${RunContext.Provider}>
                     </div>
@@ -1529,15 +1596,24 @@ function tallyPlan(rows: OverviewRow[], plan: Plan) {
   };
 }
 
-function withDecisions(plan: Plan, ids: string[], decision: Decision | undefined, reason?: string): Plan {
+/**
+ * Sets a decision and/or a reason on several cases. A decision of `null` clears it; `undefined` leaves
+ * it. A reason fills only cases that have none, unless told to overwrite, so what was written case by
+ * case is not lost to a bulk edit by accident.
+ */
+function applyPlan(plan: Plan, ids: string[], change: { decision?: Decision | null; reason?: string; overwrite: boolean }): { plan: Plan; reasonsWritten: number } {
   const d = { ...plan.d };
   const why = { ...plan.why };
+  let reasonsWritten = 0;
   for (const id of ids) {
-    if (decision) d[id] = decision;
-    else delete d[id];
-    if (reason) why[id] = reason;
+    if (change.decision === null) delete d[id];
+    else if (change.decision) d[id] = change.decision;
+    if (change.reason && (change.overwrite || !why[id]?.trim())) {
+      why[id] = change.reason;
+      reasonsWritten++;
+    }
   }
-  return { ...plan, d, why };
+  return { plan: { ...plan, d, why }, reasonsWritten };
 }
 
 /** A reviewer reads this to judge the selection, so it lists the whole range and says what is missing */
@@ -1629,7 +1705,20 @@ function PlanPage({
 }) {
   // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
   const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
-  useEffect(() => setOpened(new Map()), [resolved?.anchorId]);
+  // Ticked for a bulk action. Held here, not in the plan: it is a moment's working set, not a decision.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const lastTicked = useRef<number | null>(null);
+  const [bulkReason, setBulkReason] = useState("");
+  const [overwrite, setOverwrite] = useState(false);
+  const [decisionFilter, setDecisionFilter] = useState<"" | Decision | "none">("");
+  /** What the last bulk action did, with the plan before it; valid only while the plan is as that action left it */
+  const [outcome, setOutcome] = useState<{ text: string; before: Plan; after: Plan } | null>(null);
+  useEffect(() => {
+    setOpened(new Map());
+    setSelected(new Set());
+    lastTicked.current = null;
+    setOutcome(null);
+  }, [resolved?.anchorId, run?.id]);
   // The controls stay in view while the table scrolls, but how tall they are depends on how the range
   // chips wrap, so the table head's offset (--filter-h) follows the measured height
   const barRef = useRef<HTMLDivElement>(null);
@@ -1652,20 +1741,51 @@ function PlanPage({
   const { rowKey } = resolved;
   const partRows = rowKey ? rangeRows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rangeRows;
   const trimmedQuery = query.trim();
-  const listed = filterOverviewRows(partRows, trimmedQuery);
-  const decidable = listed.filter((row) => !row.inactive).map((row) => row.tcId);
+  const decisionOf = (row: OverviewRow) => (row.inactive ? undefined : (plan.d[row.tcId] ?? "none"));
+  const listed = filterOverviewRows(partRows, trimmedQuery).filter((row) => decisionFilter === "" || decisionOf(row) === decisionFilter);
+  const listedIds = listed.filter((row) => !row.inactive).map((row) => row.tcId);
   const tally = tallyPlan(rangeRows, plan);
 
-  const skipListed = () => {
-    const reason = window.prompt(t("plan.skipPrompt", { n: decidable.length }), "");
-    if (reason === null) return;
-    onPlan((current) => withDecisions(current, decidable, "s", reason.trim()));
+  const tick = (ids: string[], on: boolean) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  const tickRow = (id: string, shift: boolean) => {
+    const index = listedIds.indexOf(id);
+    const on = !selected.has(id);
+    const from = lastTicked.current;
+    if (shift && from !== null && index >= 0) tick(listedIds.slice(Math.min(from, index), Math.max(from, index) + 1), on);
+    else tick([id], on);
+    if (index >= 0) lastTicked.current = index;
   };
+
+  const selectedIds = [...selected];
+  const hiddenSelected = selectedIds.filter((id) => !listedIds.includes(id)).length;
+  const reasonChoices = (() => {
+    const counts = new Map<string, number>();
+    for (const reason of Object.values(plan.why)) if (reason.trim()) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1]).map(([reason]) => reason);
+  })();
+  const outcomeShown = outcome && plan.d === outcome.after.d && plan.why === outcome.after.why ? outcome : null;
+
+  const apply = (decision: Decision | null | undefined, text: (n: number, reasons: number) => string) => {
+    const reason = bulkReason.trim();
+    const result = applyPlan(plan, selectedIds, { decision, reason: reason || undefined, overwrite });
+    onPlan(() => result.plan);
+    setOutcome({ text: text(selectedIds.length, result.reasonsWritten), before: plan, after: result.plan });
+  };
+  const decisionName = (decision: Decision) => (decision === "r" ? t("plan.run") : t("plan.skip"));
+
   const isOpen = (row: OverviewRow) => opened.get(row.tcId) ?? (target !== null && testCaseAnchorId(row.tcId) === target);
   const cellsFor = (row: OverviewRow): PlanCells => ({
     decision: plan.d[row.tcId],
     reason: plan.why[row.tcId] ?? "",
-    onDecide: (decision) => onPlan((current) => withDecisions(current, [row.tcId], decision)),
+    onDecide: (decision) => onPlan((current) => applyPlan(current, [row.tcId], { decision: decision ?? null, overwrite: true }).plan),
     onReason: (reason) =>
       onPlan((current) => {
         const why = { ...current.why };
@@ -1675,38 +1795,47 @@ function PlanPage({
       }),
     open: isOpen(row),
     onToggleOpen: () => setOpened((current) => new Map(current).set(row.tcId, !isOpen(row))),
+    selected: selected.has(row.tcId),
+    onSelect: (shift) => tickRow(row.tcId, shift),
   });
 
   return html`
-    <section class="overview scope-page plan-page" id="plan" style=${{ "--filter-h": barHeight > 0 ? `${barHeight}px` : undefined }}>
+    <section
+      class="overview scope-page plan-page"
+      id="plan"
+      style=${{ "--filter-h": barHeight > 0 ? `${barHeight}px` : undefined }}
+      onKeyDown=${(e: KeyboardEvent) => {
+        if (e.key === "Escape" && !e.isComposing && selected.size > 0) setSelected(new Set());
+      }}
+    >
       <div class="plan-bar" ref=${barRef}>
-      <div class="plan-head">
-        <div class="plan-range">
-          <span class="plan-label">${t("plan.range")}</span>
-          ${plan.tags.map(
-            (tag) => html`<span class="tag-chip plan-range-chip" key=${tag}>
-              ${tag}
-              <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))}>×</button>
-            </span>`
-          )}
-          <select
-            class="plan-tag-add"
-            aria-label=${t("plan.addTag")}
-            value=""
-            onChange=${(e: Event) => {
-              const select = e.target as HTMLSelectElement;
-              const tag = select.value;
-              select.value = "";
-              if (tag) onPlan((current) => ({ ...current, tags: [...current.tags, tag] }));
-            }}
-          >
-            <option value="">${t("plan.addTag")}</option>
-            ${allTags.filter((tag) => !plan.tags.includes(tag)).map((tag) => html`<option key=${tag} value=${tag}>${tag}</option>`)}
-          </select>
-          ${plan.tags.length === 0 ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
+        <div class="plan-head">
+          <div class="plan-range">
+            <span class="plan-label">${t("plan.range")}</span>
+            ${plan.tags.map(
+              (tag) => html`<span class="tag-chip plan-range-chip" key=${tag}>
+                ${tag}
+                <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))}>×</button>
+              </span>`
+            )}
+            <select
+              class="plan-tag-add"
+              aria-label=${t("plan.addTag")}
+              value=""
+              onChange=${(e: Event) => {
+                const select = e.target as HTMLSelectElement;
+                const tag = select.value;
+                select.value = "";
+                if (tag) onPlan((current) => ({ ...current, tags: [...current.tags, tag] }));
+              }}
+            >
+              <option value="">${t("plan.addTag")}</option>
+              ${allTags.filter((tag) => !plan.tags.includes(tag)).map((tag) => html`<option key=${tag} value=${tag}>${tag}</option>`)}
+            </select>
+            ${plan.tags.length === 0 ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
+          </div>
+          <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
         </div>
-        <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
-      </div>
         <div class="filter-bar">
           <input
             class="overview-search"
@@ -1715,21 +1844,73 @@ function PlanPage({
             value=${query}
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
+          <select
+            class="plan-decision-filter"
+            aria-label=${t("plan.decisionFilter")}
+            value=${decisionFilter}
+            onChange=${(e: Event) => setDecisionFilter((e.target as HTMLSelectElement).value as "" | Decision | "none")}
+          >
+            <option value="">${t("plan.filterAny")}</option>
+            <option value="r">${t("plan.run")}</option>
+            <option value="s">${t("plan.skip")}</option>
+            <option value="none">${t("plan.undecided")}</option>
+          </select>
           <div class="filter-actions">
-            <${CaseCountLabel} shown=${listed.length} total=${partRows.length} filtered=${trimmedQuery !== ""} />
+            <${CaseCountLabel} shown=${listed.length} total=${partRows.length} filtered=${trimmedQuery !== "" || decisionFilter !== ""} />
+            <${CopyButton} title=${t("plan.copyReviewTitle")} getText=${() => planReviewToMarkdown(run.name, plan, rows, sheetIds)} />
           </div>
-        <div class="plan-actions">
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, "r"))}>${t("plan.runListed")}</button>
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${skipListed}>${t("plan.skipListed")}</button>
-          <button class="copy-btn" disabled=${decidable.length === 0} onClick=${() => onPlan((current) => withDecisions(current, decidable, undefined))}>${t("plan.clearListed")}</button>
-          <${CopyButton} title=${t("plan.copyReviewTitle")} getText=${() => planReviewToMarkdown(run.name, plan, rows, sheetIds)} />
         </div>
-        </div>
+        ${selected.size > 0 || outcomeShown
+          ? html`<div class="plan-selection" role="region" aria-label=${t("plan.selectionRegion")}>
+              <div class="plan-selection-line">
+                <span role="status" aria-live="polite" class="plan-selected-count">
+                  ${outcomeShown
+                    ? outcomeShown.text
+                    : hiddenSelected > 0
+                      ? t("plan.selectedHidden", { n: selected.size, hidden: hiddenSelected })
+                      : t("plan.selected", { n: selected.size })}
+                </span>
+                ${outcomeShown ? html`<button class="link-btn" onClick=${() => { onPlan(() => outcomeShown.before); setOutcome(null); }}>${t("plan.undo")}</button>` : null}
+                ${selected.size > 0 ? html`<button class="link-btn" onClick=${() => setSelected(new Set())}>${t("plan.deselect")}</button>` : null}
+              </div>
+              ${selected.size > 0
+                ? html`<div class="plan-selection-line">
+                    <input
+                      class="plan-bulk-reason"
+                      list="plan-reasons"
+                      value=${bulkReason}
+                      maxlength="300"
+                      placeholder=${t("plan.reasonPlaceholder")}
+                      aria-label=${t("plan.bulkReason")}
+                      onInput=${(e: Event) => setBulkReason((e.target as HTMLInputElement).value)}
+                    />
+                    <datalist id="plan-reasons">${reasonChoices.map((reason) => html`<option key=${reason} value=${reason}></option>`)}</datalist>
+                    <label class="filter-toggle plan-overwrite">
+                      <input type="checkbox" checked=${overwrite} onChange=${(e: Event) => setOverwrite((e.target as HTMLInputElement).checked)} />
+                      <span>${t("plan.overwriteReasons")}</span>
+                    </label>
+                    <div class="plan-actions">
+                      <button class="copy-btn" onClick=${() => apply("r", (n, reasons) => t("plan.applied", { decision: decisionName("r"), n, reasons }))}>${t("plan.run")}</button>
+                      <button class="copy-btn" onClick=${() => apply("s", (n, reasons) => t("plan.applied", { decision: decisionName("s"), n, reasons }))}>${t("plan.skip")}</button>
+                      <button class="copy-btn" onClick=${() => apply(null, (n) => t("plan.appliedClear", { n }))}>${t("plan.clearDecision")}</button>
+                      <button class="copy-btn" disabled=${bulkReason.trim() === ""} onClick=${() => apply(undefined, (_n, reasons) => t("plan.appliedReason", { n: reasons }))}>${t("plan.reasonOnly")}</button>
+                    </div>
+                  </div>`
+                : null}
+            </div>`
+          : null}
       </div>
       <div class="scope-table-wrap">
         ${listed.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
-          : html`<${ScopeTable} rows=${listed} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} plan=${cellsFor} />`}
+          : html`<${ScopeTable}
+              rows=${listed}
+              depth=${resolved.depth}
+              onTag=${onQueryChange}
+              query=${trimmedQuery}
+              plan=${cellsFor}
+              planSelect=${{ selected, listedIds, onMany: tick }}
+            />`}
       </div>
     </section>
   `;
