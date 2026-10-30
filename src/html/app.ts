@@ -180,6 +180,22 @@ function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string 
   return lines.join("\n");
 }
 
+/** The query's occurrences in `text`, marked, so the reader sees why an entry or row matched */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim().toLowerCase();
+  if (!q) return html`${text}`;
+  const lower = text.toLowerCase();
+  const parts: Array<string | ReturnType<typeof html>> = [];
+  let from = 0;
+  for (let at = lower.indexOf(q); at >= 0; at = lower.indexOf(q, from)) {
+    if (at > from) parts.push(text.slice(from, at));
+    parts.push(html`<mark class="hit">${text.slice(at, at + q.length)}</mark>`);
+    from = at + q.length;
+  }
+  parts.push(text.slice(from));
+  return html`${parts}`;
+}
+
 function CopyButton({ getText, title, iconOnly = false }: { getText: () => string; title: string; iconOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
 
@@ -906,7 +922,7 @@ const indexColumns = (): string[] => [t("col.id"), t("col.name"), t("col.status"
  * One case as a table row. With `onTag` a tag chip filters the table it sits in; without it the
  * chip links to the overview filtered by that tag, for tables that have no filter of their own.
  */
-function IndexRow({ row, onTag }: { row: IndexRowData; onTag?: (tag: string) => void }) {
+function IndexRow({ row, onTag, query = "" }: { row: IndexRowData; onTag?: (tag: string) => void; query?: string }) {
   return html`
     <tr class=${"overview-row" + (row.inactive ? " row-inactive" : "")} onClick=${() => goToTestCase(row.tcId)}>
       <td class="overview-id">
@@ -916,17 +932,17 @@ function IndexRow({ row, onTag }: { row: IndexRowData; onTag?: (tag: string) => 
             e.stopPropagation();
             goToTestCase(row.tcId);
           }}
-        >${row.tcId}</button>
+        ><${Highlight} text=${row.tcId} query=${query} /></button>
       </td>
-      <td class="overview-name">${row.name}</td>
-      <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}>${row.status}</span>` : null}</td>
-      <td class="overview-nowrap">${row.method}</td>
+      <td class="overview-name"><${Highlight} text=${row.name} query=${query} /></td>
+      <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
+      <td class="overview-nowrap"><${Highlight} text=${row.method} query=${query} /></td>
       <td>
         <div class="tag-list">
           ${row.tags.map((tag) =>
             onTag
-              ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}>${tag}</button>`
-              : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}>${tag}</a>`
+              ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
+              : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}><${Highlight} text=${tag} query=${query} /></a>`
           )}
         </div>
       </td>
@@ -1230,7 +1246,7 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
 }
 
 /** Rows of the table, with a heading row ahead of each section naming where it sits below the scope */
-function ScopeTable({ rows, depth, onTag }: { rows: OverviewRow[]; depth: number; onTag: (tag: string) => void }) {
+function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth: number; onTag: (tag: string) => void; query: string }) {
   const sectionCount = new Set(rows.map((row) => row.keys.category)).size;
   // A suite with a single section would just repeat its own page title
   const showGroups = !(depth === OVERVIEW_LEVELS.length - 1 && sectionCount === 1);
@@ -1247,11 +1263,11 @@ function ScopeTable({ rows, depth, onTag }: { rows: OverviewRow[]; depth: number
             ${startsGroup
               ? html`<tr key=${"group:" + row.keys.category} class="scope-group">
                   <th colspan=${indexColumns().length}>
-                    <a href=${sectionHash(row.idPrefix, row.labels.category)}>${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")}</a>
+                    <a href=${sectionHash(row.idPrefix, row.labels.category)}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
                   </th>
                 </tr>`
               : null}
-            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} />
+            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} />
           `;
         })}
       </tbody>
@@ -1357,7 +1373,7 @@ function ScopePage({
         </div>
         ${visibleRows.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
-          : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
+          : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} />`}
       </div>
       ${hiddenCount > 0
         ? html`<p class="hidden-note">
@@ -2073,9 +2089,9 @@ function CommandPalette({
                 >
                   <span class="palette-kind-badge">${t(KIND_LABEL_KEY[entry.kind])}</span>
                   <span class="palette-item-body">
-                    ${entry.breadcrumb ? html`<span class="palette-breadcrumb">${entry.breadcrumb}</span>` : null}
+                    ${entry.breadcrumb ? html`<span class="palette-breadcrumb"><${Highlight} text=${entry.breadcrumb} query=${query} /></span>` : null}
                     <span class="palette-label">
-                      ${entry.label}${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
+                      <${Highlight} text=${entry.label} query=${query} />${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
                     </span>
                   </span>
                 </button>

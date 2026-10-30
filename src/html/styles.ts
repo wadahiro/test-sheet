@@ -1697,18 +1697,29 @@ body {
   font-weight: normal;
 }
 
+/* The same tint as a jump target's flash: both say "this is what you were looking for" */
+.hit {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--flash);
+  color: inherit;
+}
+
 .palette-kind-badge {
   flex: 0 0 auto;
   font-size: 0.7rem;
-  padding: 2px 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-subtle);
   color: var(--fg-muted);
   white-space: nowrap;
 }
 
+/* The row's own highlight is a pale tint, so the badge needs its outline (and the page background) to stay a distinct shape */
 .palette-item.palette-sel .palette-kind-badge {
   background: var(--bg);
+  color: var(--fg);
 }
 
 .palette-item-body {
