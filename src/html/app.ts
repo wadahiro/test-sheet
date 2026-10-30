@@ -1284,10 +1284,9 @@ function ScopeTable({ rows, depth, onTag, query }: { rows: OverviewRow[]; depth:
   `;
 }
 
-/** A bare number: the sentence it stands for is its tooltip and label, because the bar has no room to spell it out */
-function CaseCountLabel({ shown }: { shown: string }) {
-  const full = t("scope.count", { count: shown });
-  return html`<span class="filter-count" title=${full} aria-label=${full}>${shown}</span>`;
+/** How many cases the table lists; while filtering, "matching / all in this scope" */
+function CaseCountLabel({ shown, total, filtered }: { shown: number; total: number; filtered: boolean }) {
+  return html`<span class="filter-count">${tn("scope.count", shown, { count: filtered ? `${shown} / ${total}` : shown })}</span>`;
 }
 
 /**
@@ -1360,7 +1359,7 @@ function ScopePage({
             : null}
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
-            <${CaseCountLabel} shown=${trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count)} />
+            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== ""} />
             ${hasGuide
               ? html`<button
                   class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
