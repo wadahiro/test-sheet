@@ -1897,6 +1897,8 @@ interface NavEntry {
   count?: number;
   /** A suite that has a guide, so the outline can say so without opening it */
   hasGuide?: boolean;
+  /** Which cases the entry covers, as a key of `planRangeCounts`; absent for entries that cover none */
+  rangeKey?: string;
   /** Anchor of the suite this guide/section/case belongs to, so the outline can open just the active suite */
   suiteId?: string;
 }
@@ -1943,6 +1945,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
       label: d.domainLabel,
       searchText: `${d.domain} ${d.domainLabel}`,
       count: domainTestCaseCount(d).active,
+      rangeKey: rangeKeyOf("domain", d.domain),
     });
     for (const f of d.features) {
       entries.push({
@@ -1953,6 +1956,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
         searchText: `${f.feature} ${f.featureLabel}`,
         breadcrumb: d.domainLabel,
         count: featureTestCaseCount(f).active,
+        rangeKey: rangeKeyOf("feature", `${d.domain}\u0000${f.feature}`),
       });
       for (const suite of f.suites) {
         entries.push({
@@ -1965,6 +1969,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
           breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
           count: suiteTestCaseCount(suite).active,
           hasGuide: !!suite.guideHtml,
+          rangeKey: rangeKeyOf("suite", `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}`),
         });
         const suiteId = suiteAnchorId(suite.idPrefix);
         const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
@@ -2007,6 +2012,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
             breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`,
             count: cases.filter((tc) => !isInactive(tc)).length,
             suiteId,
+            rangeKey: rangeKeyOf("category", `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}\u0000${category}`),
           });
           if (!includeTestCases) continue;
           for (const tc of cases) {
@@ -2043,6 +2049,21 @@ function isEntryVisible(entry: NavEntry, activeSuiteId: string | null): boolean 
 }
 
 /** The sidebar entry that stands for the page a route shows */
+const ALL_RANGE_KEY = "all";
+const rangeKeyOf = (level: OverviewLevel, key: string): string => `${level}:${key}`;
+
+/** Active cases of the plan's range per outline entry, in one pass over the rows */
+function planRangeCountsOf(rows: OverviewRow[], plan: Plan): Map<string, number> {
+  const counts = new Map<string, number>();
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const row of planRange(rows, plan)) {
+    if (row.inactive) continue;
+    bump(ALL_RANGE_KEY);
+    for (const level of OVERVIEW_LEVELS) bump(rangeKeyOf(level, row.keys[level]));
+  }
+  return counts;
+}
+
 /**
  * While planning, the outline picks which part of the sheet is being planned rather than leaving for
  * that part's page. Cases and guides are not parts of the plan, so they still open as they are.
@@ -2081,9 +2102,12 @@ function NavOutline({
   onNavigate,
   width,
   onResize,
+  planRangeCounts,
 }: {
   suites: SuitePageData[];
   route: Route;
+  /** While planning with a range, how many active cases of each entry fall in it; null otherwise */
+  planRangeCounts: Map<string, number> | null;
   onNavigate: (entry: NavEntry) => void;
   width: number;
   onResize: (width: number) => void;
@@ -2095,8 +2119,10 @@ function NavOutline({
     label: t("view.all"),
     searchText: "",
     count: suites.reduce((sum, suite) => sum + suiteTestCaseCount(suite).active, 0),
+    rangeKey: ALL_RANGE_KEY,
   };
   const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
+  const inRange = (entry: NavEntry): number | undefined => (planRangeCounts && entry.rangeKey ? (planRangeCounts.get(entry.rangeKey) ?? 0) : undefined);
   const selectedId = scopeEntryId(route.scope);
   const tracksScroll = route.mode === "full" || (route.mode === "table" && route.scope.kind === "suite");
   const [currentId, setCurrentId] = useState<string>(selectedId);
@@ -2175,11 +2201,11 @@ function NavOutline({
           (entry) => html`
             <li key=${entry.id} class=${entryKindClass(entry.kind)}>
               <button
-                class=${"nav-outline-item" + (entry.id === highlightId ? " nav-outline-current" : "")}
+                class=${"nav-outline-item" + (entry.id === highlightId ? " nav-outline-current" : "") + (inRange(entry) === 0 ? " nav-outline-empty" : "")}
                 title=${entry.label}
                 onClick=${() => onJump(entry)}
               >
-                <span class="nav-label">${entry.label}</span>${entry.hasGuide ? html`<span class="nav-guide" title=${t("guide.label")}><${GuideIcon} /></span>` : null}${entry.count !== undefined ? html`<span class="count">(${entry.count})</span>` : null}
+                <span class="nav-label">${entry.label}</span>${entry.hasGuide ? html`<span class="nav-guide" title=${t("guide.label")}><${GuideIcon} /></span>` : null}${entry.count !== undefined ? html`<span class="count">(${inRange(entry) === undefined ? entry.count : `${inRange(entry)}/${entry.count}`})</span>` : null}
               </button>
             </li>
           `
@@ -3240,6 +3266,7 @@ function App() {
   }, [query]);
 
   const planning = route.mode === "plan";
+  const planRangeCounts = useMemo(() => (planning && plan.tags.length > 0 ? planRangeCountsOf(overviewRows, plan) : null), [planning, plan, overviewRows]);
   const navigate = useCallback(
     (entry: NavEntry) => {
       const hash = planning ? planHashFor(entry, suites) : entry.hash;
@@ -3369,7 +3396,7 @@ function App() {
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}
       >
-        <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} />
+        <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} planRangeCounts=${planRangeCounts} />
         <div class=${"app" + (route.mode !== "full" ? " app-scope" : "")}>
           ${route.mode === "full"
             ? domains.length === 0

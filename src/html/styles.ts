@@ -310,6 +310,9 @@ body {
 }
 
 /* The item aligns its text on the baseline, which would leave the icon riding above the numbers */
+/* Nothing in the planned range under it: still reachable, but plainly not where to look */
+.nav-outline-empty { opacity: 0.45; }
+
 .nav-guide {
   flex: 0 0 auto;
   align-self: center;
