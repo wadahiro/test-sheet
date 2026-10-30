@@ -1012,11 +1012,14 @@ body {
   border-color: var(--accent);
 }
 
-/* Too narrow to share the row with the cases: float over them instead of squeezing them */
+/*
+ * Too narrow to share the row with the cases: float over them instead of squeezing them. It starts
+ * below the filter bar, whose Guide and Copy buttons sit at the right edge, exactly where it lands.
+ */
 @media (max-width: 1100px) {
   .guide-panel {
     position: fixed;
-    top: var(--header-h);
+    top: calc(var(--header-h) + var(--filter-h));
     right: 0;
     bottom: 0;
     width: min(var(--guide-w), 90vw);
