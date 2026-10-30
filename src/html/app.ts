@@ -936,8 +936,8 @@ function IndexRow({ row, onTag, query = "" }: { row: IndexRowData; onTag?: (tag:
       </td>
       <td class="overview-name"><${Highlight} text=${row.name} query=${query} /></td>
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
-      <td class="overview-nowrap"><${Highlight} text=${row.method} query=${query} /></td>
-      <td>
+      <td class="overview-method overview-nowrap" data-label=${t("col.method")}><${Highlight} text=${row.method} query=${query} /></td>
+      <td class="overview-tags">
         <div class="tag-list">
           ${row.tags.map((tag) =>
             onTag

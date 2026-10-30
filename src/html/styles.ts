@@ -774,6 +774,41 @@ body {
   text-decoration: underline;
 }
 
+/*
+ * The suite page's main column is what is left after the sidebar and the guide panel, so the table
+ * switches layout on the wrap's own width, not the viewport's. Horizontal scroll was rejected: it
+ * would make the wrap the scroll container, so the filter bar and thead would stop sticking to the
+ * page, and it would add a nested scroller. Same breakpoint as .cards, so both change together.
+ */
+.scope-table-wrap { container: scope-table / inline-size; }
+
+@container scope-table (max-width: 600px) {
+  .scope-table, .scope-table tbody, .scope-table tr, .scope-table td, .scope-table th { display: block; }
+  /* Kept for assistive technology, hidden visually */
+  .scope-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .scope-table .overview-row {
+    display: grid;
+    grid-template-columns: max-content auto auto 1fr;
+    grid-template-areas: "id name name name" "id status method tags";
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .scope-table tbody tr:last-child { border-bottom: none; }
+  .scope-table .overview-row > td { padding: 0; border: 0; }
+  .scope-table .overview-id { grid-area: id; }
+  .scope-table .overview-name { grid-area: name; min-width: 0; }
+  .scope-table .overview-status { grid-area: status; max-width: none; }
+  .scope-table .overview-method { grid-area: method; font-size: 0.8rem; color: var(--fg-muted); }
+  .scope-table .overview-method::before { content: attr(data-label) ": "; }
+  .scope-table .overview-tags { grid-area: tags; }
+  /* The row carries the inactive fill now that its cells have no box of their own */
+  .scope-table .row-inactive { background: var(--inactive-bg); }
+  .scope-table .row-inactive td { background: none; }
+  .scope-table .scope-group th { border-bottom: 1px solid var(--border); }
+}
+
 .overview-link {
   border: none;
   background: none;
