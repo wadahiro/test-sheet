@@ -3068,6 +3068,8 @@ function AppHeader({
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
   const runButtonRef = useRef<HTMLButtonElement>(null);
   const current = crumbs[crumbs.length - 1];
+  // The plan is the run's, and the title already names it; the button's room goes to the way out. Without a run it stays: it is how one is chosen.
+  const hideRecord = planExitHash !== null && activeRun !== null;
   const Heading = pageHeading ? "h1" : "span";
 
   return html`
@@ -3092,7 +3094,9 @@ function AppHeader({
         ${planExitHash
           ? html`<a class="header-btn header-btn-on plan-done" href=${planExitHash} title=${t("plan.doneTitle")}><span aria-hidden="true">✓</span><span class="plan-done-text">${t("plan.done")}</span></a>`
           : null}
-        <div class="run-anchor">
+        ${hideRecord
+          ? null
+          : html`<div class="run-anchor">
           <button
             ref=${runButtonRef}
             class=${"header-btn run-btn" + (activeRun ? " header-btn-on" : "")}
@@ -3121,7 +3125,7 @@ function AppHeader({
                 }}
               />`
             : null}
-        </div>
+        </div>`}
         <button class="header-btn" title=${t("header.searchTitle")} onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>${t("header.search")}</span>
