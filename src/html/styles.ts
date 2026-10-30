@@ -487,22 +487,18 @@ body {
 /* The run being recorded into, always named in the header so results never go to the wrong one */
 .run-anchor { position: relative; }
 
-.run-pill {
-  max-width: 16rem;
+.run-btn {
+  max-width: clamp(7rem, 30vw, 16rem);
   gap: 6px;
 }
 
-.run-pill-name {
+.run-btn-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.run-pill-none {
-  border-color: var(--warn);
-  color: var(--warn);
-  background: var(--warn-bg);
-}
+.run-dot { font-size: 0.6rem; line-height: 1; }
 
 .run-menu {
   position: absolute;
@@ -541,6 +537,7 @@ body {
 }
 
 .run-row:hover { background: var(--bg-subtle); }
+.run-row-off .run-name { color: var(--fg-muted); font-weight: 500; }
 .run-row-active { background: var(--accent-bg); }
 .run-row-active:hover { background: var(--accent-bg); }
 

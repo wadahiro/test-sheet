@@ -203,7 +203,7 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
   `;
 }
 
-/** The run cards record into, or null when run mode is off (or no run is chosen); shared by context so it need not be threaded through every list */
+/** The run cards record into, or null when none is chosen, which is when the sheet is just read; shared by context so it need not be threaded through every list */
 interface ActiveRun {
   id: string;
   name: string;
@@ -2123,27 +2123,6 @@ function ThemeToggle() {
   `;
 }
 
-const RUN_MODE_STORAGE_KEY = "test-sheet-run-mode";
-/** What the mode was called while it only ticked steps */
-const LEGACY_RUN_MODE_STORAGE_KEY = "test-sheet-checklist-mode";
-
-function readRunMode(): boolean {
-  try {
-    const stored = localStorage.getItem(RUN_MODE_STORAGE_KEY) ?? localStorage.getItem(LEGACY_RUN_MODE_STORAGE_KEY);
-    return stored === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeRunMode(on: boolean) {
-  try {
-    localStorage.setItem(RUN_MODE_STORAGE_KEY, on ? "1" : "0");
-  } catch {
-    // Blocked storage (e.g. over file://) just means the choice is not remembered
-  }
-}
-
 const SHOW_INACTIVE_STORAGE_KEY = "test-sheet-show-inactive";
 
 function readShowInactive(): boolean {
@@ -2347,6 +2326,7 @@ function RunMenu({
   index,
   totalCases,
   onSelect,
+  onStop,
   onCreate,
   onRename,
   onDelete,
@@ -2355,10 +2335,12 @@ function RunMenu({
   index: RunIndex;
   totalCases: number;
   onSelect: (id: string) => void;
+  onStop: () => void;
   onCreate: (name: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => Promise<void>;
-  onClose: () => void;
+  /** `byKeyboard` is true for Esc, where focus should return to the button that opened the menu */
+  onClose: (byKeyboard: boolean) => void;
 }) {
   const [counts] = useState(countCasesPerRun);
   const [newName, setNewName] = useState(() => (index.runs.length === 0 ? defaultRunName() : ""));
@@ -2375,10 +2357,10 @@ function RunMenu({
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       // The pill that opens this menu closes it itself; counting that click as "outside" would reopen it
-      if (!menuRef.current?.contains(target) && !(target as HTMLElement).closest?.(".run-pill")) onClose();
+      if (!menuRef.current?.contains(target) && !(target as HTMLElement).closest?.(".run-btn")) onClose(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.isComposing) onClose();
+      if (e.key === "Escape" && !e.isComposing) onClose(true);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -2394,7 +2376,8 @@ function RunMenu({
     setBusy(null);
     const cases = counts[run.id] ?? 0;
     // A deleted run cannot be got back, screenshots included
-    if (confirm(`Delete run "${run.name}"?\n${plural(cases, "case")} with results and ${plural(screenshots, "screenshot")} will be removed. This cannot be undone.`)) {
+    const stops = run.id === index.last ? " Recording will stop." : "";
+    if (confirm(`Delete run "${run.name}"?\n${plural(cases, "case")} with results and ${plural(screenshots, "screenshot")} will be removed. This cannot be undone.${stops}`)) {
       await onDelete(run.id);
     }
   };
@@ -2408,6 +2391,15 @@ function RunMenu({
       ${index.runs.length === 0
         ? html`<p class="run-menu-empty">No runs yet. Name one to start recording results.</p>`
         : html`<ul class="run-menu-list">
+            <li class=${"run-row run-row-off" + (index.last === null ? " run-row-active" : "")}>
+              <button class="run-pick" aria-current=${index.last === null} onClick=${onStop}>
+                <span class="run-mark" aria-hidden="true">${index.last === null ? "●" : "○"}</span>
+                <span class="run-text">
+                  <span class="run-name">Not recording</span>
+                  <span class="run-meta">Read the sheet only; nothing is recorded</span>
+                </span>
+              </button>
+            </li>
             ${[...index.runs]
               .sort((a, b) => b.u.localeCompare(a.u))
               .map((run) => {
@@ -2472,14 +2464,13 @@ function AppHeader({
   onOpenPalette,
   navCollapsed,
   onToggleNav,
-  runModeOn,
-  onToggleRunMode,
   runIndex,
   activeRun,
   totalCases,
   runMenuOpen,
   onRunMenuOpen,
   onSelectRun,
+  onStopRecording,
   onCreateRun,
   onRenameRun,
   onDeleteRun,
@@ -2487,19 +2478,19 @@ function AppHeader({
   onOpenPalette: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
-  runModeOn: boolean;
-  onToggleRunMode: () => void;
   runIndex: RunIndex;
   activeRun: ActiveRun | null;
   totalCases: number;
   runMenuOpen: boolean;
   onRunMenuOpen: (open: boolean) => void;
   onSelectRun: (id: string) => void;
+  onStopRecording: () => void;
   onCreateRun: (name: string) => void;
   onRenameRun: (id: string, name: string) => void;
   onDeleteRun: (id: string) => Promise<void>;
 }) {
   const shortcut = navigator.userAgent.includes("Mac") ? "⌘K" : "Ctrl+K";
+  const runButtonRef = useRef<HTMLButtonElement>(null);
 
   return html`
     <header class="app-header">
@@ -2515,40 +2506,38 @@ function AppHeader({
         <span class="app-header-title">Test Cases</span>
       </div>
       <div class="app-header-actions">
-        <button
-          class=${"header-btn" + (runModeOn ? " header-btn-on" : "")}
-          aria-pressed=${runModeOn}
-          title="Record Pass/Fail per step as you run a case (saved in this browser only)"
-          onClick=${onToggleRunMode}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-          <span>Run mode</span>
-        </button>
-        ${runModeOn
-          ? html`<div class="run-anchor">
-              <button
-                class=${"header-btn run-pill" + (activeRun ? "" : " run-pill-none")}
-                aria-haspopup="dialog"
-                aria-expanded=${runMenuOpen}
-                title=${activeRun ? `Recording into "${activeRun.name}". Click to switch, create or delete runs.` : "No run chosen: nothing is being recorded"}
-                onClick=${() => onRunMenuOpen(!runMenuOpen)}
-              >
-                <span class="run-pill-name">${activeRun ? activeRun.name : "No run — choose or create"}</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              ${runMenuOpen
-                ? html`<${RunMenu}
-                    index=${runIndex}
-                    totalCases=${totalCases}
-                    onSelect=${onSelectRun}
-                    onCreate=${onCreateRun}
-                    onRename=${onRenameRun}
-                    onDelete=${onDeleteRun}
-                    onClose=${() => onRunMenuOpen(false)}
-                  />`
-                : null}
-            </div>`
-          : null}
+        <div class="run-anchor">
+          <button
+            ref=${runButtonRef}
+            class=${"header-btn run-btn" + (activeRun ? " header-btn-on" : "")}
+            aria-haspopup="dialog"
+            aria-expanded=${runMenuOpen}
+            title=${activeRun
+              ? `Recording into "${activeRun.name}". Click to switch runs or stop recording.`
+              : "Not recording. Choose or create a run to record Pass/Fail per step (saved in this browser only)."}
+            onClick=${() => onRunMenuOpen(!runMenuOpen)}
+          >
+            ${activeRun
+              ? html`<span class="run-dot" aria-hidden="true">●</span><span class="visually-hidden">Recording into </span><span class="run-btn-name">${activeRun.name}</span>`
+              : html`<span class="run-btn-name">Record</span>`}
+            <span aria-hidden="true">▾</span>
+          </button>
+          ${runMenuOpen
+            ? html`<${RunMenu}
+                index=${runIndex}
+                totalCases=${totalCases}
+                onSelect=${onSelectRun}
+                onStop=${onStopRecording}
+                onCreate=${onCreateRun}
+                onRename=${onRenameRun}
+                onDelete=${onDeleteRun}
+                onClose=${(byKeyboard: boolean) => {
+                  onRunMenuOpen(false);
+                  if (byKeyboard) runButtonRef.current?.focus();
+                }}
+              />`
+            : null}
+        </div>
         <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>Search</span>
@@ -2640,13 +2629,17 @@ function App() {
   useEffect(() => writeFilters(filters), [filters]);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
   const [showInactive, setShowInactive] = useState(readShowInactive);
-  const [runModeOn, setRunModeOn] = useState(readRunMode);
   const [runIndex, setRunIndex] = useState(readRunIndex);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const activeRun = useMemo<ActiveRun | null>(() => {
     const run = runIndex.runs.find((candidate) => candidate.id === runIndex.last);
     return run ? { id: run.id, name: run.name } : null;
   }, [runIndex.last, runIndex.runs]);
+  // The tab's own title says when recording, so a run left on in a background tab is not forgotten
+  const baseTitle = useRef(document.title);
+  useEffect(() => {
+    document.title = activeRun ? `● ${activeRun.name} · ${baseTitle.current}` : baseTitle.current;
+  }, [activeRun?.name]);
   const totalCases = useMemo(() => suites.reduce((sum, suite) => sum + suite.testCases.length, 0), [suites]);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
@@ -2751,19 +2744,14 @@ function App() {
     writePanelWidth(GUIDE_SIZE, width);
   }, []);
 
-  const toggleRunMode = useCallback(() => {
-    setRunModeOn((on) => {
-      writeRunMode(!on);
-      return !on;
-    });
-    // Turning it on with no run yet is the moment to name one, never to create one unseen
-    if (!runModeOn && runIndex.runs.length === 0) setRunMenuOpen(true);
-  }, [runModeOn, runIndex.runs.length]);
-
   const commitRunIndex = useCallback((next: RunIndex) => {
     writeRunIndex(next);
     setRunIndex(next);
   }, []);
+  const stopRecording = useCallback(() => {
+    commitRunIndex({ ...runIndex, last: null });
+    setRunMenuOpen(false);
+  }, [runIndex, commitRunIndex]);
   const selectRun = useCallback(
     (id: string) => {
       commitRunIndex({ ...runIndex, last: id });
@@ -2824,8 +2812,8 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runModeOn=${runModeOn} onToggleRunMode=${toggleRunMode} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
-      <${RunContext.Provider} value=${runModeOn ? activeRun : null}>
+      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
         style=${{ "--nav-w": `${navWidth}px`, "--guide-w": `${guideShownWidth}px` }}

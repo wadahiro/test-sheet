@@ -116,9 +116,28 @@ function migrateSingleRun(): RunIndex {
   return index;
 }
 
+/**
+ * Recording used to be a separate on/off flag beside the chosen run. Now having a run chosen is
+ * recording, so a flag left off becomes "no run chosen", and both old keys are dropped.
+ */
+function foldLegacyRunModeFlag(index: RunIndex): RunIndex {
+  try {
+    const flag = localStorage.getItem("test-sheet-run-mode") ?? localStorage.getItem("test-sheet-checklist-mode");
+    if (flag === null) return index;
+    localStorage.removeItem("test-sheet-run-mode");
+    localStorage.removeItem("test-sheet-checklist-mode");
+    if (flag !== "0" || index.last === null) return index;
+    const stopped = { ...index, last: null };
+    writeRunIndex(stopped);
+    return stopped;
+  } catch {
+    return index;
+  }
+}
+
 export function readRunIndex(): RunIndex {
   try {
-    return parseIndex(localStorage.getItem(runIndexKey())) ?? migrateSingleRun();
+    return foldLegacyRunModeFlag(parseIndex(localStorage.getItem(runIndexKey())) ?? migrateSingleRun());
   } catch {
     return { v: 1, last: null, runs: [] };
   }
@@ -145,10 +164,9 @@ export function withRenamedRun(index: RunIndex, id: string, name: string): RunIn
   return { ...index, runs: index.runs.map((run) => (run.id === id ? { ...run, name: trimmed } : run)) };
 }
 
+/** Deleting the run in use stops recording; it does not move to another run the tester did not choose */
 export function withoutRun(index: RunIndex, id: string): RunIndex {
-  const runs = index.runs.filter((run) => run.id !== id);
-  const last = index.last === id ? ([...runs].sort((a, b) => b.u.localeCompare(a.u))[0]?.id ?? null) : index.last;
-  return { ...index, last, runs };
+  return { ...index, last: index.last === id ? null : index.last, runs: index.runs.filter((run) => run.id !== id) };
 }
 
 /** Stamps the run as just recorded into, so the list can say when it was last used */
