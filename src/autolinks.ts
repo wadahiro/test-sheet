@@ -9,6 +9,8 @@ export interface AutolinkRule {
   pattern: string;
   /** Link target. `{0}` is the whole match, `{1}`… the capture groups, each URL-encoded */
   url: string;
+  /** A link within this page (a case reference): same tab, and not validated as an external URL */
+  local?: boolean;
 }
 
 type Warn = (message: string) => void;
@@ -73,6 +75,7 @@ interface Found {
   index: number;
   text: string;
   href: string;
+  local: boolean;
 }
 
 function expand(url: string, match: RegExpExecArray): string {
@@ -93,6 +96,20 @@ function standsAlone(text: string, start: number, end: number): boolean {
  * number inside any of them is never touched. Link text is the one place the lexer still recurses
  * into, and `inLink` is how it says so.
  */
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+
+/**
+ * A rule that links each given case ID to its own page. Built from the IDs that exist, rather than
+ * from a pattern shaped like an ID, so a word that merely looks like one is left alone. Longest
+ * first, so "LOGIN-012" is not cut short by "LOGIN-01". Listed ahead of configured rules, because a
+ * case that exists is a better target than a tracker's guess.
+ */
+export function caseReferenceRule(ids: string[]): AutolinkRule[] {
+  if (ids.length === 0) return [];
+  const alternatives = [...ids].sort((a, b) => b.length - a.length).map((id) => id.replace(REGEX_SPECIALS, "\\$&"));
+  return [{ pattern: alternatives.join("|"), url: "#/tc/{0}", local: true }];
+}
+
 export function autolinkExtension(rules: AutolinkRule[]): MarkedExtension {
   if (rules.length === 0) return {};
   const compiled = rules.map((rule) => ({ rule, source: rule.pattern }));
@@ -106,7 +123,7 @@ export function autolinkExtension(rules: AutolinkRule[]): MarkedExtension {
         // Without the preceding character, a match at the very start of a text run is taken as standing alone
         const ok = standsAlone(src, atStart ? 0 : match.index, end);
         if (match[0] !== "" && ok) {
-          if (!best || match.index < best.index) best = { index: match.index, text: match[0], href: expand(rule.url, match) };
+          if (!best || match.index < best.index) best = { index: match.index, text: match[0], href: expand(rule.url, match), local: !!rule.local };
           break;
         }
         if (atStart || match[0] === "") break;
@@ -126,10 +143,11 @@ export function autolinkExtension(rules: AutolinkRule[]): MarkedExtension {
           if (this.lexer.state.inLink) return undefined;
           const found = search(src, true);
           if (!found) return undefined;
-          return { type: "autolinkReference", raw: found.text, text: found.text, href: found.href } as Tokens.Generic;
+          return { type: "autolinkReference", raw: found.text, text: found.text, href: found.href, local: found.local } as Tokens.Generic;
         },
         renderer(token) {
-          return `<a href="${escapeHtml(token.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(token.text)}</a>`;
+          const external = token.local ? "" : ' target="_blank" rel="noopener noreferrer"';
+          return `<a href="${escapeHtml(token.href)}"${external}>${escapeHtml(token.text)}</a>`;
         },
       },
     ],

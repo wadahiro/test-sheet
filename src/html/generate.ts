@@ -9,7 +9,7 @@ import { STYLES } from "./styles";
 import { createCaseMarkdown } from "./caseMarkdown";
 import { formatTestData } from "./caseFormat";
 import type { LocaleDefinition } from "./i18n";
-import { autolinkExtension, type AutolinkRule } from "../autolinks";
+import { autolinkExtension, caseReferenceRule, type AutolinkRule } from "../autolinks";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -146,12 +146,14 @@ function jsonForScript(value: unknown): string {
 export async function generateHtml(suites: TestSuiteTestCases[], options: GenerateHtmlOptions = {}): Promise<string> {
   const { liveReload = false, locales = [], autolinks: globalAutolinks = [] } = options;
   const bundledJs = await bundleApp();
+  // Across every suite, since a case may point at one in another suite
+  const caseReferences = caseReferenceRule(suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean));
 
   const pageSuites = await Promise.all(
     suites.map(async (suite) => {
       const idPrefix = suite.metadata.id_prefix;
       // The suite's own rules come first, so where two match the same text its more specific one wins
-      const autolinks = [...suite.autolinks, ...globalAutolinks];
+      const autolinks = [...caseReferences, ...suite.autolinks, ...globalAutolinks];
       const renderers = caseRenderers(autolinks);
       const { html: guideHtml, headings: guideHeadings } = suite.guideContent
         ? await renderGuideWithHeadings(suite.guideContent, idPrefix, autolinks)

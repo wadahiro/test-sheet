@@ -203,6 +203,14 @@ bun run src/cli.ts ./tests --autolink 'PROJ-\d+' 'https://tracker.example.com/br
 - A rule that cannot work (invalid regular expression, a URL that is not `http(s)://`, a `{n}` the pattern
   has no group for) is reported when the file is loaded and left out; the rest still apply.
 
+### Referring to other cases
+
+Write another case's ID as plain text (`see LOGIN-002`) and it becomes a link to that case, in the steps,
+notes, test data and guides. Only IDs that exist in the loaded files are linked, from any suite, and an
+ID that is part of a longer word (`XLOGIN-002`, `LOGIN-0021`) is left alone, as are code spans and
+existing Markdown links. The copied Markdown keeps the plain ID, so it does not carry a link that would
+break when pasted into an issue. Where a configured autolink also matches, the case link wins.
+
 ### Directory hierarchy, domain, and feature
 
 The first two path segments relative to the root directory are treated as "domain" and "feature", respectively.
