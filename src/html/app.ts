@@ -5,7 +5,8 @@ import { h, render, createContext } from "preact";
 import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
-import { caseRunKey, countCasesPerRun, deleteRunData, defaultRunName, readRunIndex, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, touchRun, withNewRun, withoutRun, withRenamedRun, writeRunIndex, type RunIndex, type RunMeta } from "./runStore";
+import { caseRunKey, countCasesPerRun, deleteRunData, readRunIndex, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writeRunIndex, type RunIndex, type RunMeta } from "./runStore";
+import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
 const html = htmBind.bind(h);
@@ -81,14 +82,15 @@ declare global {
     __SUITES__: SuitePageData[];
     /** When true, watches for file changes over WebSocket and auto-reloads (server mode only) */
     __LIVE_RELOAD__: boolean;
+    /** Languages supplied with `--locale`, on top of the built-in ones */
+    __LOCALES__?: LocaleDefinition[];
   }
 }
 
 function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: Record<number, RunImage[]> }) | null): string {
   if (!steps || steps.length === 0) return "";
-  const lines = run
-    ? ["| # | Action | Expected | Result |", "|:---:|------|----------|--------|"]
-    : ["| # | Action | Expected |", "|:---:|------|----------|"];
+  const head = ["#", t("step.action"), t("step.expected"), ...(run ? [t("step.result")] : [])];
+  const lines = [`| ${head.join(" | ")} |`, run ? "|:---:|------|----------|--------|" : "|:---:|------|----------|"];
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     const action = escapeMarkdownCell(step.action || "");
@@ -99,7 +101,7 @@ function formatStepsAsMarkdownTable(steps: Step[], run?: (RunState & { images?: 
     }
     const result = run.results[i];
     const note = run.notes[i] ? ` — ${escapeMarkdownCell(run.notes[i])}` : "";
-    const cell = result === "p" ? "Pass" : result === "f" ? `**Fail**${note}` : "not run";
+    const cell = result === "p" ? t("result.pass") : result === "f" ? `**${t("result.fail")}**${note}` : t("result.notRun");
     lines.push(`| ${i + 1} | ${action} | ${expected} | ${cell} |`);
   }
   return lines.join("\n");
@@ -116,38 +118,38 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
   lines.push(`${"#".repeat(headingLevel)} ${tc._tcId}`, "", `**${tc.name}**`, "");
 
   if (tc.preconditions && tc.preconditions.length > 0) {
-    lines.push("**Preconditions:**", formatPreconditions(tc.preconditions), "");
+    lines.push(`**${t("md.preconditions")}:**`, formatPreconditions(tc.preconditions), "");
   }
 
   if (tc.test_data && (Array.isArray(tc.test_data) ? tc.test_data.length > 0 : Object.keys(tc.test_data as object).length > 0)) {
-    lines.push("**Test Data:**", "", formatTestData(tc.test_data), "");
+    lines.push(`**${t("md.testData")}:**`, "", formatTestData(tc.test_data), "");
   }
 
   if (tc.tags && tc.tags.length > 0) {
-    lines.push(`**Tags:** ${tc.tags.join(", ")}`, "");
+    lines.push(`**${t("md.tags")}:** ${tc.tags.join(", ")}`, "");
   }
 
   if (recorded) {
     const outcome = caseOutcome(recorded.results);
-    const label = outcome === "pass" ? "Pass" : outcome === "fail" ? "Fail" : "In progress";
+    const label = outcome === "pass" ? t("result.pass") : outcome === "fail" ? t("result.fail") : t("result.inProgress");
     const marked = recorded.results.filter((result) => result !== "").length;
-    const when = recorded.recordedAt ? `, recorded ${recorded.recordedAt.slice(0, 10)}` : "";
-    const named = recorded.runName ? `, run "${recorded.runName}"` : "";
-    lines.push(`**Result:** ${label} (${marked}/${recorded.results.length} run${named}${when})`, "");
+    const when = recorded.recordedAt ? t("md.resultRecorded", { date: recorded.recordedAt.slice(0, 10) }) : "";
+    const named = recorded.runName ? t("md.resultNamed", { name: recorded.runName }) : "";
+    lines.push(`**${t("md.result")}:** ${t("md.resultLine", { label, marked, total: recorded.results.length, named, when })}`, "");
   }
 
-  lines.push("**Steps:**", "", formatStepsAsMarkdownTable(tc.steps, recorded), "");
+  lines.push(`**${t("md.steps")}:**`, "", formatStepsAsMarkdownTable(tc.steps, recorded), "");
 
   // An image cannot travel inside Markdown (trackers drop data: URLs), so each one gets a marked spot
   // to paste it into, after copying it from the sheet
   const shotLines = Object.entries(recorded?.images ?? {}).flatMap(([step, list]) =>
-    list.map((_, n) => `- Step ${Number(step) + 1}, screenshot ${n + 1}: _(paste the image here)_`)
+    list.map((_, n) => `- ${t("md.screenshotItem", { step: Number(step) + 1, n: n + 1 })}`)
   );
-  if (shotLines.length > 0) lines.push("**Screenshots:**", "", ...shotLines, "");
+  if (shotLines.length > 0) lines.push(`**${t("md.screenshots")}:**`, "", ...shotLines, "");
 
   if (tc.notes) {
     const notesLines = tc.notes.split("\n");
-    lines.push(`> **Note:** ${notesLines[0]}`);
+    lines.push(`> **${t("md.note")}:** ${notesLines[0]}`);
     for (let i = 1; i < notesLines.length; i++) lines.push(`> ${notesLines[i]}`);
     lines.push("");
   }
@@ -157,7 +159,7 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
 
 /** Renders every test case in a section as a single Markdown document */
 function categoryToMarkdown(category: string, testCases: TestCase[], headingLevel = 2): string {
-  const lines = [`${"#".repeat(headingLevel)} Section: ${category}`, ""];
+  const lines = [`${"#".repeat(headingLevel)} ${t("md.section", { name: category })}`, ""];
   for (const tc of testCases) {
     lines.push(testCaseToMarkdown(tc, headingLevel + 1), "---", "");
   }
@@ -167,9 +169,9 @@ function categoryToMarkdown(category: string, testCases: TestCase[], headingLeve
 function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string {
   const grouped = groupByCategory(suite.testCases);
   const lines = [
-    `${"#".repeat(headingLevel)} ${suite.idPrefix}: ${suite.typeName} Test Procedure`,
+    `${"#".repeat(headingLevel)} ${t("md.suiteTitle", { prefix: suite.idPrefix, type: suite.typeName })}`,
     "",
-    `> ${suite.testCases.length} test case(s)`,
+    `> ${t("md.caseCount", { count: suite.testCases.length })}`,
     "",
   ];
   for (const [category, cases] of grouped) {
@@ -198,7 +200,7 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
       ${copied
         ? html`<span>✓</span>`
         : html`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
-      ${iconOnly ? null : html`<span>${copied ? "Copied" : "Copy"}</span>`}
+      ${iconOnly ? null : html`<span>${copied ? t("copy.copied") : t("copy.copy")}</span>`}
     </button>
   `;
 }
@@ -332,9 +334,9 @@ function caseOutcome(results: StepResult[]): CaseOutcome {
 }
 
 function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
-  if (outcome === "pass") return "PASS";
-  if (outcome === "fail") return "FAIL";
-  return `${results.filter((result) => result !== "").length}/${results.length} run`;
+  if (outcome === "pass") return t("chip.pass");
+  if (outcome === "fail") return t("chip.fail");
+  return t("chip.progress", { marked: results.filter((result) => result !== "").length, total: results.length });
 }
 
 function useCaseRun(tc: TestCase, active: ActiveRun | null): CaseRun | null {
@@ -455,18 +457,18 @@ function useLightbox(index: number | null, images: RunImage[], label: (n: number
       html`<div class="lightbox" role="dialog" aria-modal="true" aria-label=${label(index)} onClick=${close}>
         <div class="lightbox-stage" onClick=${(e: Event) => e.stopPropagation()}>
           ${images.length > 1
-            ? html`<button class="lightbox-nav" title="Previous image (←)" aria-label="Previous image" disabled=${index === 0} onClick=${() => go(index - 1)}>‹</button>`
+            ? html`<button class="lightbox-nav" title=${t("lightbox.prev")} aria-label=${t("lightbox.prevLabel")} disabled=${index === 0} onClick=${() => go(index - 1)}>‹</button>`
             : null}
           <div class="lightbox-frame">
             <div class="lightbox-bar">
               ${images.length > 1 ? html`<span class="lightbox-count">${index + 1} / ${images.length}</span>` : null}
-              <a class="lightbox-link" href=${image.url} target="_blank" rel="noopener">Open in a new tab</a>
-              <button class="lightbox-close" title="Close (Esc)" aria-label="Close" onClick=${close}>✕</button>
+              <a class="lightbox-link" href=${image.url} target="_blank" rel="noopener">${t("lightbox.open")}</a>
+              <button class="lightbox-close" title=${t("lightbox.close")} aria-label=${t("lightbox.closeLabel")} onClick=${close}>✕</button>
             </div>
             <img class="lightbox-image" src=${image.url} alt=${label(index)} />
           </div>
           ${images.length > 1
-            ? html`<button class="lightbox-nav" title="Next image (→)" aria-label="Next image" disabled=${index === images.length - 1} onClick=${() => go(index + 1)}>›</button>`
+            ? html`<button class="lightbox-nav" title=${t("lightbox.next")} aria-label=${t("lightbox.nextLabel")} disabled=${index === images.length - 1} onClick=${() => go(index + 1)}>›</button>`
             : null}
         </div>
       </div>`,
@@ -523,23 +525,23 @@ function ImageThumb({
   };
 
   return html`<li class="step-image">
-    <button class="image-open" title="View the full image" aria-label=${`View ${label} full size`} onClick=${onOpen}>
+    <button class="image-open" title=${t("shot.view")} aria-label=${t("shot.viewLabel", { label })} onClick=${onOpen}>
       <img src=${image.url} alt=${label} />
     </button>
     <span class="image-tools">
-      <button class=${"image-tool" + (copied ? " image-tool-done" : "")} title="Copy the image, to paste into an issue or comment" aria-label=${`Copy ${label}`} onClick=${copy}>
+      <button class=${"image-tool" + (copied ? " image-tool-done" : "")} title=${t("shot.copy")} aria-label=${t("shot.copyLabel", { label })} onClick=${copy}>
         ${copied ? "✓" : html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
       </button>
-      <a class="image-tool" href=${image.url} download=${fileName} title="Download the image" aria-label=${`Download ${label}`}>
+      <a class="image-tool" href=${image.url} download=${fileName} title=${t("shot.download")} aria-label=${t("shot.downloadLabel", { label })}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
       </a>
       <button
         class="image-tool image-tool-remove"
-        title="Remove this image"
-        aria-label=${`Remove ${label}`}
+        title=${t("shot.remove")}
+        aria-label=${t("shot.removeLabel", { label })}
         onClick=${() => {
           // A removed screenshot cannot be got back, and the button sits right beside Copy and Download
-          if (confirm("Remove this screenshot? This cannot be undone.")) onRemove();
+          if (confirm(t("shot.confirmRemove"))) onRemove();
         }}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
@@ -557,7 +559,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
   const full = images.length >= MAX_IMAGES_PER_STEP;
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [viewing, setViewing] = useState<number | null>(null);
-  useLightbox(viewing, images, (n) => `Screenshot ${n + 1} for step ${index + 1}`, setViewing);
+  useLightbox(viewing, images, (n) => t("shot.label", { n: n + 1, step: index + 1 }), setViewing);
 
   // Grows with the text so a few lines never need scrolling inside the box
   useEffect(() => {
@@ -578,8 +580,8 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
         class="step-note"
         rows="2"
         maxlength="2000"
-        placeholder="What did you see? Paste a screenshot here, if you have one (optional)"
-        aria-label=${`Step ${index + 1} failure note`}
+        placeholder=${t("note.placeholder")}
+        aria-label=${t("note.label", { step: index + 1 })}
         value=${run.notes[index] ?? ""}
         onInput=${(e: Event) => run.setNote(index, (e.target as HTMLTextAreaElement).value)}
         onPaste=${(e: ClipboardEvent) => {
@@ -611,7 +613,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
       />
       <div class="step-note-tools">
         <label class=${"link-btn" + (full ? " link-btn-off" : "")}>
-          Attach image
+          ${t("note.attach")}
           <input
             class="visually-hidden"
             type="file"
@@ -625,7 +627,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
             }}
           />
         </label>
-        <span class="step-note-hint">${full ? `${MAX_IMAGES_PER_STEP} images is the most a step can hold. ` : ""}Ctrl/Cmd+Enter: next step</span>
+        <span class="step-note-hint">${full ? t("note.full", { max: MAX_IMAGES_PER_STEP }) : ""}${t("note.next")}</span>
       </div>
       ${images.length > 0
         ? html`<ul class="step-images">
@@ -633,7 +635,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
               (image, n) => html`<${ImageThumb}
                 key=${image.id}
                 image=${image}
-                label=${`Screenshot ${n + 1} for step ${index + 1}`}
+                label=${t("shot.label", { n: n + 1, step: index + 1 })}
                 fileName=${`${tcId}-step${index + 1}-${n + 1}.${image.blob.type === "image/png" ? "png" : "jpg"}`}
                 onOpen=${() => setViewing(n)}
                 onRemove=${() => run.removeImage(index, image.id)}
@@ -649,7 +651,7 @@ function StepNote({ tcId, index, run, onNext, onBack }: { tcId: string; index: n
  * The explicit roles keep this a table for assistive technology even when the narrow layout
  * turns its cells into blocks, which would otherwise drop the table semantics.
  */
-const RESULT_LABEL: Record<Exclude<StepResult, "">, string> = { p: "Pass", f: "Fail" };
+const RESULT_LABEL_KEY: Record<Exclude<StepResult, "">, MessageKey> = { p: "result.pass", f: "result.fail" };
 
 /**
  * Two adjacent buttons per step. Pass and Fail keep a fixed order so a hand learns where each is,
@@ -665,7 +667,7 @@ function StepResultButtons({
   result: StepResult;
   onSet: (index: number, result: Exclude<StepResult, "">, byKeyboard: boolean) => void;
 }) {
-  return html`<div class="step-result-group" role="group" aria-label=${`Step ${index + 1} result`}>
+  return html`<div class="step-result-group" role="group" aria-label=${t("step.resultGroup", { step: index + 1 })}>
     ${(["p", "f"] as const).map(
       (value) => html`<button
         key=${value}
@@ -673,7 +675,7 @@ function StepResultButtons({
         aria-pressed=${result === value}
         onClick=${(e: MouseEvent) => onSet(index, value, e.detail === 0)}
       >
-        <span aria-hidden="true">${value === "p" ? "✓" : "✕"}</span> ${RESULT_LABEL[value]}
+        <span aria-hidden="true">${value === "p" ? "✓" : "✕"}</span> ${t(RESULT_LABEL_KEY[value])}
       </button>`
     )}
   </div>`;
@@ -715,9 +717,9 @@ function StepsTable({ tcId, steps, run }: { tcId: string; steps: Step[]; run: Ca
       <thead role="rowgroup">
         <tr role="row">
           <th role="columnheader" class="step-no">#</th>
-          <th role="columnheader">Action</th>
-          <th role="columnheader">Expected</th>
-          ${run ? html`<th role="columnheader" class="step-result">Result</th>` : null}
+          <th role="columnheader">${t("step.action")}</th>
+          <th role="columnheader">${t("step.expected")}</th>
+          ${run ? html`<th role="columnheader" class="step-result">${t("step.result")}</th>` : null}
         </tr>
       </thead>
       <tbody role="rowgroup">
@@ -734,7 +736,7 @@ function StepsTable({ tcId, steps, run }: { tcId: string; steps: Step[]; run: Ca
             <tr key=${i} role="row" data-step=${i} class=${classes.join(" ")}>
               <th role="rowheader" scope="row" class="step-no">${i + 1}</th>
               <td role="cell" class="step-cell step-action" dangerouslySetInnerHTML=${{ __html: step.actionHtml }} />
-              <td role="cell" class="step-cell step-expected" dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
+              <td role="cell" class="step-cell step-expected" data-label=${t("step.expected")} dangerouslySetInnerHTML=${{ __html: step.expectedHtml }} />
               ${run
                 ? html`<td role="cell" class="step-result">
                     <${StepResultButtons} index=${i} result=${result} onSet=${onSet} />
@@ -758,11 +760,17 @@ function StepsTable({ tcId, steps, run }: { tcId: string; steps: Step[]; run: Ca
 /** Why a case is out of active coverage, spelled out; null for an active case */
 function inactiveNote(tc: TestCase): string | null {
   const reason = tc.reason ?? tc.skip?.reason;
-  if (tc.status === "obsolete") return `Obsolete${reason ? `: ${reason}` : ""}`;
+  if (tc.status === "obsolete") return reason ? t("inactive.obsoleteReason", { reason }) : t("inactive.obsolete");
   if (tc.status === "superseded") {
-    return `Superseded${tc.superseded_by ? ` by ${tc.superseded_by}` : ""}${reason ? `: ${reason}` : ""}`;
+    const by = tc.superseded_by;
+    if (by && reason) return t("inactive.supersededByReason", { by, reason });
+    if (by) return t("inactive.supersededBy", { by });
+    return reason ? t("inactive.supersededReason", { reason }) : t("inactive.superseded");
   }
-  if (tc.skip) return `Skipped${tc.skip.until ? ` until ${tc.skip.until}` : ""}: ${tc.skip.reason}`;
+  if (tc.skip) {
+    const { until, reason: why } = tc.skip;
+    return until ? t("inactive.skippedUntil", { until, reason: why }) : t("inactive.skipped", { reason: why });
+  }
   return null;
 }
 
@@ -783,26 +791,26 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
         <span class="test-case-id">${tc._tcId}</span>
         <h4 class="test-case-name" title=${tc.name}>${tc.name}</h4>
         <span class="test-case-badges">
-          ${tc.status === "obsolete" ? html`<span class="badge">obsolete</span>` : null}
-          ${tc.status === "superseded" ? html`<span class="badge">superseded${tc.superseded_by ? ` → ${tc.superseded_by}` : ""}</span>` : null}
-          ${tc.skip ? html`<span class="badge badge-skip">skip${tc.skip.until ? ` (until ${tc.skip.until})` : ""}</span>` : null}
+          ${tc.status === "obsolete" ? html`<span class="badge">${t("badge.obsolete")}</span>` : null}
+          ${tc.status === "superseded" ? html`<span class="badge">${statusLabel(tc)}</span>` : null}
+          ${tc.skip ? html`<span class="badge badge-skip">${statusLabel(tc)}</span>` : null}
           ${tc.automation && tc.automation !== "manual"
             ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
             : null}
         </span>
         ${run && outcome !== "none"
           ? html`<span class="run-status">
-              <span class=${`run-chip run-chip-${outcome}`} title=${`Recorded in run "${activeRun?.name ?? ""}" (this browser only)`}>${outcomeLabel(outcome, run.results)}</span>
-              <button class="link-btn" onClick=${run.reset}>Reset</button>
+              <span class=${`run-chip run-chip-${outcome}`} title=${t("chip.title", { name: activeRun?.name ?? "" })}>${outcomeLabel(outcome, run.results)}</span>
+              <button class="link-btn" onClick=${run.reset}>${t("chip.reset")}</button>
             </span>`
           : null}
         <span class="test-case-actions">
-          <a class="icon-btn" href=${testCaseHash(tc._tcId)} title="Link to this test case" aria-label="Link to this test case">
+          <a class="icon-btn" href=${testCaseHash(tc._tcId)} title=${t("case.link")} aria-label=${t("case.link")}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
           </a>
           <${CopyButton}
             iconOnly=${true}
-            title=${hasShots ? "Copy this test case as Markdown (copy each screenshot separately)" : "Copy this test case as Markdown"}
+            title=${hasShots ? t("copy.caseWithShots") : t("copy.case")}
             getText=${() => testCaseToMarkdown(tc, 3, run && { ...run, runName: activeRun?.name })}
           />
         </span>
@@ -810,22 +818,22 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
       <div class="test-case-body">
         ${hasMeta
           ? html`<div class="test-case-meta">
-              ${(tc.tags ?? []).map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title="Show test cases matching this tag">${tag}</a>`)}
+              ${(tc.tags ?? []).map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
               ${note ? html`<span class="inactive-note">${note}</span>` : null}
-              ${tc.legacy_marker ? html`<span class="legacy-marker">Original marker: ${tc.legacy_marker}</span>` : null}
+              ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
             </div>`
           : null}
         ${hasPreconditions || tc.testDataHtml
           ? html`<div class="test-case-setup">
               ${hasPreconditions
                 ? html`<div class="preconditions">
-                    <h5 class="eyebrow">Preconditions</h5>
+                    <h5 class="eyebrow">${t("case.preconditions")}</h5>
                     <ul>${tc.preconditions!.map((p, i) => html`<li key=${i}>${preconditionText(p)}</li>`)}</ul>
                   </div>`
                 : null}
               ${tc.testDataHtml
                 ? html`<div class="test-data">
-                    <h5 class="eyebrow">Test data</h5>
+                    <h5 class="eyebrow">${t("case.testData")}</h5>
                     <div class="test-data-body" dangerouslySetInnerHTML=${{ __html: tc.testDataHtml }} />
                   </div>`
                 : null}
@@ -834,7 +842,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
         <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
         ${tc.notesHtml
           ? html`<aside class="notes">
-              <h5 class="eyebrow">Note</h5>
+              <h5 class="eyebrow">${t("case.note")}</h5>
               <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
             </aside>`
           : null}
@@ -859,15 +867,15 @@ function goToTestCase(tcId: string) {
 
 /** Why a case is out of active coverage, as a short label; null for an active case */
 function statusLabel(tc: TestCase): string | null {
-  if (tc.status === "obsolete") return "obsolete";
-  if (tc.status === "superseded") return tc.superseded_by ? `superseded \u2192 ${tc.superseded_by}` : "superseded";
-  if (tc.skip) return tc.skip.until ? `skip (until ${tc.skip.until})` : "skip";
+  if (tc.status === "obsolete") return t("badge.obsolete");
+  if (tc.status === "superseded") return tc.superseded_by ? t("badge.supersededBy", { by: tc.superseded_by }) : t("badge.superseded");
+  if (tc.skip) return tc.skip.until ? t("badge.skipUntil", { until: tc.skip.until }) : t("badge.skip");
   return null;
 }
 
 /** How the case is run; an unset `automation` means a person runs it by hand */
 function testMethod(tc: TestCase): string {
-  return tc.automation ?? "manual";
+  return !tc.automation || tc.automation === "manual" ? t("method.manual") : tc.automation;
 }
 
 interface IndexRowData {
@@ -892,7 +900,7 @@ function indexRowData(tc: TestCase): IndexRowData {
   };
 }
 
-const INDEX_COLUMNS = ["ID", "Name", "Status", "Method", "Tags"];
+const indexColumns = (): string[] => [t("col.id"), t("col.name"), t("col.status"), t("col.method"), t("col.tags")];
 
 /**
  * One case as a table row. With `onTag` a tag chip filters the table it sits in; without it the
@@ -917,7 +925,7 @@ function IndexRow({ row, onTag }: { row: IndexRowData; onTag?: (tag: string) => 
         <div class="tag-list">
           ${row.tags.map((tag) =>
             onTag
-              ? html`<button class="tag-chip" key=${tag} title="Filter by this tag" onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}>${tag}</button>`
+              ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}>${tag}</button>`
               : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}>${tag}</a>`
           )}
         </div>
@@ -931,7 +939,7 @@ function SectionIndex({ testCases }: { testCases: TestCase[] }) {
   return html`
     <table class="overview-table section-index">
       <thead>
-        <tr>${INDEX_COLUMNS.map((column) => html`<th key=${column}>${column}</th>`)}</tr>
+        <tr>${indexColumns().map((column) => html`<th key=${column}>${column}</th>`)}</tr>
       </thead>
       <tbody>
         ${testCases.map((tc) => html`<${IndexRow} key=${tc._tcId} row=${indexRowData(tc)} />`)}
@@ -959,7 +967,7 @@ function CategorySection({
         <h3>${category}</h3>
         <div class="category-header-right">
           <span class="count"><${CountLabel} testCases=${testCases} /></span>
-          <${CopyButton} title="Copy this section as Markdown" getText=${() => categoryToMarkdown(category, testCases)} />
+          <${CopyButton} title=${t("copy.section")} getText=${() => categoryToMarkdown(category, testCases)} />
         </div>
       </div>
       ${showIndex ? html`<${SectionIndex} testCases=${testCases} />` : null}
@@ -1120,7 +1128,7 @@ function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
 }
 
 /** Column headings, shared by the rendered table and the Markdown export so they cannot drift */
-const OVERVIEW_COLUMNS = ["ID", "Domain", "Feature", "Test Suite", "Section", "Name", "Status", "Method", "Tags"];
+const overviewColumns = (): string[] => [t("col.id"), t("col.domain"), t("col.feature"), t("col.suite"), t("col.section"), t("col.name"), t("col.status"), t("col.method"), t("col.tags")];
 
 function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
@@ -1129,13 +1137,14 @@ function escapeMarkdownCell(value: string): string {
 /** Renders the overview as a Markdown table. Repeated values are written out in full, since
  *  the dimming that stands in for them on screen has no Markdown equivalent. */
 function overviewToMarkdown(rows: OverviewRow[]): string {
+  const columns = overviewColumns();
   const lines = [
-    "# Overview",
+    `# ${t("md.overview")}`,
     "",
-    `> ${rows.length} test case(s)`,
+    `> ${t("md.caseCount", { count: rows.length })}`,
     "",
-    `| ${OVERVIEW_COLUMNS.join(" | ")} |`,
-    `|${OVERVIEW_COLUMNS.map(() => "---").join("|")}|`,
+    `| ${columns.join(" | ")} |`,
+    `|${columns.map(() => "---").join("|")}|`,
   ];
   for (const row of rows) {
     const cells = [
@@ -1173,7 +1182,7 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
   const sumCounts = (list: SuitePageData[]) => list.reduce((sum, suite) => addCounts(sum, suiteTestCaseCount(suite)), { active: 0, total: 0 });
 
   if (scope.kind === "all") {
-    return { title: "All test cases", ancestors: [], anchorId: "overview", suites, count: sumCounts(suites), depth: 0 };
+    return { title: t("view.all"), ancestors: [], anchorId: "overview", suites, count: sumCounts(suites), depth: 0 };
   }
   if (scope.kind === "suite") {
     const suite = suites.find((candidate) => candidate.idPrefix === scope.idPrefix);
@@ -1229,7 +1238,7 @@ function ScopeTable({ rows, depth, onTag }: { rows: OverviewRow[]; depth: number
   return html`
     <table class="overview-table scope-table">
       <thead>
-        <tr>${INDEX_COLUMNS.map((column) => html`<th key=${column}>${column}</th>`)}</tr>
+        <tr>${indexColumns().map((column) => html`<th key=${column}>${column}</th>`)}</tr>
       </thead>
       <tbody>
         ${rows.map((row, i) => {
@@ -1237,7 +1246,7 @@ function ScopeTable({ rows, depth, onTag }: { rows: OverviewRow[]; depth: number
           return html`
             ${startsGroup
               ? html`<tr key=${"group:" + row.keys.category} class="scope-group">
-                  <th colspan=${INDEX_COLUMNS.length}>
+                  <th colspan=${indexColumns().length}>
                     <a href=${sectionHash(row.idPrefix, row.labels.category)}>${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")}</a>
                   </th>
                 </tr>`
@@ -1277,10 +1286,10 @@ function ScopePage({
 }) {
   const resolved = resolveScope(route.scope, suites);
   if (!resolved) {
-    return html`<p class="empty">Not found. <a href=${OVERVIEW_HASH}>Back to all test cases</a></p>`;
+    return html`<p class="empty">${t("scope.notFound")} <a href=${OVERVIEW_HASH}>${t("scope.backToAll")}</a></p>`;
   }
   if (suites.length === 0) {
-    return html`<p class="empty">No testcases.yaml files found.</p>`;
+    return html`<p class="empty">${t("scope.noFiles")}</p>`;
   }
 
   const { rowKey } = resolved;
@@ -1309,23 +1318,23 @@ function ScopePage({
           ${resolved.ancestors.length > 0 ? html`<span class="scope-crumb">${resolved.ancestors.join(" › ")} › </span>` : null}${resolved.title}
         </span>
         <span class="suite-title-right">
-          ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>Read as one page</a>` : null}
+          ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
           <span class="suite-title-count">
-            ${trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count)} test case(s)
+            ${t("scope.count", { count: trimmedQuery ? `${visibleRows.length} / ${scopeRows.length}` : formatCaseCount(resolved.count) })}
           </span>
           ${hasGuide
             ? html`<button
                 class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
                 aria-pressed=${guideOpen}
-                title=${guideOpen ? "Hide the guide" : "Show the guide beside the test cases"}
+                title=${guideOpen ? t("guide.hide") : t("guide.show")}
                 onClick=${onToggleGuide}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
-                <span>Guide</span>
+                <span>${t("guide.label")}</span>
               </button>`
             : null}
           <${CopyButton}
-            title="Copy the listed test cases as Markdown"
+            title=${t("copy.listed")}
             getText=${() => (resolved.toMarkdown && !trimmedQuery ? resolved.toMarkdown() : overviewToMarkdown(visibleRows))}
           />
         </span>
@@ -1335,25 +1344,25 @@ function ScopePage({
           <input
             class="overview-search"
             type="search"
-            placeholder="🔍 Filter by ID, name, section, status, method, or tag"
+            placeholder=${t("filter.placeholder")}
             value=${query}
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
           ${hasInactive
-            ? html`<label class="filter-toggle" title="Obsolete, superseded and skipped cases are always listed in the table">
+            ? html`<label class="filter-toggle" title=${t("filter.showInactiveTitle")}>
                 <input type="checkbox" checked=${showInactive} onChange=${onToggleInactive} />
-                Show inactive cards
+                ${t("filter.showInactive")}
               </label>`
             : null}
         </div>
         ${visibleRows.length === 0
-          ? html`<p class="empty">No matches</p>`
+          ? html`<p class="empty">${t("filter.none")}</p>`
           : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} />`}
       </div>
       ${hiddenCount > 0
         ? html`<p class="hidden-note">
-            ${hiddenCount} inactive case${hiddenCount === 1 ? " is" : "s are"} not shown below; ${hiddenCount === 1 ? "it stays" : "they stay"} in the table.${" "}
-            <button class="link-btn" onClick=${onToggleInactive}>Show</button>
+            ${tn("hidden", hiddenCount)}${" "}
+            <button class="link-btn" onClick=${onToggleInactive}>${t("hidden.show")}</button>
           </p>`
         : null}
       ${suite && cardCases.length > 0
@@ -1370,7 +1379,7 @@ function featureAnchorId(domain: string, feature: string): string {
 function SuiteGuide({ suite }: { suite: SuitePageData }) {
   if (!suite.guideHtml) return null;
   return html`<details class="guide" id=${guideAnchorId(suite.idPrefix)}>
-    <summary class="guide-summary">📖 Guide</summary>
+    <summary class="guide-summary">${t("guide.summary")}</summary>
     <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
   </details>`;
 }
@@ -1397,15 +1406,15 @@ function GuidePanel({
   return html`
     <aside
       class="guide-panel"
-      aria-label="Guide"
+      aria-label=${t("guide.label")}
       onKeyDown=${(e: KeyboardEvent) => {
         if (e.key === "Escape") onClose();
       }}
     >
-      <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label="Resize guide" onResize=${onResize} onReset=${onResetWidth} />
+      <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label=${t("guide.resize")} onResize=${onResize} onReset=${onResetWidth} />
       <div class="guide-panel-head">
-        <span class="guide-panel-title" title=${`${suite.idPrefix}: ${suite.typeName}`}>📖 Guide · ${suite.typeName}</span>
-        <button class="header-btn header-btn-icon" title="Close the guide" aria-label="Close the guide" onClick=${onClose}>✕</button>
+        <span class="guide-panel-title" title=${`${suite.idPrefix}: ${suite.typeName}`}>${t("guide.panelTitle", { name: suite.typeName })}</span>
+        <button class="header-btn header-btn-icon" title=${t("guide.close")} aria-label=${t("guide.close")} onClick=${onClose}>✕</button>
       </div>
       <div class="guide-panel-body" tabindex="0">
         <div class="guide" id=${guideAnchorId(suite.idPrefix)}>
@@ -1442,7 +1451,7 @@ function SuiteSection({ suite }: { suite: SuitePageData }) {
         <span class="suite-title-text">${suite.idPrefix}: ${suite.typeName}</span>
         <span class="suite-title-right">
           <span class="suite-title-count"><${CountLabel} testCases=${suite.testCases} /></span>
-          <${CopyButton} title="Copy all test cases as Markdown" getText=${() => allTestCasesToMarkdown(suite)} />
+          <${CopyButton} title=${t("copy.suite")} getText=${() => allTestCasesToMarkdown(suite)} />
         </span>
       </h1>
       <${SuiteGuide} suite=${suite} />
@@ -1479,7 +1488,7 @@ function formatCaseCount({ active, total }: CaseCount): string {
 }
 
 function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
-  const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${formatCaseCount(featureTestCaseCount(group))} test case(s)`, ""];
+  const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${t("md.caseCount", { count: formatCaseCount(featureTestCaseCount(group)) })}`, ""];
   for (const suite of group.suites) {
     lines.push(allTestCasesToMarkdown(suite, headingLevel + 1));
   }
@@ -1487,7 +1496,7 @@ function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
 }
 
 function domainToMarkdown(group: DomainGroup): string {
-  const lines = [`# ${group.domainLabel}`, "", `> ${formatCaseCount(domainTestCaseCount(group))} test case(s)`, ""];
+  const lines = [`# ${group.domainLabel}`, "", `> ${t("md.caseCount", { count: formatCaseCount(domainTestCaseCount(group)) })}`, ""];
   for (const feature of group.features) {
     lines.push(featureToMarkdown(feature, 2));
   }
@@ -1501,7 +1510,7 @@ function FeatureSection({ domain, group }: { domain: string; group: FeatureGroup
         <span class="suite-title-text">${group.featureLabel}</span>
         <span class="suite-title-right">
           <span class="suite-title-count">${formatCaseCount(featureTestCaseCount(group))}</span>
-          <${CopyButton} title="Copy this feature as Markdown" getText=${() => featureToMarkdown(group)} />
+          <${CopyButton} title=${t("copy.feature")} getText=${() => featureToMarkdown(group)} />
         </span>
       </h2>
       ${group.suites.map((suite) => html`<${SuiteSection} key=${suite.idPrefix} suite=${suite} />`)}
@@ -1516,7 +1525,7 @@ function DomainSection({ group }: { group: DomainGroup }) {
         <span class="suite-title-text">${group.domainLabel}</span>
         <span class="suite-title-right">
           <span class="suite-title-count">${formatCaseCount(domainTestCaseCount(group))}</span>
-          <${CopyButton} title="Copy this domain as Markdown" getText=${() => domainToMarkdown(group)} />
+          <${CopyButton} title=${t("copy.domain")} getText=${() => domainToMarkdown(group)} />
         </span>
       </h2>
       ${group.features.map((f) => html`<${FeatureSection} key=${f.feature} domain=${group.domain} group=${f} />`)}
@@ -1572,14 +1581,14 @@ interface NavEntry {
   suiteId?: string;
 }
 
-const KIND_LABEL: Record<NavEntry["kind"], string> = {
-  view: "View",
-  domain: "Domain",
-  feature: "Feature",
-  suite: "Test Suite",
-  guide: "Guide",
-  category: "Section",
-  testcase: "Test Case",
+const KIND_LABEL_KEY: Record<NavEntry["kind"], MessageKey> = {
+  view: "kind.view",
+  domain: "kind.domain",
+  feature: "kind.feature",
+  suite: "kind.suite",
+  guide: "kind.guide",
+  category: "kind.section",
+  testcase: "kind.testcase",
 };
 
 /** Everything inside a case, so searching matches step and precondition wording too */
@@ -1647,8 +1656,8 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
               kind: "guide",
               id: guideAnchorId(suite.idPrefix),
               hash: guideHash(suite.idPrefix),
-              label: "Guide",
-              searchText: `${suite.idPrefix} guide ${suite.guideText}`,
+              label: t("guide.label"),
+              searchText: `${suite.idPrefix} guide ${t("guide.label")} ${suite.guideText}`,
               breadcrumb: guideBreadcrumb,
               suiteId,
             });
@@ -1745,7 +1754,7 @@ function NavOutline({
     kind: "view",
     id: OVERVIEW_HASH,
     hash: OVERVIEW_HASH,
-    label: "All test cases",
+    label: t("view.all"),
     searchText: "",
     count: suites.reduce((sum, suite) => sum + suiteTestCaseCount(suite).active, 0),
   };
@@ -1838,7 +1847,7 @@ function NavOutline({
           `
         )}
       </ul>
-      <${Resizer} edge="end" width=${width} size=${NAV_SIZE} label="Resize navigation" onResize=${onResize} />
+      <${Resizer} edge="end" width=${width} size=${NAV_SIZE} label=${t("nav.resize")} onResize=${onResize} />
     </nav>
   `;
 }
@@ -1997,7 +2006,7 @@ function CommandPalette({
             kind: "view",
             id: overviewHash(trimmed),
             hash: overviewHash(trimmed),
-            label: `Filter all test cases by "${trimmed}"`,
+            label: t("palette.filterAll", { query: trimmed }),
             searchText: "",
             count: matched,
           },
@@ -2045,7 +2054,7 @@ function CommandPalette({
           ref=${inputRef}
           class="palette-input"
           type="text"
-          placeholder="🔍 Search test suites, sections, test cases (Esc to close)"
+          placeholder=${t("palette.placeholder")}
           value=${query}
           onInput=${onInput}
           onKeyDown=${onKeyDown}
@@ -2062,7 +2071,7 @@ function CommandPalette({
                     onClose();
                   }}
                 >
-                  <span class="palette-kind-badge">${KIND_LABEL[entry.kind]}</span>
+                  <span class="palette-kind-badge">${t(KIND_LABEL_KEY[entry.kind])}</span>
                   <span class="palette-item-body">
                     ${entry.breadcrumb ? html`<span class="palette-breadcrumb">${entry.breadcrumb}</span>` : null}
                     <span class="palette-label">
@@ -2073,7 +2082,7 @@ function CommandPalette({
               </li>
             `
           )}
-          ${results.length === 0 ? html`<li class="nav-empty">No matches</li>` : null}
+          ${results.length === 0 ? html`<li class="nav-empty">${t("palette.none")}</li>` : null}
         </ul>
       </div>
     </div>
@@ -2112,14 +2121,114 @@ function ThemeToggle() {
   return html`
     <button
       class="header-btn header-btn-icon"
-      title=${theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      aria-label=${theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      title=${theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
+      aria-label=${theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
       onClick=${onClick}
     >
       ${theme === "dark"
         ? html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>`
         : html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>`}
     </button>
+  `;
+}
+
+const LANG_STORAGE_KEY = "test-sheet-lang";
+
+const LOCALES = mergeLocales(window.__LOCALES__ ?? []);
+
+function readStoredLang(): string | null {
+  try {
+    return localStorage.getItem(LANG_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredLang(code: string) {
+  try {
+    localStorage.setItem(LANG_STORAGE_KEY, code);
+  } catch {
+    // Blocked storage (e.g. over file://): the choice lasts for this visit only
+  }
+}
+
+function findLocale(code: string): LocaleDefinition {
+  return LOCALES.find((locale) => locale.code === code) ?? LOCALES[0];
+}
+
+/** A language the reader picked wins; otherwise the browser's own preference, so a first visit needs no setup */
+function initialLocale(): LocaleDefinition {
+  const stored = readStoredLang();
+  if (stored && LOCALES.some((locale) => locale.code === stored)) return findLocale(stored);
+  const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
+  return findLocale(matchLocale(LOCALES, preferred));
+}
+
+function applyLocale(locale: LocaleDefinition) {
+  setLocale(locale);
+  document.documentElement.lang = locale.code;
+}
+
+applyLocale(initialLocale());
+
+function LanguageMenu({ current, onChange }: { current: string; onChange: (code: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    anchorRef.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!anchorRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return html`
+    <div class="lang-anchor" ref=${anchorRef}>
+      <button
+        ref=${buttonRef}
+        class="header-btn header-btn-icon"
+        title=${t("lang.title")}
+        aria-label=${t("lang.title")}
+        aria-haspopup="menu"
+        aria-expanded=${open}
+        onClick=${() => setOpen(!open)}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+      </button>
+      ${open
+        ? html`<div class="lang-menu" role="menu" aria-label=${t("lang.title")}>
+            ${LOCALES.map(
+              (locale) => html`<button
+                key=${locale.code}
+                class=${"lang-item" + (locale.code === current ? " lang-item-current" : "")}
+                role="menuitemradio"
+                aria-checked=${locale.code === current}
+                lang=${locale.code}
+                onClick=${() => {
+                  onChange(locale.code);
+                  setOpen(false);
+                  buttonRef.current?.focus();
+                }}
+              >
+                <span class="lang-mark" aria-hidden="true">${locale.code === current ? "✓" : ""}</span>${locale.label}
+              </button>`
+            )}
+          </div>`
+        : null}
+    </div>
   `;
 }
 
@@ -2297,7 +2406,7 @@ function Resizer({
     aria-valuemax=${limit ?? size.max}
     aria-valuenow=${width}
     tabindex="0"
-    title="Drag to resize (double-click to reset)"
+    title=${t("resizer.hint")}
     onPointerDown=${onPointerDown}
     onPointerMove=${onPointerMove}
     onPointerUp=${onPointerUp}
@@ -2307,15 +2416,13 @@ function Resizer({
   />`;
 }
 
+const defaultName = (): string => t("runs.defaultName", { date: todayStamp() });
+
 function formatRunTime(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? ""
-    : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
+    : date.toLocaleString(formattingLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -2343,7 +2450,7 @@ function RunMenu({
   onClose: (byKeyboard: boolean) => void;
 }) {
   const [counts] = useState(countCasesPerRun);
-  const [newName, setNewName] = useState(() => (index.runs.length === 0 ? defaultRunName() : ""));
+  const [newName, setNewName] = useState(() => (index.runs.length === 0 ? defaultName() : ""));
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -2376,27 +2483,27 @@ function RunMenu({
     setBusy(null);
     const cases = counts[run.id] ?? 0;
     // A deleted run cannot be got back, screenshots included
-    const stops = run.id === index.last ? " Recording will stop." : "";
-    if (confirm(`Delete run "${run.name}"?\n${plural(cases, "case")} with results and ${plural(screenshots, "screenshot")} will be removed. This cannot be undone.${stops}`)) {
+    const stops = run.id === index.last ? t("runs.stops") : "";
+    if (confirm(t("runs.confirmDelete", { name: run.name, cases: tn("unit.case", cases), shots: tn("unit.screenshot", screenshots), stops }))) {
       await onDelete(run.id);
     }
   };
 
   return html`
-    <div class="run-menu" ref=${menuRef} role="dialog" aria-label="Test runs">
+    <div class="run-menu" ref=${menuRef} role="dialog" aria-label=${t("runs.title")}>
       <div class="run-menu-head">
-        <span>Test runs</span>
-        <span class="run-menu-note">saved in this browser</span>
+        <span>${t("runs.title")}</span>
+        <span class="run-menu-note">${t("runs.savedNote")}</span>
       </div>
       ${index.runs.length === 0
-        ? html`<p class="run-menu-empty">No runs yet. Name one to start recording results.</p>`
+        ? html`<p class="run-menu-empty">${t("runs.empty")}</p>`
         : html`<ul class="run-menu-list">
             <li class=${"run-row run-row-off" + (index.last === null ? " run-row-active" : "")}>
               <button class="run-pick" aria-current=${index.last === null} onClick=${onStop}>
                 <span class="run-mark" aria-hidden="true">${index.last === null ? "●" : "○"}</span>
                 <span class="run-text">
-                  <span class="run-name">Not recording</span>
-                  <span class="run-meta">Read the sheet only; nothing is recorded</span>
+                  <span class="run-name">${t("runs.notRecording")}</span>
+                  <span class="run-meta">${t("runs.readOnly")}</span>
                 </span>
               </button>
             </li>
@@ -2410,7 +2517,7 @@ function RunMenu({
                         class="run-rename"
                         value=${renameText}
                         maxlength="80"
-                        aria-label="Run name"
+                        aria-label=${t("runs.nameLabel")}
                         onInput=${(e: Event) => setRenameText((e.target as HTMLInputElement).value)}
                         onKeyDown=${(e: KeyboardEvent) => {
                           if (e.isComposing) return;
@@ -2428,12 +2535,12 @@ function RunMenu({
                         <span class="run-mark" aria-hidden="true">${isActive ? "●" : "○"}</span>
                         <span class="run-text">
                           <span class="run-name" title=${run.name}>${run.name}</span>
-                          <span class="run-meta">${counts[run.id] ?? 0} of ${totalCases} cases run · ${formatRunTime(run.u)}</span>
+                          <span class="run-meta">${t("runs.meta", { done: counts[run.id] ?? 0, total: totalCases, time: formatRunTime(run.u) })}</span>
                         </span>
                       </button>`}
                   <span class="run-actions">
-                    <button class="link-btn" onClick=${() => { setRenaming(run.id); setRenameText(run.name); }}>Rename</button>
-                    <button class="link-btn link-btn-danger" disabled=${busy === run.id} onClick=${() => askDelete(run)}>Delete</button>
+                    <button class="link-btn" onClick=${() => { setRenaming(run.id); setRenameText(run.name); }}>${t("runs.rename")}</button>
+                    <button class="link-btn link-btn-danger" disabled=${busy === run.id} onClick=${() => askDelete(run)}>${t("runs.delete")}</button>
                   </span>
                 </li>`;
               })}
@@ -2450,11 +2557,11 @@ function RunMenu({
           class="run-new-input"
           value=${newName}
           maxlength="80"
-          placeholder='New run, e.g. "2.3 regression"'
-          aria-label="New run name"
+          placeholder=${t("runs.newPlaceholder")}
+          aria-label=${t("runs.newLabel")}
           onInput=${(e: Event) => setNewName((e.target as HTMLInputElement).value)}
         />
-        <button type="submit" class="copy-btn">Create</button>
+        <button type="submit" class="copy-btn">${t("runs.create")}</button>
       </form>
     </div>
   `;
@@ -2474,7 +2581,11 @@ function AppHeader({
   onCreateRun,
   onRenameRun,
   onDeleteRun,
+  lang,
+  onChangeLang,
 }: {
+  lang: string;
+  onChangeLang: (code: string) => void;
   onOpenPalette: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
@@ -2497,13 +2608,13 @@ function AppHeader({
       <div class="app-header-lead">
         <button
           class="header-btn header-btn-icon"
-          title=${navCollapsed ? "Show navigation" : "Hide navigation"}
+          title=${navCollapsed ? t("nav.show") : t("nav.hide")}
           aria-pressed=${navCollapsed}
           onClick=${onToggleNav}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
         </button>
-        <span class="app-header-title">Test Cases</span>
+        <span class="app-header-title">${t("app.title")}</span>
       </div>
       <div class="app-header-actions">
         <div class="run-anchor">
@@ -2512,14 +2623,12 @@ function AppHeader({
             class=${"header-btn run-btn" + (activeRun ? " header-btn-on" : "")}
             aria-haspopup="dialog"
             aria-expanded=${runMenuOpen}
-            title=${activeRun
-              ? `Recording into "${activeRun.name}". Click to switch runs or stop recording.`
-              : "Not recording. Choose or create a run to record Pass/Fail per step (saved in this browser only)."}
+            title=${activeRun ? t("header.runTitleOn", { name: activeRun.name }) : t("header.runTitleOff")}
             onClick=${() => onRunMenuOpen(!runMenuOpen)}
           >
             ${activeRun
-              ? html`<span class="run-dot" aria-hidden="true">●</span><span class="visually-hidden">Recording into </span><span class="run-btn-name">${activeRun.name}</span>`
-              : html`<span class="run-btn-name">Record</span>`}
+              ? html`<span class="run-dot" aria-hidden="true">●</span><span class="visually-hidden">${t("header.recordingInto")}</span><span class="run-btn-name">${activeRun.name}</span>`
+              : html`<span class="run-btn-name">${t("header.record")}</span>`}
             <span aria-hidden="true">▾</span>
           </button>
           ${runMenuOpen
@@ -2538,11 +2647,12 @@ function AppHeader({
               />`
             : null}
         </div>
-        <button class="header-btn" title="Search test suites, sections, test cases" onClick=${onOpenPalette}>
+        <button class="header-btn" title=${t("header.searchTitle")} onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
-          <span>Search</span>
+          <span>${t("header.search")}</span>
           <kbd class="header-kbd">${shortcut}</kbd>
         </button>
+        <${LanguageMenu} current=${lang} onChange=${onChangeLang} />
         <${ThemeToggle} />
       </div>
     </header>
@@ -2575,21 +2685,21 @@ function scopeKey(route: Route): string {
 }
 
 /** Command-palette entries for the two page-wide views, which have no outline entry of their own */
-const ALL_TEST_CASES_ENTRY: NavEntry = {
+const allTestCasesEntry = (): NavEntry => ({
   kind: "view",
   id: OVERVIEW_HASH,
   hash: OVERVIEW_HASH,
-  label: "All test cases",
-  searchText: "overview index list table all test cases",
-};
+  label: t("view.all"),
+  searchText: `${t("view.all")} overview index list table all test cases`,
+});
 
-const ONE_PAGE_ENTRY: NavEntry = {
+const onePageEntry = (): NavEntry => ({
   kind: "view",
   id: ALL_HASH,
   hash: ALL_HASH,
-  label: "Everything on one page",
-  searchText: "all one page everything single long print",
-};
+  label: t("view.onePage"),
+  searchText: `${t("view.onePage")} all one page everything single long print`,
+});
 
 function App() {
   const suites = window.__SUITES__;
@@ -2635,11 +2745,16 @@ function App() {
     const run = runIndex.runs.find((candidate) => candidate.id === runIndex.last);
     return run ? { id: run.id, name: run.name } : null;
   }, [runIndex.last, runIndex.runs]);
+  const [lang, setLang] = useState(currentLocaleCode);
+  const changeLang = useCallback((code: string) => {
+    applyLocale(findLocale(code));
+    writeStoredLang(code);
+    setLang(code);
+  }, []);
   // The tab's own title says when recording, so a run left on in a background tab is not forgotten
-  const baseTitle = useRef(document.title);
   useEffect(() => {
-    document.title = activeRun ? `● ${activeRun.name} · ${baseTitle.current}` : baseTitle.current;
-  }, [activeRun?.name]);
+    document.title = activeRun ? `● ${activeRun.name} · ${t("app.title")}` : t("app.title");
+  }, [activeRun?.name, lang]);
   const totalCases = useMemo(() => suites.reduce((sum, suite) => sum + suite.testCases.length, 0), [suites]);
   const [guideWidth, setGuideWidth] = useState<number | null>(() => readStoredPanelWidth(GUIDE_SIZE));
   /** The route the reader closed the guide on, so a route that points into it does not hold it open */
@@ -2761,7 +2876,7 @@ function App() {
   );
   const createRun = useCallback(
     (name: string) => {
-      commitRunIndex(withNewRun(runIndex, name));
+      commitRunIndex(withNewRun(runIndex, name.trim() || defaultName()));
       setRunMenuOpen(false);
     },
     [runIndex, commitRunIndex]
@@ -2812,7 +2927,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
@@ -2822,7 +2937,7 @@ function App() {
         <div class="app">
           ${route.mode === "full"
             ? domains.length === 0
-              ? html`<p class="empty">No testcases.yaml files found.</p>`
+              ? html`<p class="empty">${t("scope.noFiles")}</p>`
               : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
             : html`<${ScopePage}
                 route=${route}
@@ -2850,7 +2965,7 @@ function App() {
       </${RunContext.Provider}>
       ${paletteOpen
         ? html`<${CommandPalette}
-            entries=${[ALL_TEST_CASES_ENTRY, ONE_PAGE_ENTRY, ...entries]}
+            entries=${[allTestCasesEntry(), onePageEntry(), ...entries]}
             overviewRows=${overviewRows}
             onClose=${() => setPaletteOpen(false)}
             onJump=${navigate}

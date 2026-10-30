@@ -8,6 +8,7 @@ import type { TestSuiteTestCases } from "../testCases";
 import { STYLES } from "./styles";
 import { createCaseMarkdown } from "./caseMarkdown";
 import { formatTestData } from "./caseFormat";
+import type { LocaleDefinition } from "./i18n";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -120,10 +121,17 @@ async function renderTestCase(tc: TestSuiteTestCases["testCases"][number]) {
 export interface GenerateHtmlOptions {
   /** When true, enables WebSocket auto-reload in the browser (server mode only). Set to false for static output. */
   liveReload?: boolean;
+  /** Languages offered besides the built-in ones; see src/locales.ts */
+  locales?: LocaleDefinition[];
+}
+
+/** JSON inside a <script> block ends at the first "</script>", whatever string it sits in */
+function jsonForScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
 export async function generateHtml(suites: TestSuiteTestCases[], options: GenerateHtmlOptions = {}): Promise<string> {
-  const { liveReload = false } = options;
+  const { liveReload = false, locales = [] } = options;
   const bundledJs = await bundleApp();
 
   const pageSuites = await Promise.all(
@@ -169,9 +177,11 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
 </head>
 <body>
 <div id="app"></div>
-<script type="application/json" id="test-case-data">${JSON.stringify(pageSuites)}</script>
+<script type="application/json" id="test-case-data">${jsonForScript(pageSuites)}</script>
+<script type="application/json" id="locale-data">${jsonForScript(locales)}</script>
 <script type="module">
 window.__SUITES__ = JSON.parse(document.getElementById("test-case-data").textContent);
+window.__LOCALES__ = JSON.parse(document.getElementById("locale-data").textContent);
 window.__LIVE_RELOAD__ = ${liveReload};
 ${bundledJs}
 </script>

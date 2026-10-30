@@ -59,8 +59,8 @@ export function runImagePrefix(runId: string): string {
   return `${runNamespace()}:${runId}:`;
 }
 
-export function defaultRunName(): string {
-  return `Run ${new Date().toISOString().slice(0, 10)}`;
+export function todayStamp(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function parseIndex(raw: string | null): RunIndex | null {
@@ -154,7 +154,7 @@ export function rereadRunIndex(): RunIndex {
 
 export function withNewRun(index: RunIndex, name: string): RunIndex {
   const now = new Date().toISOString();
-  const run: RunMeta = { id: newRunId(), name: name.trim() || defaultRunName(), c: now, u: now };
+  const run: RunMeta = { id: newRunId(), name: name.trim() || todayStamp(), c: now, u: now };
   return { ...index, last: run.id, runs: [...index.runs, run] };
 }
 

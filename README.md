@@ -11,6 +11,7 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - Resizable, collapsible side nav; a docked guide panel to read beside the cases
 - A Record button in the header turns recording on by choosing a run: its menu lists the saved runs (several can run side by side, say one per theme being tested) to resume, create, rename or delete, plus a "Not recording" entry to go back to just reading. While recording the button shows the run's name and every step gets Pass / Fail buttons: the first unmarked step is highlighted, a failed step takes a note with line breaks and pasted (or dropped, or attached) screenshots, each case gets a PASS / FAIL chip, and copying a case as Markdown includes the results. Markdown cannot carry an image that issue trackers will show (they drop embedded `data:` images, including from a rich-text paste), so the copy marks where each screenshot goes, and each screenshot has Copy image and Download buttons: copy it and paste it at the mark, and the tracker uploads it. The run in use is shared by every tab, and results stay in this browser only; they are a working record, not a test report
 - Each case shows its preconditions, test data, steps and note; a suite page hides the cards of obsolete, superseded and skipped cases by default (they stay in the table)
+- The interface is in English or Japanese, chosen from the browser's language on the first visit and switchable from the globe icon in the header; more languages can be added with a JSON file (see [Languages](#languages)). Markdown copied from the page follows the language chosen
 - Copy any section or test suite as Markdown (for pasting into a PR or issue comment)
 - Auto-reloads the browser whenever a `testcases.yaml` is saved
 - Can also render to a single self-contained HTML file (for CI artifacts or static distribution)
@@ -48,6 +49,31 @@ repeated.
 bun run src/cli.ts ./tests --exclude "**/_template/**"
 bun run src/cli.ts ./tests -e "**/_template/**" -e "**/drafts/**"
 ```
+
+### Languages
+
+English and Japanese are built in. The page opens in the first language in the browser's preference
+list that it has (`ja-JP` matches `ja`, and anything else falls back to English); the globe icon in the
+header switches it, and the choice is remembered in the browser. What you write in `testcases.yaml`
+is shown as written — only the interface is translated.
+
+To add a language, or to change some wording of a built-in one, pass a JSON file with `--locale`
+(repeatable). Start from the full list of strings:
+
+```bash
+bun run src/cli.ts --print-locale fr > fr.json   # every key, in English
+# edit fr.json: set "code", "label" (shown in the menu) and translate the values
+bun run src/cli.ts ./tests --out test-cases.html --locale fr.json
+```
+
+```json
+{ "code": "fr", "label": "Français", "messages": { "header.search": "Rechercher" } }
+```
+
+A key you leave out is shown in English. A file whose `code` is a built-in one (`ja`, say) overrides
+just the keys it lists. `{name}` marks a value filled in at run time and must be kept; a count that
+changes the wording has `.one` and `.other` variants. A file is read when the command starts, so
+restart `bun run serve` after editing one.
 
 ## `testcases.yaml` structure
 

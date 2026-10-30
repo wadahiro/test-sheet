@@ -18,12 +18,15 @@ import { watch } from "fs";
 import { resolve } from "path";
 import { loadAllTestSuites } from "./testCases";
 import { generateHtml } from "./html/generate";
+import type { LocaleDefinition } from "./html/i18n";
+import { loadLocaleFile, localeTemplate } from "./locales";
 
 interface CliArgs {
   rootDir: string;
   port: number;
   outFile: string | null;
   exclude: string[];
+  localeFiles: string[];
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -31,6 +34,7 @@ function parseArgs(argv: string[]): CliArgs {
   let port = 4300;
   let outFile: string | null = null;
   const exclude: string[] = [];
+  const localeFiles: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -44,6 +48,17 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       exclude.push(pattern);
+    } else if (argv[i] === "--locale") {
+      const file = argv[++i];
+      if (!file) {
+        console.error("Error: --locale requires a JSON file");
+        process.exit(1);
+      }
+      localeFiles.push(file);
+    } else if (argv[i] === "--print-locale") {
+      // Starting point for a translation: every key, in English, as a locale file
+      process.stdout.write(localeTemplate(argv[++i] || "xx"));
+      process.exit(0);
     } else if (argv[i] === "-h" || argv[i] === "--help") {
       console.log(`
 Usage: bun run src/cli.ts [root directory] [options]
@@ -55,6 +70,9 @@ Options:
   --out, -o <file>       Skip the server and write a single HTML file instead
   --exclude, -e <glob>   Skip testcases.yaml files whose path matches the glob.
                          Matched relative to the root directory; repeatable.
+  --locale <file>        Add a UI language (or adjust a built-in one) from a JSON file.
+                         Repeatable. English and Japanese are built in.
+  --print-locale [code]  Print a locale file with every UI string in English, to translate
 
 Examples:
   bun run src/cli.ts
@@ -68,17 +86,27 @@ Examples:
     }
   }
 
-  return { rootDir, port, outFile, exclude };
+  return { rootDir, port, outFile, exclude, localeFiles };
 }
 
-async function generateStatic(rootDir: string, outFile: string, exclude: string[]) {
+async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
+  const locales: LocaleDefinition[] = [];
+  for (const file of files) {
+    const { locale, unknownKeys } = await loadLocaleFile(file);
+    if (unknownKeys.length > 0) console.error(`Warning: ${file}: ignoring unknown keys: ${unknownKeys.join(", ")}`);
+    locales.push(locale);
+  }
+  return locales;
+}
+
+async function generateStatic(rootDir: string, outFile: string, exclude: string[], locales: LocaleDefinition[]) {
   const suites = await loadAllTestSuites(rootDir, exclude);
-  const html = await generateHtml(suites, { liveReload: false });
+  const html = await generateHtml(suites, { liveReload: false, locales });
   await Bun.write(outFile, html);
   console.log(`Generated: ${outFile}`);
 }
 
-function serve(rootDir: string, port: number, exclude: string[]) {
+function serve(rootDir: string, port: number, exclude: string[], locales: LocaleDefinition[]) {
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
 
   const server = Bun.serve({
@@ -96,7 +124,7 @@ function serve(rootDir: string, port: number, exclude: string[]) {
       if (url.pathname === "/" || url.pathname === "/index.html") {
         try {
           const suites = await loadAllTestSuites(rootDir, exclude);
-          const html = await generateHtml(suites, { liveReload: true });
+          const html = await generateHtml(suites, { liveReload: true, locales });
           return new Response(html, {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           });
@@ -148,14 +176,18 @@ function serve(rootDir: string, port: number, exclude: string[]) {
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude } = parseArgs(process.argv.slice(2));
+  const { rootDir, port, outFile, exclude, localeFiles } = parseArgs(process.argv.slice(2));
+  const locales = await loadLocales(localeFiles);
 
   if (outFile) {
-    await generateStatic(rootDir, outFile, exclude);
+    await generateStatic(rootDir, outFile, exclude, locales);
     return;
   }
 
-  serve(rootDir, port, exclude);
+  serve(rootDir, port, exclude, locales);
 }
 
-main();
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

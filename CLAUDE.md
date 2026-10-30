@@ -8,7 +8,7 @@ Renders `testcases.yaml` files into one browsable, self-contained HTML page. Bun
 - **Routing is hash-based** (`parseRoute` in `app.ts`), never the History API: `pushState` throws over `file://`. Namespace routes under `#/` so they cannot collide with an element ID and trigger a native anchor jump. The grammar lives in the comment above `parseRoute`; build hashes with the `*Hash` helpers, and keep `#/tc/<id>` and `#/` resolving because people link to them.
 - **htm, not JSX.** `app.ts` uses `` html`...` `` tagged templates; JSX would require a build-step change.
 - **All CSS lives in `styles.ts`** as one template string. No CSS modules, no `.css` files.
-- **English only** in UI strings, comments and docs — this is OSS-facing.
+- **UI strings go through `t()`** (`src/html/i18n.ts`), keyed in `src/html/locales/en.ts`; never write a user-visible literal in `app.ts`. English is the source and the fallback, so comments and docs stay English. A new key must also be added to `locales/ja.ts` (it is typed against `en`, so the build says so). Build messages whole, with `{placeholders}`, rather than gluing fragments, because word order differs by language. Anything computed from strings at module load (column lists, labels) must be a function, since the language can change at run time. The category fallback `"Other"` is data, not UI: it also forms route hashes, so it is not translated.
 
 ## Hierarchy
 

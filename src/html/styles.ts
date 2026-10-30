@@ -484,6 +484,46 @@ body {
 .link-btn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 .link-btn-danger:hover { color: var(--danger); }
 
+/* Language picker: a short list under the header icon, opened like the run menu */
+.lang-anchor { position: relative; }
+
+.lang-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  min-width: 10rem;
+  max-height: calc(100vh - var(--header-h) - 24px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--overlay);
+}
+
+.lang-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lang-item:hover { background: var(--bg-subtle); }
+.lang-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.lang-item-current { font-weight: 600; }
+.lang-mark { display: inline-block; width: 1em; color: var(--accent); }
+
 /* The run being recorded into, always named in the header so results never go to the wrong one */
 .run-anchor { position: relative; }
 
@@ -1207,7 +1247,7 @@ body {
   .steps-table .step-action { grid-area: action; font-weight: 600; }
   .steps-table .step-expected { grid-area: expected; padding-top: 4px; }
   .steps-table .step-expected::before {
-    content: "Expected";
+    content: attr(data-label);
     display: block;
     font-size: 0.68rem;
     font-weight: 600;
@@ -1224,12 +1264,15 @@ body {
  * edge and followed by a row for what the tester saw.
  */
 .steps-table .col-step-result { width: 9rem; }
+/* "不合格" is wider than "Fail"; the column is fixed-width, so a language with longer labels asks for more */
+:lang(ja) .steps-table .col-step-result { width: 11.5rem; }
 .steps-table.steps-run .col-step-action { width: 38%; }
 .steps-table .step-result { vertical-align: top; }
 .steps-table .step-result-group { display: flex; gap: 4px; }
 
 .result-btn {
   flex: 1 1 0;
+  white-space: nowrap;
   min-width: 3.5rem;
   height: 32px;
   padding: 0 10px;
