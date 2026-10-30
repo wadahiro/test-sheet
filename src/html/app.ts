@@ -1710,7 +1710,7 @@ function PlanPage({
   const lastTicked = useRef<number | null>(null);
   const [bulkReason, setBulkReason] = useState("");
   const [overwrite, setOverwrite] = useState(false);
-  const [decisionFilter, setDecisionFilter] = useState<"" | Decision | "none">("");
+  const [decisionFilter, setDecisionFilter] = useState<"" | Decision | "none" | "decided">("");
   /** What the last bulk action did, with the plan before it; valid only while the plan is as that action left it */
   const [outcome, setOutcome] = useState<{ text: string; before: Plan; after: Plan } | null>(null);
   useEffect(() => {
@@ -1742,7 +1742,7 @@ function PlanPage({
   const partRows = rowKey ? rangeRows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rangeRows;
   const trimmedQuery = query.trim();
   const decisionOf = (row: OverviewRow) => (row.inactive ? undefined : (plan.d[row.tcId] ?? "none"));
-  const listed = filterOverviewRows(partRows, trimmedQuery).filter((row) => decisionFilter === "" || decisionOf(row) === decisionFilter);
+  const listed = filterOverviewRows(partRows, trimmedQuery).filter((row) => decisionFilter === "" || (decisionFilter === "decided" ? decisionOf(row) === "r" || decisionOf(row) === "s" : decisionOf(row) === decisionFilter));
   const listedIds = listed.filter((row) => !row.inactive).map((row) => row.tcId);
   const tally = tallyPlan(rangeRows, plan);
 
@@ -1848,9 +1848,10 @@ function PlanPage({
             class="plan-decision-filter"
             aria-label=${t("plan.decisionFilter")}
             value=${decisionFilter}
-            onChange=${(e: Event) => setDecisionFilter((e.target as HTMLSelectElement).value as "" | Decision | "none")}
+            onChange=${(e: Event) => setDecisionFilter((e.target as HTMLSelectElement).value as "" | Decision | "none" | "decided")}
           >
             <option value="">${t("plan.filterAny")}</option>
+            <option value="decided">${t("plan.filterDecided")}</option>
             <option value="r">${t("plan.run")}</option>
             <option value="s">${t("plan.skip")}</option>
             <option value="none">${t("plan.undecided")}</option>

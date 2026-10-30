@@ -99,6 +99,7 @@ export const ja: Record<MessageKey, string> = {
   "plan.undo": "元に戻す",
   "plan.decisionFilter": "判断で絞り込み",
   "plan.filterAny": "すべての判断",
+  "plan.filterDecided": "実施と除外",
   "plan.copyReviewTitle": "計画を Markdown でコピー（レビュアーが選定を確認するため）",
   "plan.hidden": "表示していません: 除外 {skipped} 件、未判断 {undecided} 件。",
   "plan.edit": "計画を編集",

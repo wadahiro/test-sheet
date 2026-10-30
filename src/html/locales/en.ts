@@ -108,6 +108,7 @@ export const en = {
   "plan.undo": "Undo",
   "plan.decisionFilter": "Filter by decision",
   "plan.filterAny": "Any decision",
+  "plan.filterDecided": "Run or Skip",
   "plan.copyReviewTitle": "Copy the plan as Markdown, for a reviewer to check the selection",
   "plan.hidden": "Not shown: {skipped} skipped, {undecided} undecided.",
   "plan.edit": "Edit plan",
