@@ -309,6 +309,13 @@ body {
   white-space: nowrap;
 }
 
+.nav-guide {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-left: 6px;
+  color: var(--fg-faint);
+}
+
 .nav-outline-item .count {
   flex: 0 0 auto;
   color: var(--fg-muted);

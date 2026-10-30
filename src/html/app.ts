@@ -867,6 +867,10 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   `;
 }
 
+function GuideIcon() {
+  return html`<svg class="guide-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>`;
+}
+
 /** The cases a heading lists, with a unit: a bare number beside a title does not say what it counts */
 function caseCountText(n: number | string, plural: number = Number(n)): string {
   return tn("scope.count", plural, { count: n });
@@ -1369,7 +1373,7 @@ function ScopePage({
                   title=${guideOpen ? t("guide.hide") : t("guide.show")}
                   onClick=${onToggleGuide}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+                  <${GuideIcon} />
                   <span>${t("guide.label")}</span>
                 </button>`
               : null}
@@ -1601,6 +1605,8 @@ interface NavEntry {
   /** Breadcrumb shown in the command palette (e.g. "web › Login › Basic flow"). Undefined for domains. */
   breadcrumb?: string;
   count?: number;
+  /** A suite that has a guide, so the outline can say so without opening it */
+  hasGuide?: boolean;
   /** Anchor of the suite this guide/section/case belongs to, so the outline can open just the active suite */
   suiteId?: string;
 }
@@ -1668,6 +1674,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
           searchText: `${suite.idPrefix} ${suite.typeName}`,
           breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
           count: suiteTestCaseCount(suite).active,
+          hasGuide: !!suite.guideHtml,
         });
         const suiteId = suiteAnchorId(suite.idPrefix);
         const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
@@ -1865,7 +1872,7 @@ function NavOutline({
                 title=${entry.label}
                 onClick=${() => onJump(entry)}
               >
-                <span class="nav-label">${entry.label}</span>${entry.count !== undefined ? html`<span class="count">(${entry.count})</span>` : null}
+                <span class="nav-label">${entry.label}</span>${entry.hasGuide ? html`<span class="nav-guide" title=${t("guide.label")}><${GuideIcon} /></span>` : null}${entry.count !== undefined ? html`<span class="count">(${entry.count})</span>` : null}
               </button>
             </li>
           `
