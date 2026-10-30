@@ -1977,8 +1977,12 @@ function jumpToId(id: string, onDone?: () => void) {
     const offset = parseFloat(getComputedStyle(header).top);
     if (offset > 0) window.scrollBy(0, -offset);
   }
-  el.classList.add("jump-flash");
-  setTimeout(() => el.classList.remove("jump-flash"), 1200);
+  // A heading-level target (section, suite, feature…) wraps everything below it, so flashing the
+  // whole element would light up its contents; its own header is what the reader asked for. A case
+  // card is the leaf, and is flashed whole.
+  const flashed = el.matches(".test-case") ? el : (el.querySelector<HTMLElement>(":scope > .sticky-header") ?? el);
+  flashed.classList.add("jump-flash");
+  setTimeout(() => flashed.classList.remove("jump-flash"), 1200);
   onDone?.();
 }
 

@@ -1748,4 +1748,14 @@ body {
 .jump-flash {
   animation: jump-flash 1.2s ease-out;
 }
+
+/* A sticky header is painted with --bg, so it must fade back to that rather than to nothing */
+@keyframes jump-flash-header {
+  0% { background: var(--flash); }
+  100% { background: var(--bg); }
+}
+
+.sticky-header.jump-flash {
+  animation-name: jump-flash-header;
+}
 `;
