@@ -3,7 +3,7 @@
  * Kept as one constant so the two copies cannot drift apart.
  */
 const DARK_THEME_VARS = `
-  --fg: #e6edf3;
+  --fg: #c9d1d9;
   --fg-muted: #9198a1;
   --fg-faint: #4a525c;
   --bg: #0d1117;
@@ -283,7 +283,7 @@ body {
   text-align: left;
   border: none;
   background: none;
-  padding: 6px 8px;
+  padding: 3px 8px;
   border-radius: 6px;
   font-size: 0.85rem;
   cursor: pointer;
@@ -327,12 +327,12 @@ body {
 }
 
 .nav-outline-view .nav-outline-item {
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.95rem;
 }
 
 .nav-outline-domain {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .nav-outline-domain:first-child {
@@ -340,23 +340,23 @@ body {
 }
 
 .nav-outline-domain .nav-outline-item {
-  font-weight: 800;
+  font-weight: 500;
   font-size: 0.95rem;
 }
 
 .nav-outline-feature {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .nav-outline-feature .nav-outline-item {
   padding-left: 12px;
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.9rem;
 }
 
 .nav-outline-suite .nav-outline-item {
   padding-left: 24px;
-  font-weight: 600;
+  font-weight: 400;
   font-size: 0.85rem;
 }
 
@@ -368,7 +368,7 @@ body {
 
 .nav-outline-category .nav-outline-item {
   padding-left: 36px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .app {
