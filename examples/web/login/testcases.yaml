@@ -10,6 +10,15 @@ test_cases:
     tags: [smoke]
     preconditions:
       - A valid user account exists
+    test_data:
+      login_id: demo-user
+      password: "Passw0rd!"
+      roles: [admin, viewer]
+      accounts:
+        - id: demo-user
+          plan: standard
+        - id: demo-admin
+          plan: premium
     steps:
       - action: Enter ID/password on the login screen
         expected: Redirected to the dashboard

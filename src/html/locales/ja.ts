@@ -186,6 +186,7 @@ export const ja: Record<MessageKey, string> = {
 
   "copy.copy": "コピー",
   "copy.copied": "コピーしました",
+  "copy.value": "この値をコピー",
   "copy.case": "このテストケースを Markdown でコピー",
   "copy.caseWithShots": "このテストケースを Markdown でコピー（スクリーンショットは個別にコピー）",
   "copy.section": "このセクションを Markdown でコピー",

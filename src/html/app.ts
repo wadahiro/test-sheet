@@ -837,6 +837,28 @@ function inactiveNote(tc: TestCase): string | null {
   return null;
 }
 
+/**
+ * Test data as rendered at generation time, each value followed by an empty copy button carrying
+ * the raw value. The buttons live in generated HTML, so they are labelled here, where the language is known.
+ */
+function TestDataBody({ html: markup }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    for (const button of ref.current?.querySelectorAll<HTMLButtonElement>("button.td-copy") ?? []) {
+      button.title = t("copy.value");
+      button.setAttribute("aria-label", t("copy.value"));
+    }
+  });
+  const onClick = async (e: MouseEvent) => {
+    const button = (e.target as Element).closest<HTMLButtonElement>("button.td-copy");
+    if (!button) return;
+    if (!(await writeClipboardText(decodeURIComponent(button.dataset.copy ?? "")))) return;
+    button.classList.add("td-copy-done");
+    setTimeout(() => button.classList.remove("td-copy-done"), 1200);
+  };
+  return html`<div class="test-data-body" ref=${ref} onClick=${onClick} dangerouslySetInnerHTML=${{ __html: markup }} />`;
+}
+
 /** `level` is the card header's position in the stack of sticky headers above it */
 function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   const activeRun = useContext(RunContext);
@@ -909,7 +931,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
               ${tc.testDataHtml
                 ? html`<div class="test-data">
                     <h5 class="eyebrow">${t("case.testData")}</h5>
-                    <div class="test-data-body" dangerouslySetInnerHTML=${{ __html: tc.testDataHtml }} />
+                    <${TestDataBody} html=${tc.testDataHtml} />
                   </div>`
                 : null}
             </div>`

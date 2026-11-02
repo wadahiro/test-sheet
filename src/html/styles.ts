@@ -762,7 +762,7 @@ body {
 }
 
 /* A case opened in place: its card sits in a table cell, so its header must not join the sticky stack */
-.row-detail td { padding: 0 8px 8px; border-top: none; }
+.row-detail > td { padding: 0 8px 8px; border-top: none; }
 .row-detail .test-case { margin-bottom: 0; }
 .row-detail .test-case-head { position: static; }
 /* Planning stays on the plan page, so the card's link to its own page is not offered, and a plan has nothing to copy per case */
@@ -1001,24 +1001,26 @@ a.link-btn { text-decoration: none; }
   font-size: 0.9rem;
 }
 
-.overview-table th,
-.overview-table td {
+.overview-table > thead > tr > th,
+.overview-table > tbody > tr > th,
+.overview-table > tbody > tr > td {
   border-bottom: 1px solid var(--border);
   padding: 6px 10px;
   text-align: left;
   vertical-align: top;
 }
 
-.overview-table th + th,
-.overview-table td + td {
+.overview-table > thead > tr > th + th,
+.overview-table > tbody > tr > td + td {
   border-left: 1px solid var(--border);
 }
 
-.overview-table tbody tr:last-child td {
+.overview-table > tbody > tr:last-child > td {
   border-bottom: none;
 }
 
-.overview-table thead th {
+/* The child combinators matter: a case opened in a row holds tables of its own (steps, test data) whose heads must not stick to the page */
+.overview-table > thead > tr > th {
   position: sticky;
   top: calc(var(--stick-top) + var(--sticky-h));
   z-index: 9;
@@ -1026,7 +1028,7 @@ a.link-btn { text-decoration: none; }
   border-top: 1px solid var(--border);
 }
 
-.scope-table thead th {
+.scope-table > thead > tr > th {
   top: calc(var(--stick-top) + var(--filter-h));
 }
 
@@ -1152,10 +1154,14 @@ a.link-btn { text-decoration: none; }
 
 @container scope-table (max-width: 600px) {
   .scope-table:not(.plan-table) { --scope-thead-h: 0px; }
-  .scope-table, .scope-table tbody, .scope-table tr, .scope-table td, .scope-table th { display: block; }
+  .scope-table,
+  .scope-table > tbody,
+  .scope-table > tbody > tr,
+  .scope-table > tbody > tr > td,
+  .scope-table > tbody > tr > th { display: block; }
   /* Kept for assistive technology, hidden visually */
   .scope-table { border-top: 1px solid var(--border); }
-  .scope-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .scope-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .scope-table .overview-row {
     display: grid;
     grid-template-columns: max-content auto auto 1fr;
@@ -1165,7 +1171,7 @@ a.link-btn { text-decoration: none; }
     padding: 6px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .scope-table tbody tr:last-child { border-bottom: none; }
+  .scope-table > tbody > tr:last-child { border-bottom: none; }
   .scope-table .overview-row > td { padding: 0; border: 0; }
   .scope-table .overview-id { grid-area: id; }
   .scope-table .overview-name { grid-area: name; min-width: 0; }
@@ -1574,6 +1580,33 @@ a.link-btn { text-decoration: none; }
 .test-data-body th,
 .test-data-body td { border: 1px solid var(--border); padding: 3px 10px; text-align: left; }
 .test-data-body th { background: var(--bg-subtle); }
+/*
+ * The icon is a mask so the generated HTML needs no markup inside the button, and it takes the text
+ * color. The mask is a variable so the confirmation can swap the glyph for a check, as the other
+ * copy buttons do, rather than only recolouring a small icon.
+ */
+.td-copy {
+  --td-copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E");
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin: 0 0 -3px 6px;
+  padding: 0;
+  border: none;
+  background-color: var(--fg-muted);
+  -webkit-mask: var(--td-copy-icon) center / contain no-repeat;
+  mask: var(--td-copy-icon) center / contain no-repeat;
+  cursor: pointer;
+}
+.td-val:hover > .td-copy,
+.td-copy:focus-visible { background-color: var(--fg); }
+.td-copy:hover { background-color: var(--accent); }
+.td-copy.td-copy-done,
+.td-val:hover > .td-copy.td-copy-done {
+  --td-copy-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-color: var(--success);
+}
+
 .test-data-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
 
 /* Fixed layout so every case's table shares the same column edges as they stack down the page;

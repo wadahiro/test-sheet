@@ -200,6 +200,7 @@ export const en = {
   // Copy buttons
   "copy.copy": "Copy",
   "copy.copied": "Copied",
+  "copy.value": "Copy this value",
   "copy.case": "Copy this test case as Markdown",
   "copy.caseWithShots": "Copy this test case as Markdown (copy each screenshot separately)",
   "copy.section": "Copy this section as Markdown",

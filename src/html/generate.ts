@@ -116,8 +116,30 @@ function caseRenderers(autolinks: AutolinkRule[]): CaseRenderers {
   };
 }
 
+// Private-use characters carry the copy buttons through Markdown, which shows raw HTML as text: they
+// are plain text to it, and are turned into the span and button once the HTML is out.
+const VALUE_OPEN = "\uE000";
+const VALUE_CLOSE = "\uE001";
+const VALUE_END = "\uE002";
+
+/** Test data as HTML with a copy button after each value, so a login ID or a token can be taken without selecting it */
+async function renderTestData(testData: unknown, marked: Marked): Promise<string> {
+  const copied: string[] = [];
+  const mark = (raw: string, shown = raw) => {
+    // A multi-line value would break the list item or table cell it sits in
+    if (raw.trim() === "" || raw.includes("\n")) return shown;
+    return `${VALUE_OPEN}${shown}${VALUE_CLOSE}${copied.push(raw) - 1}${VALUE_END}`;
+  };
+  const markdown = formatTestData(testData, mark);
+  if (!markdown) return "";
+  const rendered = await marked.parse(markdown);
+  return rendered
+    .replaceAll(VALUE_OPEN, '<span class="td-val">')
+    .replace(new RegExp(`${VALUE_CLOSE}(\\d+)${VALUE_END}`, "g"), (_, index: string) => `<button class="td-copy" type="button" data-copy="${encodeURIComponent(copied[Number(index)])}"></button></span>`);
+}
+
 async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { notes: notesMarked, step: stepMarked }: CaseRenderers) {
-  const testDataMarkdown = formatTestData(tc.test_data);
+  const testDataHtml = await renderTestData(tc.test_data, notesMarked);
   return {
     ...tc,
     steps: await Promise.all(
@@ -128,7 +150,7 @@ async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { not
       }))
     ),
     ...(tc.notes ? { notesHtml: await notesMarked.parse(tc.notes) } : {}),
-    ...(testDataMarkdown ? { testDataHtml: await notesMarked.parse(testDataMarkdown) } : {}),
+    ...(testDataHtml ? { testDataHtml } : {}),
   };
 }
 
