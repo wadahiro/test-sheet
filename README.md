@@ -10,7 +10,7 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - Full-text search in a command palette (Cmd+K / Ctrl+K), and a filter on every table that each page remembers for the tab, so going to a case and back finds the list as it was (a link can still carry one, as `#/overview?q=smoke`)
 - Resizable, collapsible side nav; a docked guide panel to read beside the cases
 - A Record button in the header turns recording on by choosing a run: its menu lists the saved runs (several can run side by side, say one per theme being tested) to resume, create, rename or delete, plus a "Not recording" entry to go back to just reading. While recording the button shows the run's name and every step gets Pass / Fail buttons: the first unmarked step is highlighted, a failed step takes a note with line breaks and pasted (or dropped, or attached) screenshots, each case gets a PASS / FAIL chip, and copying a case as Markdown includes the results. Markdown cannot carry an image that issue trackers will show (they drop embedded `data:` images, including from a rich-text paste), so the copy marks where each screenshot goes, and each screenshot has Copy image and Download buttons: copy it and paste it at the mark, and the tracker uploads it. The run in use is shared by every tab, and results stay in this browser only; they are a working record, not a test report
-- Plan which cases a run covers: pick a tag range, mark cases Run or Skip with a reason, and copy the whole selection as a Markdown review sheet (see [Planning a run](#planning-a-run))
+- Plan which cases a run covers: pick a range of tags or parts of the hierarchy, mark cases Run or Skip with a reason, and copy the whole selection as a Markdown review sheet (see [Planning a run](#planning-a-run))
 - Each case shows its preconditions, test data, steps and note; a suite page hides the cards of obsolete, superseded and skipped cases by default (they stay in the table)
 - The interface is in English or Japanese, chosen from the browser's language on the first visit and switchable from the globe icon in the header; more languages can be added with a JSON file (see [Languages](#languages)). Markdown copied from the page follows the language chosen
 - Ticket numbers written as plain text become links to your issue tracker from one setting (see [Linking ticket numbers](#linking-ticket-numbers-autolinks))
@@ -217,8 +217,9 @@ break when pasted into an issue. Where a configured autolink also matches, the c
 Not every release needs every case. With a run recording (header Record button), open **Plan** from the
 run's row in that menu (or `#/plan`):
 
-1. Add one or more tags under **Range**: the cases carrying any of them are what is being reviewed
-   (no tag means the whole sheet). The filter box narrows the list further.
+1. Add tags, domains, features or suites under **Range**: the cases carrying any of those tags or sitting
+   under any of those domains, features or suites are what is being reviewed (nothing chosen means the
+   whole sheet). The filter box narrows the list further.
 2. Mark each case **Run** or **Skip** and, if you like, write a reason beside it. To do several at once,
    tick them (the checkbox on a row, on a section heading, or in the table head for everything listed;
    Shift-click ticks a stretch) and use the bar that appears: **Run**, **Skip**, **Clear decision**, or
@@ -233,7 +234,7 @@ run's row in that menu (or `#/plan`):
    reason), decisions outside the current range, and decisions for cases no longer in the sheet.
 
 While planning, the side nav chooses which part of the sheet is listed (its numbers read in-range/total once a
-tag range is set), a case's ID opens its steps in place, and section headings scroll within the page, so
+range is set), a case's ID opens its steps in place, and section headings scroll within the page, so
 nothing leaves the plan until **Done planning** in the header (which returns to the cases of that part).
 
 A plan belongs to its run and is kept in this browser with it. A case added to the sheet later is undecided.

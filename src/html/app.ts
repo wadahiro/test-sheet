@@ -1588,10 +1588,43 @@ function ScopePage({
   `;
 }
 
-/** The cases a run's plan covers: those carrying one of its tags, or all of them when it names none */
+const planHasRange = (plan: Plan): boolean => plan.tags.length > 0 || plan.parts.length > 0;
+
+/**
+ * The cases a run's plan covers: those carrying one of its tags or sitting under one of its domains,
+ * features or suites (any of them, as with tags), or all of them when it names none
+ */
 function planRange(rows: OverviewRow[], plan: Plan): OverviewRow[] {
-  return plan.tags.length === 0 ? rows : rows.filter((row) => row.tags.some((tag) => plan.tags.includes(tag)));
+  if (!planHasRange(plan)) return rows;
+  const parts = new Set(plan.parts);
+  return rows.filter((row) => row.tags.some((tag) => plan.tags.includes(tag)) || OVERVIEW_LEVELS.some((level) => parts.has(rangeKeyOf(level, row.keys[level]))));
 }
+
+/** Hierarchy levels a range can name; sections are not a unit anyone releases by */
+const RANGE_PART_LEVELS = ["domain", "feature", "suite"] as const;
+
+interface RangePart {
+  key: string;
+  /** Position in the hierarchy, which indents the picker the way the side nav does */
+  depth: number;
+  /** Enough of the path to tell two same-named features apart */
+  label: string;
+}
+
+/** Every domain, feature and suite in the sheet, in document order with parents first */
+function rangePartsOf(rows: OverviewRow[]): RangePart[] {
+  const parts = new Map<string, RangePart>();
+  for (const row of rows) {
+    RANGE_PART_LEVELS.forEach((level, depth) => {
+      const key = rangeKeyOf(level, row.keys[level]);
+      if (!parts.has(key)) parts.set(key, { key, depth, label: RANGE_PART_LEVELS.slice(0, depth + 1).map((l) => row.labels[l]).join(" › ") });
+    });
+  }
+  return [...parts.values()];
+}
+
+/** A part the sheet no longer has still shows, so it can be removed rather than silently shaping the range */
+const rangePartLabel = (parts: RangePart[], key: string): string => parts.find((part) => part.key === key)?.label ?? key.slice(key.indexOf(":") + 1).split("\u0000").pop() ?? key;
 
 /** An inactive case has its reason in the YAML already, so it is not asked to be decided */
 function tallyPlan(rows: OverviewRow[], plan: Plan) {
@@ -1660,7 +1693,9 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
     `# ${t("plan.review.title", { name: runName })}`,
     "",
     `> ${t("plan.review.summary", {
-      range: plan.tags.length === 0 ? t("plan.review.allTags") : plan.tags.map((tag) => `\`${tag}\``).join(", "),
+      range: !planHasRange(plan)
+        ? t("plan.review.allTags")
+        : [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(", "),
       total: inRange.length,
       run: tally.run,
       skip: tally.skip,
@@ -1684,8 +1719,8 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
 }
 
 /**
- * Where the person planning a run chooses what it covers. The range is a set of exact tags rather
- * than the filter's text: that text also matches names and translated labels, so it could not name
+ * Where the person planning a run chooses what it covers. The range is a set of exact tags and
+ * hierarchy keys rather than the filter's text: that text also matches names and translated labels, so it could not name
  * the same cases twice. Decisions are kept per case, so a case added to the sheet later is undecided.
  */
 function PlanPage({
@@ -1745,6 +1780,7 @@ function PlanPage({
   if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${PLAN_HASH}>${t("scope.backToAll")}</a></p>`;
 
   const allTags = [...new Set(rows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
+  const allParts = rangePartsOf(rows);
   const rangeRows = planRange(rows, plan);
   const { rowKey } = resolved;
   const partRows = rowKey ? rangeRows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rangeRows;
@@ -1826,6 +1862,29 @@ function PlanPage({
                 <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))}>×</button>
               </span>`
             )}
+            ${plan.parts.map((key) => {
+              const label = rangePartLabel(allParts, key);
+              return html`<span class="tag-chip plan-range-chip plan-range-part" key=${key}>
+                ${label}
+                <button class="plan-chip-x" aria-label=${t("plan.removePart", { name: label })} title=${t("plan.removePart", { name: label })} onClick=${() => onPlan((current) => ({ ...current, parts: current.parts.filter((other) => other !== key) }))}>×</button>
+              </span>`;
+            })}
+            <select
+              class="plan-tag-add"
+              aria-label=${t("plan.addPart")}
+              value=""
+              onChange=${(e: Event) => {
+                const select = e.target as HTMLSelectElement;
+                const key = select.value;
+                select.value = "";
+                if (key) onPlan((current) => ({ ...current, parts: [...current.parts, key] }));
+              }}
+            >
+              <option value="">${t("plan.addPart")}</option>
+              ${allParts
+                .filter((part) => !plan.parts.includes(part.key))
+                .map((part) => html`<option key=${part.key} value=${part.key}>${"\u00a0\u00a0".repeat(part.depth)}${part.label.split(" › ").pop()}</option>`)}
+            </select>
             <select
               class="plan-tag-add"
               aria-label=${t("plan.addTag")}
@@ -1840,7 +1899,7 @@ function PlanPage({
               <option value="">${t("plan.addTag")}</option>
               ${allTags.filter((tag) => !plan.tags.includes(tag)).map((tag) => html`<option key=${tag} value=${tag}>${tag}</option>`)}
             </select>
-            ${plan.tags.length === 0 ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
+            ${!planHasRange(plan) ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
           </div>
           <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
         </div>
@@ -3522,7 +3581,7 @@ function App() {
   }, [query]);
 
   const planning = route.mode === "plan";
-  const planRangeCounts = useMemo(() => (planning && plan.tags.length > 0 ? planRangeCountsOf(overviewRows, plan) : null), [planning, plan, overviewRows]);
+  const planRangeCounts = useMemo(() => (planning && planHasRange(plan) ? planRangeCountsOf(overviewRows, plan) : null), [planning, plan, overviewRows]);
   const navigate = useCallback(
     (entry: NavEntry) => {
       const hash = planning ? planHashFor(entry, suites) : entry.hash;

@@ -207,8 +207,10 @@ export type Decision = "r" | "s";
 
 export interface Plan {
   v: 1;
-  /** The range being planned: cases carrying any of these exact tags; none means the whole sheet */
+  /** The range being planned: cases carrying any of these exact tags or inside any of `parts`; none of either means the whole sheet */
   tags: string[];
+  /** Domains, features and suites in the range, as range keys of the hierarchy (not paths a rename could break silently) */
+  parts: string[];
   /** Run or skip, per case; a case with no entry is undecided, so one added to the sheet later is seen as such */
   d: Record<string, Decision>;
   /** Why a case is run or skipped, optional on either decision */
@@ -217,7 +219,7 @@ export interface Plan {
   u: string;
 }
 
-export const emptyPlan = (): Plan => ({ v: 1, tags: [], d: {}, why: {}, u: "" });
+export const emptyPlan = (): Plan => ({ v: 1, tags: [], parts: [], d: {}, why: {}, u: "" });
 
 export function planKey(runId: string): string {
   return `test-sheet-plan:${runNamespace()}:${runId}`;
@@ -235,6 +237,7 @@ export function readPlan(runId: string): Plan {
     return {
       v: 1,
       tags: Array.isArray(data.tags) ? data.tags.filter((tag): tag is string => typeof tag === "string") : [],
+      parts: Array.isArray(data.parts) ? data.parts.filter((part): part is string => typeof part === "string") : [],
       d: isRecordOf(data.d, (item): item is Decision => item === "r" || item === "s") ? data.d : {},
       why: isRecordOf(data.why, (item): item is string => typeof item === "string") ? data.why : {},
       u: typeof data.u === "string" ? data.u : "",
