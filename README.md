@@ -10,7 +10,7 @@ A local tool for managing test cases as `testcases.yaml` files and browsing them
 - Full-text search in a command palette (Cmd+K / Ctrl+K), and a filter on every table that each page remembers for the tab, so going to a case and back finds the list as it was (a link can still carry one, as `#/overview?q=smoke`)
 - Resizable, collapsible side nav; a docked guide panel to read beside the cases
 - A Record button in the header turns recording on by choosing a run: its menu lists the saved runs (several can run side by side, say one per theme being tested) to resume, create, rename or delete, plus a "Not recording" entry to go back to just reading. While recording the button shows the run's name and every step gets Pass / Fail buttons: the first unmarked step is highlighted, a failed step takes a note with line breaks and pasted (or dropped, or attached) screenshots, each case gets a PASS / FAIL chip, and copying a case as Markdown includes the results. Each table row gets a Result column and the filter bar shows how many listed cases are done (and failed). Each case opens below its row (click its ID or name; *Expand all* opens every listed case) and is recorded there, on every page; its header has previous / next buttons, and nothing moves on by itself, since cases have no required order. The one-page read (`#/all`) is read-only. Markdown cannot carry an image that issue trackers will show (they drop embedded `data:` images, including from a rich-text paste), so the copy marks where each screenshot goes, and each screenshot has Copy image and Download buttons: copy it and paste it at the mark, and the tracker uploads it. The run in use is shared by every tab, and results stay in this browser only; they are a working record, not a test report
-- Plan which cases a run covers: pick a range of tags or parts of the hierarchy, mark cases Run or Skip with a reason, and copy the whole selection as a Markdown review sheet (see [Planning a run](#planning-a-run))
+- Plan which cases a run covers: pick a range of tags or parts of the hierarchy, mark cases Run or Exclude with a reason, and copy the whole selection as a Markdown review sheet (see [Planning a run](#planning-a-run))
 - Each case shows its preconditions, test data (every value has a copy button, for a login ID or a token), steps and note; obsolete, superseded and skipped cases stay in the tables, marked with their reason
 - The interface is in English or Japanese, chosen from the browser's language on the first visit and switchable from the globe icon in the header; more languages can be added with a JSON file (see [Languages](#languages)). Markdown copied from the page follows the language chosen
 - Ticket numbers written as plain text become links to your issue tracker from one setting (see [Linking ticket numbers](#linking-ticket-numbers-autolinks))
@@ -214,29 +214,34 @@ break when pasted into an issue. Where a configured autolink also matches, the c
 
 ### Planning a run
 
-Not every release needs every case. With a run recording (header Record button), open **Plan** from the
-run's row in that menu (or `#/plan`):
+Not every release needs every case. Creating a run (header Record button) takes you straight to its plan; you
+can come back any time with the header's **Edit plan** button (or `#/plan`), and leave run mode with the ✕ beside it,
+which shows every case again:
 
 1. Add tags, domains, features or suites under **Range**: the cases carrying any of those tags or sitting
    under any of those domains, features or suites are what is being reviewed (nothing chosen means the
    whole sheet). The filter box narrows the list further.
-2. Mark each case **Run** or **Skip** and, if you like, write a reason beside it. To do several at once,
+2. Mark each case **Run** or **Exclude** and, if you like, write a reason beside it. To do several at once,
    tick them (the checkbox on a row, on a section heading, or in the table head for everything listed;
-   Shift-click ticks a stretch) and use the bar that appears: **Run**, **Skip**, **Clear decision**, or
+   Shift-click ticks a stretch) and use the bar that appears: **Run**, **Exclude**, **Clear decision**, or
    **Reason only**, with one reason for all of them (reasons already used are offered). A reason fills only
    cases that have none, unless *Overwrite reasons* is ticked, and **Undo** takes the last bulk change
    back. The filter box and the decision filter next to it decide what is listed. Obsolete, superseded and
    skipped cases already carry a reason in the YAML and are not asked about.
-3. Testers then see only the cases marked Run on every page (the **In scope only** switch beside the filter
-   turns that off), and the run's progress counts against them. Until a case is marked Run, the range
-   itself narrows the pages (minus cases marked Skip); the switch appears once a plan has a range or a case to run.
+3. While the run is in use, every page lists only the cases marked Run (within the range, active). A note says
+   how many were left out and why (outside the range, excluded, not decided, inactive), with a link back to the
+   plan, and the run's progress counts against the listed cases. Starting from a plan where nothing is marked
+   Run marks the range's undecided cases Run first ("Start testing with all 29 cases"), so a run never starts with
+   nothing to run. Why a case was excluded is for the review sheet below, not for testers.
 4. *Copy* on the plan page copies a review sheet in Markdown for someone to check the selection: the range,
-   every case in it with its decision and reason, then what needs attention (undecided cases, skips with no
+   every case in it with its decision and reason, then what needs attention (undecided cases, exclusions with no
    reason), decisions outside the current range, and decisions for cases no longer in the sheet.
 
 While planning, the side nav chooses which part of the sheet is listed (its numbers read in-range/total once a
 range is set), a case's ID opens its steps in place, and section headings scroll within the page, so
-nothing leaves the plan until **Done planning** in the header (which returns to the cases of that part).
+nothing leaves the plan until **Start testing** in the header (which goes to the cases that run covers) or **Cancel**
+(which leaves without keeping what you changed, after asking if you changed anything; a run made just for this
+plan is dropped).
 
 A plan belongs to its run and is kept in this browser with it. A case added to the sheet later is undecided.
 

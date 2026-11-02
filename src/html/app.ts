@@ -1615,19 +1615,22 @@ function CaseCountLabel({ shown, total, filtered }: { shown: number; total: numb
   return html`<span class="filter-count">${caseCountText(filtered ? `${shown} / ${total}` : shown, shown)}</span>`;
 }
 
-/**
- * What a run's plan keeps off a page, and a way back. The counts say why: skipped and undecided cases
- * once something is decided Run, otherwise whatever lies outside the range.
- */
-function ScopeNote({ pageRows, shownCount, plan, onShowAll, editHref }: { pageRows: OverviewRow[]; shownCount: number; plan: Plan; onShowAll: () => void; editHref: string }) {
-  const decidedRun = Object.values(plan.d).includes("r");
-  const skipped = pageRows.filter((row) => plan.d[row.tcId] === "s").length;
-  const undecided = pageRows.filter((row) => !row.inactive && !plan.d[row.tcId]).length;
-  const outside = pageRows.length - shownCount;
-  if ((decidedRun ? skipped + undecided : outside) <= 0) return null;
+/** What the run's plan keeps off a page, and why, so a short list is not mistaken for a missing case */
+function ScopeNote({ hiddenRows, plan, editHref }: { hiddenRows: OverviewRow[]; plan: Plan; editHref: string }) {
+  if (hiddenRows.length === 0) return null;
+  const inRange = new Set(planRange(hiddenRows, plan).map((row) => row.tcId));
+  const inactive = hiddenRows.filter((row) => row.inactive).length;
+  const outside = hiddenRows.filter((row) => !row.inactive && !inRange.has(row.tcId)).length;
+  const excluded = hiddenRows.filter((row) => !row.inactive && inRange.has(row.tcId) && plan.d[row.tcId] === "s").length;
+  const undecided = hiddenRows.length - inactive - outside - excluded;
+  const parts = [
+    outside > 0 ? t("plan.hiddenOutside", { n: outside }) : "",
+    excluded > 0 ? t("plan.hiddenExcluded", { n: excluded }) : "",
+    undecided > 0 ? t("plan.hiddenUndecided", { n: undecided }) : "",
+    inactive > 0 ? t("plan.hiddenInactive", { n: inactive }) : "",
+  ].filter(Boolean);
   return html`<p class="hidden-note">
-    ${decidedRun ? t("plan.hidden", { skipped, undecided }) : t("plan.hiddenRange", { n: outside })}${" "}
-    <button class="link-btn" onClick=${onShowAll}>${t("hidden.show")}</button>${" · "}
+    ${t("plan.hidden", { parts: parts.join(t("plan.hiddenJoin")) })}${" "}
     <a class="scope-link" href=${editHref}>${t("plan.edit")}</a>
   </p>`;
 }
@@ -1645,9 +1648,7 @@ function ScopePage({
   guideOpen,
   onToggleGuide,
   plan,
-  planHasRun,
-  scopeOnly,
-  onToggleScopeOnly,
+  scoped,
 }: {
   route: Route;
   resolved: ResolvedScope | null;
@@ -1657,10 +1658,8 @@ function ScopePage({
   guideOpen: boolean;
   onToggleGuide: () => void;
   plan: Plan;
-  /** The run's plan names cases to run or a range, so there is a list to narrow the page to */
-  planHasRun: boolean;
-  scopeOnly: boolean;
-  onToggleScopeOnly: () => void;
+  /** A run is in use, so the page lists what its plan covers; without one the whole sheet is listed */
+  scoped: boolean;
 }) {
   // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
   const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
@@ -1694,8 +1693,9 @@ function ScopePage({
   const { rowKey } = resolved;
   const pageRows = rowKey ? rows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rows;
   // The case the route points at stays, so a link to a case outside the plan still lands on it
-  const scopeIds = planScopeIds(rows, plan);
-  const scopeRows = scopeOnly && scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
+  const scopeIds = scoped ? planScopeIds(rows, plan) : null;
+  const scopeRows = scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
+  const shownIds = new Set(scopeRows.map((row) => row.tcId));
   const trimmedQuery = query.trim();
   const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
   const suite = route.scope.kind === "suite" ? resolved.suites[0] : null;
@@ -1721,12 +1721,6 @@ function ScopePage({
             value=${query}
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
-          ${planHasRun
-            ? html`<label class="filter-toggle" title=${t("scope.onlyTitle")}>
-                <input type="checkbox" checked=${scopeOnly} onChange=${onToggleScopeOnly} />
-                <span class="filter-toggle-text">${t("scope.only")}</span>
-              </label>`
-            : null}
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
             <${RunProgress} rows=${visibleRows} />
@@ -1760,9 +1754,7 @@ function ScopePage({
               <${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} expand=${{ isOpen, toggle: toggleCase }} />
             </${CaseNavContext.Provider}>`}
       </div>
-      ${scopeOnly && scopeIds
-        ? html`<${ScopeNote} pageRows=${pageRows} shownCount=${scopeRows.length} plan=${plan} onShowAll=${onToggleScopeOnly} editHref=${planHashForScope(route.scope)} />`
-        : null}
+      ${scopeIds ? html`<${ScopeNote} hiddenRows=${pageRows.filter((row) => !shownIds.has(row.tcId))} plan=${plan} editHref=${planHashForScope(route.scope)} />` : null}
     </section>
   `;
 }
@@ -1780,15 +1772,19 @@ function planRange(rows: OverviewRow[], plan: Plan): OverviewRow[] {
 }
 
 /**
- * The cases a run is to cover. Those decided Run are the scope; until one is, the range stands in
- * for it (less any decided Skip), so choosing a range alone narrows what testers see. Null when the
- * plan narrows nothing.
+ * The cases a run covers: those the plan decided Run, within its range and active. Excluded and
+ * undecided cases are left out (the review sheet is where an exclusion is explained). Null when no
+ * case is decided Run: such a plan has not been made yet, and the run covers the whole sheet.
  */
 function planScopeIds(rows: OverviewRow[], plan: Plan): Set<string> | null {
-  const decidedRun = Object.values(plan.d).includes("r");
-  if (!decidedRun && !planHasRange(plan)) return null;
   const rangeIds = new Set(planRange(rows, plan).map((row) => row.tcId));
-  return new Set(rows.filter((row) => (decidedRun ? plan.d[row.tcId] === "r" : rangeIds.has(row.tcId) && plan.d[row.tcId] !== "s")).map((row) => row.tcId));
+  const covered = rows.filter((row) => rangeIds.has(row.tcId) && !row.inactive && plan.d[row.tcId] === "r");
+  return covered.length === 0 ? null : new Set(covered.map((row) => row.tcId));
+}
+
+/** What starting testing would mark Run: the range's active cases nobody has decided yet */
+function undecidedCandidates(rows: OverviewRow[], plan: Plan): OverviewRow[] {
+  return planRange(rows, plan).filter((row) => !row.inactive && !plan.d[row.tcId]);
 }
 
 /** Hierarchy levels a range can name; sections are not a unit anyone releases by */
@@ -3102,25 +3098,6 @@ function LanguageMenu({ current, onChange }: { current: string; onChange: (code:
   `;
 }
 
-const SCOPE_ONLY_STORAGE_KEY = "test-sheet-in-scope-only";
-
-/** On unless turned off: a plan that says what to run is there to narrow the pages */
-function readScopeOnly(): boolean {
-  try {
-    return localStorage.getItem(SCOPE_ONLY_STORAGE_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
-function writeScopeOnly(on: boolean) {
-  try {
-    localStorage.setItem(SCOPE_ONLY_STORAGE_KEY, on ? "1" : "0");
-  } catch {
-    // Blocked storage just means the choice is not remembered
-  }
-}
-
 const GUIDE_OPEN_STORAGE_KEY = "test-sheet-guide-open";
 
 function readGuideOpen(): boolean {
@@ -3385,11 +3362,11 @@ function RunMenu({
               .map((run) => {
                 const isActive = run.id === index.last;
                 const marked = recorded[run.id] ?? new Set<string>();
-                const scope = planScopeIds(rows, readPlan(run.id));
-                const planned = scope ? rows.filter((row) => !row.inactive && scope.has(row.tcId)).map((row) => row.tcId) : [];
+                const runPlan = readPlan(run.id);
+                const planned = planScopeIds(rows, runPlan);
                 const meta =
-                  scope
-                    ? t("runs.metaPlan", { done: planned.filter((id) => marked.has(id)).length, total: planned.length, time: formatRunTime(run.u) })
+                  planned
+                    ? t("runs.metaPlan", { done: [...planned].filter((id) => marked.has(id)).length, total: planned.size, time: formatRunTime(run.u) })
                     : t("runs.meta", { done: marked.size, total: totalCases, time: formatRunTime(run.u) });
                 return html`<li key=${run.id} class=${"run-row" + (isActive ? " run-row-active" : "")}>
                   ${renaming === run.id
@@ -3419,7 +3396,7 @@ function RunMenu({
                         </span>
                       </button>`}
                   <span class="run-actions">
-                    ${isActive ? html`<a class="link-btn" href=${PLAN_HASH} onClick=${() => onClose(false)}>${t("plan.open")}</a>` : null}
+                    ${isActive ? html`<a class="link-btn" href=${PLAN_HASH} onClick=${() => onClose(false)}>${t("plan.edit")}</a>` : null}
                     <button class="link-btn" onClick=${() => { setRenaming(run.id); setRenameText(run.name); }}>${t("runs.rename")}</button>
                     <button class="link-btn link-btn-danger" disabled=${busy === run.id} onClick=${() => askDelete(run)}>${t("runs.delete")}</button>
                   </span>
@@ -3452,6 +3429,10 @@ function AppHeader({
   crumbs,
   pageHeading,
   planExitHash,
+  planHash,
+  onCancelPlan,
+  startAll,
+  onStart,
   onOpenPalette,
   navCollapsed,
   onToggleNav,
@@ -3475,6 +3456,13 @@ function AppHeader({
   pageHeading: boolean;
   /** Where "Done planning" leads while the plan page is shown; null elsewhere */
   planExitHash: string | null;
+  /** Where planning the run in use for the page shown starts */
+  planHash: string;
+  /** Leaves planning without keeping what was changed; absent when there is no run to plan */
+  onCancelPlan: (() => void) | null;
+  /** With no case decided Run, starting marks this many undecided ones Run first; `ranged` says whether a range chose them */
+  startAll: { n: number; ranged: boolean } | null;
+  onStart: () => void;
   lang: string;
   onChangeLang: (code: string) => void;
   onOpenPalette: () => void;
@@ -3518,8 +3506,11 @@ function AppHeader({
         </nav>
       </div>
       <div class="app-header-actions">
+        ${planExitHash !== null && onCancelPlan
+          ? html`<button class="header-btn plan-cancel" title=${t("plan.cancelTitle")} onClick=${onCancelPlan}><span aria-hidden="true">✕</span><span class="plan-done-text">${t("plan.cancel")}</span></button>`
+          : null}
         ${planExitHash
-          ? html`<a class="header-btn header-btn-on plan-done" href=${planExitHash} title=${t("plan.doneTitle")}><span aria-hidden="true">✓</span><span class="plan-done-text">${t("plan.done")}</span></a>`
+          ? html`<a class="header-btn header-btn-on plan-done" href=${planExitHash} title=${startAll ? t("plan.startAllTitle") : t("plan.doneTitle")} onClick=${onStart}><span aria-hidden="true">✓</span><span class="plan-done-text">${startAll ? t(startAll.ranged ? "plan.startRange" : "plan.startAll", { n: startAll.n }) : t("plan.done")}</span></a>`
           : null}
         ${hideRecord
           ? null
@@ -3554,6 +3545,12 @@ function AppHeader({
               />`
             : null}
         </div>`}
+        ${activeRun && planExitHash === null
+          ? html`<a class="header-btn run-plan" href=${planHash} title=${t("plan.openTitle")}>${t("plan.edit")}</a>
+              <button class="header-btn header-btn-icon run-exit" title=${t("header.exitRun")} aria-label=${t("header.exitRun")} onClick=${onStopRecording}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>`
+          : null}
         <button class="header-btn" title=${t("header.searchTitle")} onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>${t("header.search")}</span>
@@ -3622,6 +3619,7 @@ function App() {
   const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
   const [navWidth, setNavWidth] = useState(() => readPanelWidth(NAV_SIZE));
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash, suites));
+  const planning = route.mode === "plan";
   const entries = buildNavEntries(suites, "headings", true);
   const overviewRows = buildOverviewRows(suites);
   /**
@@ -3676,15 +3674,6 @@ function App() {
     },
     [activeRunId, sheetIds]
   );
-  const planHasRun = Object.values(plan.d).includes("r") || planHasRange(plan);
-  const [scopeOnlyPref, setScopeOnlyPref] = useState(readScopeOnly);
-  const scopeOnly = planHasRun && scopeOnlyPref;
-  const toggleScopeOnly = useCallback(() => {
-    setScopeOnlyPref((on) => {
-      writeScopeOnly(!on);
-      return !on;
-    });
-  }, []);
   const [lang, setLang] = useState(currentLocaleCode);
   const changeLang = useCallback((code: string) => {
     applyLocale(findLocale(code));
@@ -3758,7 +3747,6 @@ function App() {
     }
   }, [query]);
 
-  const planning = route.mode === "plan";
   const planRangeCounts = useMemo(() => (planning && planHasRange(plan) ? planRangeCountsOf(overviewRows, plan) : null), [planning, plan, overviewRows]);
   const navigate = useCallback(
     (entry: NavEntry) => {
@@ -3817,12 +3805,23 @@ function App() {
     },
     [runIndex, commitRunIndex]
   );
+  // What the plan was when planning began, so leaving by Cancel can put it back; a run made just now is dropped instead
+  const freshRunId = useRef<string | null>(null);
+  const planSnapshot = useRef<{ runId: string; plan: Plan; fresh: boolean } | null>(null);
   const createRun = useCallback(
     (name: string) => {
-      commitRunIndex(withNewRun(runIndex, name.trim() || defaultName()));
+      const next = withNewRun(runIndex, name.trim() || defaultName());
+      freshRunId.current = next.last;
+      commitRunIndex(next);
       setRunMenuOpen(false);
+      // A run begins with deciding what it covers; planning is a way out of this page, so it is not forced again from the plan page itself
+      if (route.mode !== "plan") {
+        location.hash = planHashForScope(route.scope);
+        // hashchange arrives after the next paint: waiting for it would show the header once as if the plan were not open
+        setRoute(parseRoute(location.hash, suites));
+      }
     },
-    [runIndex, commitRunIndex]
+    [runIndex, commitRunIndex, route.mode, route.scope, suites]
   );
   const renameRun = useCallback((id: string, name: string) => commitRunIndex(withRenamedRun(runIndex, id, name)), [runIndex, commitRunIndex]);
   const deleteRun = useCallback(
@@ -3832,6 +3831,39 @@ function App() {
     },
     [commitRunIndex]
   );
+
+  useEffect(() => {
+    if (!planning || !activeRunId) {
+      planSnapshot.current = null;
+      if (!planning) freshRunId.current = null;
+    } else if (planSnapshot.current?.runId !== activeRunId) {
+      planSnapshot.current = { runId: activeRunId, plan: planRef.current, fresh: freshRunId.current === activeRunId };
+    }
+  }, [planning, activeRunId]);
+  const cancelPlanning = useCallback(async () => {
+    const snapshot = planSnapshot.current;
+    if (!snapshot) return;
+    const decisions = (value: Plan) => JSON.stringify([value.tags, value.parts, value.d, value.why]);
+    const edited = decisions(snapshot.plan) !== decisions(planRef.current);
+    if (edited && !confirm(t(snapshot.fresh ? "plan.cancelConfirmNew" : "plan.cancelConfirm"))) return;
+    if (snapshot.fresh) {
+      await deleteRunData(snapshot.runId);
+      commitRunIndex(withoutRun(rereadRunIndex(), snapshot.runId));
+    } else {
+      writePlan(snapshot.runId, snapshot.plan, sheetIds);
+      setPlanStore({ runId: snapshot.runId, plan: snapshot.plan });
+    }
+    location.hash = scopeHashFor(route.scope);
+    setRoute(parseRoute(location.hash, suites));
+  }, [commitRunIndex, sheetIds, route.scope, suites]);
+
+  const noRunDecided = planScopeIds(overviewRows, plan) === null;
+  const candidates = planning && noRunDecided ? undecidedCandidates(overviewRows, plan) : [];
+  const startAll = candidates.length > 0 ? { n: candidates.length, ranged: planHasRange(plan) } : null;
+  // Nothing marked Run would leave a run with nothing to run, so starting from an untouched plan marks its candidates
+  const startTesting = useCallback(() => {
+    if (startAll) updatePlan((current) => applyPlan(current, candidates.map((row) => row.tcId), { decision: "r", overwrite: false }).plan);
+  }, [startAll, candidates, updatePlan]);
 
   // The runs are shared by every tab: a run chosen, created or deleted in another one reaches this one
   useEffect(() => {
@@ -3861,8 +3893,8 @@ function App() {
     });
   }, []);
 
-  // The one-page read follows the plan like the tables do: with the switch on it lists only what the run covers
-  const fullScopeIds = route.mode === "full" && scopeOnly ? planScopeIds(overviewRows, plan) : null;
+  // The one-page read follows the plan like the tables do: while a run is in use it lists only what the run covers
+  const fullScopeIds = route.mode === "full" && activeRun ? planScopeIds(overviewRows, plan) : null;
   const domains = groupByDomainAndFeature(
     fullScopeIds ? suites.map((suite) => ({ ...suite, testCases: suite.testCases.filter((tc) => fullScopeIds.has(tc._tcId)) })).filter((suite) => suite.testCases.length > 0) : suites
   );
@@ -3881,7 +3913,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} planHash=${planHashForScope(route.scope)} onCancelPlan=${planning && activeRun ? cancelPlanning : null} startAll=${startAll} onStart=${startTesting} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
@@ -3890,18 +3922,12 @@ function App() {
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} planRangeCounts=${planRangeCounts} />
         <div class=${"app" + (route.mode !== "full" ? " app-scope" : "")}>
           ${route.mode === "full"
-            ? html`${planHasRun
-                  ? html`<div class="full-scope-bar">
-                      <label class="filter-toggle" title=${t("scope.onlyTitle")}>
-                        <input type="checkbox" checked=${scopeOnly} onChange=${toggleScopeOnly} />
-                        <span class="filter-toggle-text">${t("scope.only")}</span>
-                      </label>
-                      ${fullScopeIds ? html`<${ScopeNote} pageRows=${overviewRows} shownCount=${fullScopeIds.size} plan=${plan} onShowAll=${toggleScopeOnly} editHref=${PLAN_HASH} />` : null}
-                    </div>`
+            ? html`${fullScopeIds
+                  ? html`<div class="full-scope-bar"><${ScopeNote} hiddenRows=${overviewRows.filter((row) => !fullScopeIds.has(row.tcId))} plan=${plan} editHref=${PLAN_HASH} /></div>`
                   : null}
                 <${RunContext.Provider} value=${null}>
                   ${domains.length === 0
-                    ? html`<p class="empty">${planHasRun && scopeOnly ? t("filter.none") : t("scope.noFiles")}</p>`
+                    ? html`<p class="empty">${fullScopeIds ? t("filter.none") : t("scope.noFiles")}</p>`
                     : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
                 </${RunContext.Provider}>`
             : route.mode === "plan"
@@ -3925,9 +3951,7 @@ function App() {
                 guideOpen=${guidePanelOpen}
                 onToggleGuide=${() => setGuide(!guidePanelOpen)}
                 plan=${plan}
-                planHasRun=${planHasRun}
-                scopeOnly=${scopeOnly}
-                onToggleScopeOnly=${toggleScopeOnly}
+                scoped=${activeRun !== null}
               />`}
         </div>
         ${guidePanelOpen && guideSuite

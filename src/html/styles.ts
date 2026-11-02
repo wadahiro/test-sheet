@@ -751,6 +751,13 @@ body {
   .plan-done-text { display: none; }
 }
 
+.run-plan { white-space: nowrap; text-decoration: none; }
+
+/* The header cannot wrap, so the plan link gives its room to the run's name first; the run menu still has it */
+@media (max-width: 900px) {
+  .run-plan { display: none; }
+}
+
 /* The name opens the case as the ID does, for the mouse; the ID button stays the one keyboard and assistive technology use */
 .expand-name { cursor: pointer; }
 
