@@ -256,6 +256,12 @@ interface ActiveRun {
 
 const RunContext = createContext<ActiveRun | null>(null);
 
+/** Fired after every write of a case's marks, so the table can show progress without the cards being re-rendered for it */
+const RUN_CHANGE_EVENT = "test-sheet-run-change";
+
+/** The cases a page's cards show, in the order they are laid out, for stepping from one to the next */
+const CaseOrderContext = createContext<string[] | null>(null);
+
 type StepResult = "" | "p" | "f";
 
 interface StoredRun {
@@ -329,20 +335,21 @@ function writeRun(runId: string, tc: TestCase, run: RunState) {
   try {
     if (run.results.every((result) => result === "")) {
       localStorage.removeItem(runKey(runId, tc));
-      return;
+    } else {
+      const stored: StoredRun = {
+        v: 1,
+        h: stepsFingerprint(tc.steps),
+        r: run.results,
+        n: Object.fromEntries(Object.entries(run.notes).filter(([, text]) => text !== "")),
+        t: run.recordedAt ?? new Date().toISOString(),
+      };
+      localStorage.setItem(runKey(runId, tc), JSON.stringify(stored));
+      touchRun(runId);
     }
-    const stored: StoredRun = {
-      v: 1,
-      h: stepsFingerprint(tc.steps),
-      r: run.results,
-      n: Object.fromEntries(Object.entries(run.notes).filter(([, text]) => text !== "")),
-      t: run.recordedAt ?? new Date().toISOString(),
-    };
-    localStorage.setItem(runKey(runId, tc), JSON.stringify(stored));
-    touchRun(runId);
   } catch {
     // Blocked storage (e.g. over file://): the marks last for this visit only
   }
+  window.dispatchEvent(new Event(RUN_CHANGE_EVENT));
 }
 
 /** A screenshot attached to a failed step, with an object URL to show it by */
@@ -376,10 +383,14 @@ function caseOutcome(results: StepResult[]): CaseOutcome {
   return marked === results.length ? "pass" : "running";
 }
 
-function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
+function outcomeText(outcome: CaseOutcome, marked: number, total: number): string {
   if (outcome === "pass") return t("chip.pass");
   if (outcome === "fail") return t("chip.fail");
-  return t("chip.progress", { marked: results.filter((result) => result !== "").length, total: results.length });
+  return t("chip.progress", { marked, total });
+}
+
+function outcomeLabel(outcome: CaseOutcome, results: StepResult[]): string {
+  return outcomeText(outcome, results.filter((result) => result !== "").length, results.length);
 }
 
 function useCaseRun(tc: TestCase, active: ActiveRun | null): CaseRun | null {
@@ -739,13 +750,14 @@ function StepsTable({ tcId, steps, run }: { tcId: string; steps: Step[]; run: Ca
     if (next >= 0) focusIn(`tr.step-row[data-step="${next}"] .result-btn-pass`);
   };
 
+
   const onSet = (index: number, result: Exclude<StepResult, "">, byKeyboard: boolean) => {
     if (!run) return;
     const clearing = run.results[index] === result;
     run.set(index, result);
     if (clearing || !byKeyboard) return;
     // Keyboard runs should not have to Tab back to the next step; mouse and touch users get no focus jump
-    if (result === "f") requestAnimationFrame(() => focusIn(`tr.step-note-row[data-step="${index}"] input`));
+    if (result === "f") requestAnimationFrame(() => focusIn(`tr.step-note-row[data-step="${index}"] textarea`));
     else focusNextPass(index, [...run.results.slice(0, index), "p", ...run.results.slice(index + 1)]);
   };
 
@@ -822,6 +834,10 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   const activeRun = useContext(RunContext);
   const run = useCaseRun(tc, activeRun);
   const outcome = run ? caseOutcome(run.results) : "none";
+  const order = useContext(CaseOrderContext);
+  const position = run && order ? order.indexOf(tc._tcId) : -1;
+  const prevId = position > 0 && order ? order[position - 1] : null;
+  const nextId = position >= 0 && order && position < order.length - 1 ? order[position + 1] : null;
   const hasShots = !!run && Object.values(run.images).some((list) => list.length > 0);
   const inactive = isInactive(tc);
   const note = inactiveNote(tc);
@@ -848,6 +864,14 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
             </span>`
           : null}
         <span class="test-case-actions">
+          ${position >= 0
+            ? html`<button class="icon-btn" disabled=${prevId === null} title=${t("case.prev")} aria-label=${t("case.prev")} onClick=${() => prevId && goToTestCase(prevId)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" /></svg>
+                </button>
+                <button class="icon-btn" disabled=${nextId === null} title=${t("case.next")} aria-label=${t("case.next")} onClick=${() => nextId && goToTestCase(nextId)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                </button>`
+            : null}
           <a class="icon-btn" href=${testCaseHash(tc._tcId)} title=${t("case.link")} aria-label=${t("case.link")}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
           </a>
@@ -1001,7 +1025,36 @@ function ReasonInput({ id, reason, onReason }: { id: string; reason: string; onR
   />`;
 }
 
-function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?: (tag: string) => void; query?: string; plan?: PlanCells }) {
+/** A row whose case opens below it, read-only, on pages that have no cards of their own */
+interface RowExpand {
+  open: boolean;
+  onToggle: () => void;
+}
+
+/** How far a case is through the active run; the table shows it so progress can be read without scrolling the cards */
+interface CaseProgress {
+  outcome: CaseOutcome;
+  marked: number;
+  total: number;
+}
+
+function IndexRow({
+  row,
+  onTag,
+  query = "",
+  plan,
+  expand,
+  result,
+}: {
+  row: IndexRowData;
+  onTag?: (tag: string) => void;
+  query?: string;
+  plan?: PlanCells;
+  expand?: RowExpand;
+  /** Present (even as null, for a case with no marks) when the table has a result column */
+  result?: CaseProgress | null;
+}) {
+  const toggle: RowExpand | undefined = plan ? { open: plan.open, onToggle: plan.onToggleOpen } : expand;
   const decisionButton = (decision: Decision, label: string) => html`<button
     class=${"decision-btn decision-" + decision + (plan?.decision === decision ? " decision-on" : "")}
     aria-pressed=${plan?.decision === decision}
@@ -1009,8 +1062,8 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
   >${label}</button>`;
   return html`
     <tr
-      class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "")}
-      onClick=${plan ? undefined : () => goToTestCase(row.tcId)}
+      class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "") + (result !== undefined ? " has-result" : "")}
+      onClick=${toggle ? undefined : () => goToTestCase(row.tcId)}
     >
       ${plan
         ? html`<td class="plan-select-cell">
@@ -1028,21 +1081,21 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
       <td class="overview-id">
         <button
           class="overview-link"
-          aria-expanded=${plan ? plan.open : undefined}
-          title=${plan ? t("plan.toggleCase", { id: row.tcId }) : undefined}
+          aria-expanded=${toggle?.open}
+          title=${toggle ? t("plan.toggleCase", { id: row.tcId }) : undefined}
           onClick=${(e: Event) => {
             e.stopPropagation();
-            if (plan) plan.onToggleOpen();
+            if (toggle) toggle.onToggle();
             else goToTestCase(row.tcId);
           }}
-        >${plan ? html`<span class="plan-caret" aria-hidden="true">${plan.open ? "▾" : "▸"}</span>` : null}<${Highlight} text=${row.tcId} query=${query} /></button>
+        >${toggle ? html`<span class="expand-caret" aria-hidden="true">${toggle.open ? "▾" : "▸"}</span>` : null}<${Highlight} text=${row.tcId} query=${query} /></button>
       </td>
       <td
-        class=${"overview-name" + (plan ? " plan-name" : "")}
-        onClick=${plan
+        class=${"overview-name" + (toggle ? " expand-name" : "")}
+        onClick=${toggle
           ? () => {
               // Not while the name is being selected to copy
-              if (!window.getSelection()?.toString()) plan.onToggleOpen();
+              if (!window.getSelection()?.toString()) toggle.onToggle();
             }
           : undefined}
       ><${Highlight} text=${row.name} query=${query} /></td>
@@ -1057,6 +1110,11 @@ function IndexRow({ row, onTag, query = "", plan }: { row: IndexRowData; onTag?:
           )}
         </div>
       </td>
+      ${result !== undefined
+        ? html`<td class="overview-result" data-label=${t("col.result")}>
+            ${result && result.outcome !== "none" ? html`<span class=${`run-chip run-chip-${result.outcome}`}>${outcomeText(result.outcome, result.marked, result.total)}</span>` : null}
+          </td>`
+        : null}
       ${plan
         ? html`<td class="overview-decision">
               ${row.inactive
@@ -1376,6 +1434,35 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
 }
 
 /** Rows of the table, with a heading row ahead of each section naming where it sits below the scope */
+function useRunChanges(): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const onChange = () => setVersion((n) => n + 1);
+    window.addEventListener(RUN_CHANGE_EVENT, onChange);
+    return () => window.removeEventListener(RUN_CHANGE_EVENT, onChange);
+  }, []);
+  return version;
+}
+
+/**
+ * Where each listed case stands in the active run, read from storage rather than from the cards: a
+ * case's card owns its marks, and the table must follow them without owning a second copy.
+ */
+function useRunProgress(rows: OverviewRow[], enabled: boolean): Map<string, CaseProgress> | null {
+  const runId = useContext(RunContext)?.id ?? null;
+  const version = useRunChanges();
+  return useMemo(() => {
+    if (!enabled || !runId) return null;
+    const progress = new Map<string, CaseProgress>();
+    for (const row of rows) {
+      if (row.inactive) continue;
+      const { results } = readRun(runId, row.tc);
+      progress.set(row.tcId, { outcome: caseOutcome(results), marked: results.filter((result) => result !== "").length, total: results.length });
+    }
+    return progress;
+  }, [enabled, runId, rows, version]);
+}
+
 function ScopeTable({
   rows,
   depth,
@@ -1391,7 +1478,11 @@ function ScopeTable({
   plan?: (row: OverviewRow) => PlanCells;
   planSelect?: PlanSelect;
 }) {
-  const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : indexColumns();
+  const progress = useRunProgress(rows, !plan);
+  // Cases open in place only where no cards sit below to jump to; a suite's own page keeps its cards the one place to record
+  const expandable = !plan && depth < OVERVIEW_LEVELS.length - 1;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : progress ? [...indexColumns(), t("col.result")] : indexColumns();
   const span = columns.length + (plan ? 1 : 0);
   const tickState = (ids: string[]) => {
     const ticked = ids.filter((id) => planSelect?.selected.has(id)).length;
@@ -1435,9 +1526,27 @@ function ScopeTable({
                   </th>
                 </tr>`
               : null}
-            <${IndexRow} key=${row.tcId} row=${row} onTag=${onTag} query=${query} plan=${cells} />
-            ${cells?.open
-              ? html`<tr key=${"detail:" + row.tcId} class="plan-detail">
+            <${IndexRow}
+              key=${row.tcId}
+              row=${row}
+              onTag=${onTag}
+              query=${query}
+              plan=${cells}
+              result=${progress ? (progress.get(row.tcId) ?? null) : undefined}
+              expand=${expandable
+                ? {
+                    open: expanded.has(row.tcId),
+                    onToggle: () =>
+                      setExpanded((current) => {
+                        const next = new Set(current);
+                        if (!next.delete(row.tcId)) next.add(row.tcId);
+                        return next;
+                      }),
+                  }
+                : undefined}
+            />
+            ${cells?.open || (expandable && expanded.has(row.tcId))
+              ? html`<tr key=${"detail:" + row.tcId} class="row-detail">
                   <td colspan=${span}>
                     <div class="cards">
                       <${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${0} /></${RunContext.Provider}>
@@ -1450,6 +1559,20 @@ function ScopeTable({
       </tbody>
     </table>
   `;
+}
+
+/** How far the listed cases are through the active run */
+function RunProgress({ rows }: { rows: OverviewRow[] }) {
+  const progress = useRunProgress(rows, true);
+  if (!progress) return null;
+  const live = rows.filter((row) => !row.inactive);
+  const outcomeOf = (row: OverviewRow): CaseOutcome => progress.get(row.tcId)?.outcome ?? "none";
+  const done = live.filter((row) => outcomeOf(row) === "pass" || outcomeOf(row) === "fail").length;
+  const failed = live.filter((row) => outcomeOf(row) === "fail").length;
+  if (live.length === 0) return null;
+  return html`<span class="run-progress">
+    <span class="filter-count run-progress-text">${failed > 0 ? t("scope.progressFail", { done, total: live.length, failed }) : t("scope.progress", { done, total: live.length })}</span>
+  </span>`;
 }
 
 /** How many cases the table lists; while filtering, "matching / all in this scope" */
@@ -1486,7 +1609,7 @@ function ScopePage({
   showInactive: boolean;
   onToggleInactive: () => void;
   plan: Plan;
-  /** The run's plan has at least one case to run, so there is a list to narrow the page to */
+  /** The run's plan names cases to run or a range, so there is a list to narrow the page to */
   planHasRun: boolean;
   scopeOnly: boolean;
   onToggleScopeOnly: () => void;
@@ -1501,7 +1624,10 @@ function ScopePage({
   const { rowKey } = resolved;
   const pageRows = rowKey ? rows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rows;
   // The case the route points at stays, so a link to a case outside the plan still lands on it
-  const scopeRows = scopeOnly ? pageRows.filter((row) => plan.d[row.tcId] === "r" || testCaseAnchorId(row.tcId) === route.target) : pageRows;
+  // Cases decided Run are the scope; until one is, the range stands in for it, so choosing a range alone narrows the run pages
+  const decidedRun = Object.values(plan.d).includes("r");
+  const scopeIds = planScopeIds(rows, plan);
+  const scopeRows = scopeOnly && scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
   const skippedCount = pageRows.filter((row) => plan.d[row.tcId] === "s").length;
   const undecidedCount = pageRows.filter((row) => !row.inactive && !plan.d[row.tcId]).length;
   const trimmedQuery = query.trim();
@@ -1546,6 +1672,7 @@ function ScopePage({
             : null}
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
+            <${RunProgress} rows=${visibleRows} />
             <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== ""} />
             ${hasGuide
               ? html`<button
@@ -1574,15 +1701,17 @@ function ScopePage({
             <button class="link-btn" onClick=${onToggleInactive}>${t("hidden.show")}</button>
           </p>`
         : null}
-      ${scopeOnly && skippedCount + undecidedCount > 0
+      ${scopeOnly && (decidedRun ? skippedCount + undecidedCount : pageRows.length - scopeRows.length) > 0
         ? html`<p class="hidden-note">
-            ${t("plan.hidden", { skipped: skippedCount, undecided: undecidedCount })}${" "}
+            ${decidedRun ? t("plan.hidden", { skipped: skippedCount, undecided: undecidedCount }) : t("plan.hiddenRange", { n: pageRows.length - scopeRows.length })}${" "}
             <button class="link-btn" onClick=${onToggleScopeOnly}>${t("hidden.show")}</button>${" · "}
             <a class="scope-link" href=${planHashForScope(route.scope)}>${t("plan.edit")}</a>
           </p>`
         : null}
       ${suite && cardCases.length > 0
-        ? html`<${SuiteCategories} suite=${suite} testCases=${cardCases} level=${0} showIndex=${false} />`
+        ? html`<${CaseOrderContext.Provider} value=${groupByCategory(cardCases).flatMap(([, cases]) => cases.map((tc) => tc._tcId))}>
+            <${SuiteCategories} suite=${suite} testCases=${cardCases} level=${0} showIndex=${false} />
+          </${CaseOrderContext.Provider}>`
         : null}
     </section>
   `;
@@ -1598,6 +1727,18 @@ function planRange(rows: OverviewRow[], plan: Plan): OverviewRow[] {
   if (!planHasRange(plan)) return rows;
   const parts = new Set(plan.parts);
   return rows.filter((row) => row.tags.some((tag) => plan.tags.includes(tag)) || OVERVIEW_LEVELS.some((level) => parts.has(rangeKeyOf(level, row.keys[level]))));
+}
+
+/**
+ * The cases a run is to cover. Those decided Run are the scope; until one is, the range stands in
+ * for it (less any decided Skip), so choosing a range alone narrows what testers see. Null when the
+ * plan narrows nothing.
+ */
+function planScopeIds(rows: OverviewRow[], plan: Plan): Set<string> | null {
+  const decidedRun = Object.values(plan.d).includes("r");
+  if (!decidedRun && !planHasRange(plan)) return null;
+  const rangeIds = new Set(planRange(rows, plan).map((row) => row.tcId));
+  return new Set(rows.filter((row) => (decidedRun ? plan.d[row.tcId] === "r" : rangeIds.has(row.tcId) && plan.d[row.tcId] !== "s")).map((row) => row.tcId));
 }
 
 /** Hierarchy levels a range can name; sections are not a unit anyone releases by */
@@ -3130,6 +3271,7 @@ function formatRunTime(iso: string): string {
 function RunMenu({
   index,
   totalCases,
+  rows,
   onSelect,
   onStop,
   onCreate,
@@ -3139,6 +3281,7 @@ function RunMenu({
 }: {
   index: RunIndex;
   totalCases: number;
+  rows: OverviewRow[];
   onSelect: (id: string) => void;
   onStop: () => void;
   onCreate: (name: string) => void;
@@ -3210,9 +3353,10 @@ function RunMenu({
               .map((run) => {
                 const isActive = run.id === index.last;
                 const marked = recorded[run.id] ?? new Set<string>();
-                const planned = Object.entries(readPlan(run.id).d).filter(([, decision]) => decision === "r").map(([id]) => id);
+                const scope = planScopeIds(rows, readPlan(run.id));
+                const planned = scope ? rows.filter((row) => !row.inactive && scope.has(row.tcId)).map((row) => row.tcId) : [];
                 const meta =
-                  planned.length > 0
+                  scope
                     ? t("runs.metaPlan", { done: planned.filter((id) => marked.has(id)).length, total: planned.length, time: formatRunTime(run.u) })
                     : t("runs.meta", { done: marked.size, total: totalCases, time: formatRunTime(run.u) });
                 return html`<li key=${run.id} class=${"run-row" + (isActive ? " run-row-active" : "")}>
@@ -3282,6 +3426,7 @@ function AppHeader({
   runIndex,
   activeRun,
   totalCases,
+  rows,
   runMenuOpen,
   onRunMenuOpen,
   onSelectRun,
@@ -3306,6 +3451,7 @@ function AppHeader({
   runIndex: RunIndex;
   activeRun: ActiveRun | null;
   totalCases: number;
+  rows: OverviewRow[];
   runMenuOpen: boolean;
   onRunMenuOpen: (open: boolean) => void;
   onSelectRun: (id: string) => void;
@@ -3363,6 +3509,7 @@ function AppHeader({
             ? html`<${RunMenu}
                 index=${runIndex}
                 totalCases=${totalCases}
+                rows=${rows}
                 onSelect=${onSelectRun}
                 onStop=${onStopRecording}
                 onCreate=${onCreateRun}
@@ -3498,7 +3645,7 @@ function App() {
     },
     [activeRunId, sheetIds]
   );
-  const planHasRun = Object.values(plan.d).includes("r");
+  const planHasRun = Object.values(plan.d).includes("r") || planHasRange(plan);
   const [scopeOnlyPref, setScopeOnlyPref] = useState(readScopeOnly);
   const scopeOnly = planHasRun && scopeOnlyPref;
   const toggleScopeOnly = useCallback(() => {
@@ -3705,7 +3852,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}

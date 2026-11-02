@@ -752,9 +752,9 @@ body {
 }
 
 /* The name opens the case as the ID does, for the mouse; the ID button stays the one keyboard and assistive technology use */
-.plan-name { cursor: pointer; }
+.expand-name { cursor: pointer; }
 
-.plan-caret {
+.expand-caret {
   display: inline-block;
   width: 1em;
   margin-right: 2px;
@@ -762,11 +762,11 @@ body {
 }
 
 /* A case opened in place: its card sits in a table cell, so its header must not join the sticky stack */
-.plan-detail td { padding: 0 8px 8px; border-top: none; }
-.plan-detail .test-case { margin-bottom: 0; }
-.plan-detail .test-case-head { position: static; }
+.row-detail td { padding: 0 8px 8px; border-top: none; }
+.row-detail .test-case { margin-bottom: 0; }
+.row-detail .test-case-head { position: static; }
 /* Planning stays on the plan page, so the card's link to its own page is not offered, and a plan has nothing to copy per case */
-.plan-detail .test-case-actions { display: none; }
+.plan-table .row-detail .test-case-actions { display: none; }
 
 /* A section heading row has no sticky header of its own for jumpToId to nudge by, so it clears the stack here */
 .plan-table .scope-group { scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--plan-thead-h, 38px)); }
@@ -1110,6 +1110,8 @@ a.link-btn { text-decoration: none; }
 /* The actions beside the filter input shrink to icons before the input is squeezed */
 @container scope-table (max-width: 760px) {
   .filter-actions { gap: 8px; margin-left: 8px; }
+  /* The filter bar has a fixed height and cannot wrap, so the run count gives way to the input */
+  .run-progress-text { display: none; }
   .filter-actions .scope-link { display: none; }
   .filter-actions .copy-btn > span:last-child {
     position: absolute;
@@ -1142,6 +1144,8 @@ a.link-btn { text-decoration: none; }
   .scope-table .overview-method { grid-area: method; font-size: 0.8rem; color: var(--fg-muted); }
   .scope-table .overview-method::before { content: attr(data-label) ": "; }
   .scope-table .overview-tags { grid-area: tags; }
+  .scope-table .overview-row.has-result { grid-template-areas: "id name name result" "id status method tags"; }
+  .scope-table .overview-result { grid-area: result; justify-self: end; }
   .plan-table .overview-row {
     grid-template-columns: max-content max-content auto auto 1fr;
     grid-template-areas: "sel id name name name" "sel id status method tags" "sel id decision reason reason";
@@ -1899,6 +1903,21 @@ a.link-btn { text-decoration: none; }
   gap: 6px;
   font-size: 0.75rem;
   white-space: nowrap;
+}
+
+.overview-result { white-space: nowrap; }
+
+.run-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
 }
 
 .run-chip {

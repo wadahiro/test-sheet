@@ -27,6 +27,7 @@ domain → feature → test suite → section → test case. Domain and feature 
 
 ## Runs and plans
 
+- A suite page's cards are the only place marks are recorded. The table follows them through `RUN_CHANGE_EVENT` (fired by `writeRun`) and `useRunProgress`, which reads storage itself, so marking a case re-renders the table and filter bar but not the other cards. Inline-opened cases on other pages get no run context and stay read-only for the same reason.
 - A run's per-case results live under `test-sheet-run:<ns>:<run>:`, and `recordedCaseIds` counts every key there as a recorded case. Anything else a run stores (its plan: `test-sheet-plan:<ns>:<run>`) needs its own prefix, and `deleteRunData` must remove it.
 - A plan's range is a set of exact tags, never the filter's text: that text also matches names and translated labels, so it could not name the same cases twice. A case with no decision is undecided, so one added to the sheet later is seen as new rather than silently in or out. Inactive cases carry their reason in the YAML and are not decided.
 

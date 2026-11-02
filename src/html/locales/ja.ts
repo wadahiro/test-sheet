@@ -44,6 +44,7 @@ export const ja: Record<MessageKey, string> = {
   "col.location": "場所",
   "col.decision": "判断",
   "col.reason": "理由",
+  "col.result": "結果",
 
   "scope.notFound": "見つかりません。",
   "scope.backToAll": "すべてのテストケースに戻る",
@@ -57,6 +58,8 @@ export const ja: Record<MessageKey, string> = {
   "filter.showInactive": "無効なケースも表示",
   "filter.showInactiveTitle": "廃止・置き換え済み・スキップのケースは、表には常に表示されます",
   "scope.only": "対象のみ",
+  "scope.progress": "{done}/{total} 完了",
+  "scope.progressFail": "{done}/{total} 完了 · {failed} 件不合格",
   "scope.onlyTitle": "この実行の計画で「実施」にしたケースだけを表示",
   "hidden.one": "無効なケース {n} 件は下に表示していません。表には残っています。",
   "hidden.other": "無効なケース {n} 件は下に表示していません。表には残っています。",
@@ -103,6 +106,7 @@ export const ja: Record<MessageKey, string> = {
   "plan.filterAny": "すべての判断",
   "plan.filterDecided": "実施と除外",
   "plan.copyReviewTitle": "計画を Markdown でコピー（レビュアーが選定を確認するため）",
+  "plan.hiddenRange": "表示していません: 範囲外または除外 {n} 件。",
   "plan.hidden": "表示していません: 除外 {skipped} 件、未判断 {undecided} 件。",
   "plan.edit": "計画を編集",
   "plan.review.title": "テスト計画レビュー: {name}",
@@ -122,6 +126,8 @@ export const ja: Record<MessageKey, string> = {
   "guide.close": "ガイドを閉じる",
   "guide.resize": "ガイドの幅を変更",
 
+  "case.prev": "前のケース",
+  "case.next": "次のケース",
   "case.link": "このテストケースへのリンク",
   "case.tagLink": "このタグに一致するテストケースを表示",
   "case.legacyMarker": "元のマーカー: {marker}",

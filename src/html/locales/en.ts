@@ -52,6 +52,7 @@ export const en = {
   "col.location": "Location",
   "col.decision": "Decision",
   "col.reason": "Reason",
+  "col.result": "Result",
 
   // Scope pages
   "scope.notFound": "Not found.",
@@ -66,6 +67,8 @@ export const en = {
   "filter.showInactive": "Show inactive cases",
   "filter.showInactiveTitle": "Obsolete, superseded and skipped cases are always listed in the table",
   "scope.only": "In scope only",
+  "scope.progress": "{done}/{total} done",
+  "scope.progressFail": "{done}/{total} done · {failed} failed",
   "scope.onlyTitle": "Show only the cases this run's plan says to run",
   "hidden.one": "{n} inactive case is not shown below; it stays in the table.",
   "hidden.other": "{n} inactive cases are not shown below; they stay in the table.",
@@ -112,6 +115,7 @@ export const en = {
   "plan.filterAny": "Any decision",
   "plan.filterDecided": "Run or Skip",
   "plan.copyReviewTitle": "Copy the plan as Markdown, for a reviewer to check the selection",
+  "plan.hiddenRange": "Not shown: {n} outside the range or skipped.",
   "plan.hidden": "Not shown: {skipped} skipped, {undecided} undecided.",
   "plan.edit": "Edit plan",
   "plan.review.title": "Test plan review: {name}",
@@ -133,6 +137,8 @@ export const en = {
   "guide.resize": "Resize guide",
 
   // Test case card
+  "case.prev": "Previous case",
+  "case.next": "Next case",
   "case.link": "Link to this test case",
   "case.tagLink": "Show test cases matching this tag",
   "case.legacyMarker": "Original marker: {marker}",
