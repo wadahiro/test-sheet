@@ -64,14 +64,12 @@ export const en = {
   "filter.placeholder": "🔍 Filter by ID, name, section, status, method, or tag",
   "filter.none": "No matches",
   "filter.byTag": "Filter by this tag",
-  "filter.showInactive": "Show inactive cases",
-  "filter.showInactiveTitle": "Obsolete, superseded and skipped cases are always listed in the table",
   "scope.only": "In scope only",
+  "scope.expandAll": "Expand all",
+  "scope.collapseAll": "Collapse all",
   "scope.progress": "{done}/{total} done",
   "scope.progressFail": "{done}/{total} done · {failed} failed",
   "scope.onlyTitle": "Show only the cases this run's plan says to run",
-  "hidden.one": "{n} inactive case is not shown below; it stays in the table.",
-  "hidden.other": "{n} inactive cases are not shown below; they stay in the table.",
   "hidden.show": "Show",
 
   // Planning a run: which cases it covers, and why the others are left out

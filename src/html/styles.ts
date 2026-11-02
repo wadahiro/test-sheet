@@ -767,6 +767,34 @@ body {
 .row-detail .test-case-head { position: static; }
 /* Planning stays on the plan page, so the card's link to its own page is not offered, and a plan has nothing to copy per case */
 .plan-table .row-detail .test-case-actions { display: none; }
+.plan-table .row-detail .test-case-head { position: static; }
+
+/*
+ * On a scope page a case opens below its row and is recorded there, so a long case keeps its header
+ * (result chip, Previous / Next) in view. It sticks under the filter bar and the table head, and is
+ * not on the level stack: its top is that of the table, not of a section header.
+ */
+.scope-table:not(.plan-table) { --scope-thead-h: 38px; }
+.scope-table:not(.plan-table) .row-detail .test-case-head.sticky-header {
+  position: sticky;
+  top: calc(var(--stick-top) + var(--filter-h) + var(--scope-thead-h));
+  z-index: 10;
+}
+/* Jump targets (a section's heading row, a closed case's row) clear the same stack */
+.scope-table:not(.plan-table) .scope-group,
+.scope-table:not(.plan-table) .overview-row {
+  scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--scope-thead-h));
+}
+.scope-group-copy { float: right; margin: -3px 0; }
+
+.full-scope-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+.full-scope-bar .hidden-note { margin: 0; }
 
 /* A section heading row has no sticky header of its own for jumpToId to nudge by, so it clears the stack here */
 .plan-table .scope-group { scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--plan-thead-h, 38px)); }
@@ -1123,6 +1151,7 @@ a.link-btn { text-decoration: none; }
 }
 
 @container scope-table (max-width: 600px) {
+  .scope-table:not(.plan-table) { --scope-thead-h: 0px; }
   .scope-table, .scope-table tbody, .scope-table tr, .scope-table td, .scope-table th { display: block; }
   /* Kept for assistive technology, hidden visually */
   .scope-table { border-top: 1px solid var(--border); }

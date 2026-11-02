@@ -55,14 +55,12 @@ export const ja: Record<MessageKey, string> = {
   "filter.placeholder": "🔍 ID、名前、セクション、状態、方法、タグで絞り込み",
   "filter.none": "該当なし",
   "filter.byTag": "このタグで絞り込む",
-  "filter.showInactive": "無効なケースも表示",
-  "filter.showInactiveTitle": "廃止・置き換え済み・スキップのケースは、表には常に表示されます",
   "scope.only": "対象のみ",
+  "scope.expandAll": "すべて開く",
+  "scope.collapseAll": "すべて閉じる",
   "scope.progress": "{done}/{total} 完了",
   "scope.progressFail": "{done}/{total} 完了 · {failed} 件不合格",
   "scope.onlyTitle": "この実行の計画で「実施」にしたケースだけを表示",
-  "hidden.one": "無効なケース {n} 件は下に表示していません。表には残っています。",
-  "hidden.other": "無効なケース {n} 件は下に表示していません。表には残っています。",
   "hidden.show": "表示する",
 
   // 実行の計画: 何を対象にするか、対象外にした理由

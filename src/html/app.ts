@@ -259,8 +259,16 @@ const RunContext = createContext<ActiveRun | null>(null);
 /** Fired after every write of a case's marks, so the table can show progress without the cards being re-rendered for it */
 const RUN_CHANGE_EVENT = "test-sheet-run-change";
 
-/** The cases a page's cards show, in the order they are laid out, for stepping from one to the next */
-const CaseOrderContext = createContext<string[] | null>(null);
+/**
+ * The cases the page lists, in table order, and a way to open one of them and scroll to it. Stepping
+ * stays on the page (no hash change), so Previous / Next never carry the tester to another scope.
+ */
+interface CaseNav {
+  order: string[];
+  go: (tcId: string) => void;
+}
+
+const CaseNavContext = createContext<CaseNav | null>(null);
 
 type StepResult = "" | "p" | "f";
 
@@ -834,10 +842,10 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   const activeRun = useContext(RunContext);
   const run = useCaseRun(tc, activeRun);
   const outcome = run ? caseOutcome(run.results) : "none";
-  const order = useContext(CaseOrderContext);
-  const position = run && order ? order.indexOf(tc._tcId) : -1;
-  const prevId = position > 0 && order ? order[position - 1] : null;
-  const nextId = position >= 0 && order && position < order.length - 1 ? order[position + 1] : null;
+  const nav = useContext(CaseNavContext);
+  const position = run && nav ? nav.order.indexOf(tc._tcId) : -1;
+  const prevId = position > 0 && nav ? nav.order[position - 1] : null;
+  const nextId = position >= 0 && nav && position < nav.order.length - 1 ? nav.order[position + 1] : null;
   const hasShots = !!run && Object.values(run.images).some((list) => list.length > 0);
   const inactive = isInactive(tc);
   const note = inactiveNote(tc);
@@ -865,10 +873,10 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           : null}
         <span class="test-case-actions">
           ${position >= 0
-            ? html`<button class="icon-btn" disabled=${prevId === null} title=${t("case.prev")} aria-label=${t("case.prev")} onClick=${() => prevId && goToTestCase(prevId)}>
+            ? html`<button class="icon-btn" disabled=${prevId === null} title=${t("case.prev")} aria-label=${t("case.prev")} onClick=${() => prevId && nav?.go(prevId)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" /></svg>
                 </button>
-                <button class="icon-btn" disabled=${nextId === null} title=${t("case.next")} aria-label=${t("case.next")} onClick=${() => nextId && goToTestCase(nextId)}>
+                <button class="icon-btn" disabled=${nextId === null} title=${t("case.next")} aria-label=${t("case.next")} onClick=${() => nextId && nav?.go(nextId)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
                 </button>`
             : null}
@@ -1045,6 +1053,7 @@ function IndexRow({
   plan,
   expand,
   result,
+  anchorId,
 }: {
   row: IndexRowData;
   onTag?: (tag: string) => void;
@@ -1053,6 +1062,8 @@ function IndexRow({
   expand?: RowExpand;
   /** Present (even as null, for a case with no marks) when the table has a result column */
   result?: CaseProgress | null;
+  /** Makes the row a jump target while its case is closed; an open case's card carries the id instead */
+  anchorId?: string;
 }) {
   const toggle: RowExpand | undefined = plan ? { open: plan.open, onToggle: plan.onToggleOpen } : expand;
   const decisionButton = (decision: Decision, label: string) => html`<button
@@ -1062,6 +1073,7 @@ function IndexRow({
   >${label}</button>`;
   return html`
     <tr
+      id=${anchorId}
       class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "") + (result !== undefined ? " has-result" : "")}
       onClick=${toggle ? undefined : () => goToTestCase(row.tcId)}
     >
@@ -1470,6 +1482,7 @@ function ScopeTable({
   query,
   plan,
   planSelect,
+  expand,
 }: {
   rows: OverviewRow[];
   depth: number;
@@ -1477,11 +1490,10 @@ function ScopeTable({
   query: string;
   plan?: (row: OverviewRow) => PlanCells;
   planSelect?: PlanSelect;
+  /** Which cases are open below their rows, held by the page so its filter bar can open or close them all */
+  expand?: { isOpen: (tcId: string) => boolean; toggle: (tcId: string) => void };
 }) {
   const progress = useRunProgress(rows, !plan);
-  // Cases open in place only where no cards sit below to jump to; a suite's own page keeps its cards the one place to record
-  const expandable = !plan && depth < OVERVIEW_LEVELS.length - 1;
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : progress ? [...indexColumns(), t("col.result")] : indexColumns();
   const span = columns.length + (plan ? 1 : 0);
   const tickState = (ids: string[]) => {
@@ -1513,7 +1525,7 @@ function ScopeTable({
           const groupHref = plan ? PLAN_HASH + sectionHash(row.idPrefix, row.labels.category).replace(/^#/, "") : sectionHash(row.idPrefix, row.labels.category);
           return html`
             ${startsGroup
-              ? html`<tr key=${"group:" + row.keys.category} class="scope-group" id=${plan ? categoryAnchorId(row.idPrefix, row.labels.category) : undefined}>
+              ? html`<tr key=${"group:" + row.keys.category} class="scope-group" id=${categoryAnchorId(row.idPrefix, row.labels.category)}>
                   <th colspan=${span}>
                     ${plan && planSelect
                       ? (() => {
@@ -1523,6 +1535,14 @@ function ScopeTable({
                         })()
                       : null}
                     <a href=${groupHref}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
+                    ${plan
+                      ? null
+                      : html`<span class="scope-group-copy"
+                          ><${CopyButton}
+                            iconOnly=${true}
+                            title=${t("copy.section")}
+                            getText=${() => categoryToMarkdown(row.labels.category, rows.filter((other) => other.keys.category === row.keys.category).map((other) => other.tc))}
+                        /></span>`}
                   </th>
                 </tr>`
               : null}
@@ -1533,23 +1553,16 @@ function ScopeTable({
               query=${query}
               plan=${cells}
               result=${progress ? (progress.get(row.tcId) ?? null) : undefined}
-              expand=${expandable
-                ? {
-                    open: expanded.has(row.tcId),
-                    onToggle: () =>
-                      setExpanded((current) => {
-                        const next = new Set(current);
-                        if (!next.delete(row.tcId)) next.add(row.tcId);
-                        return next;
-                      }),
-                  }
-                : undefined}
+              anchorId=${expand && !expand.isOpen(row.tcId) ? testCaseAnchorId(row.tcId) : undefined}
+              expand=${expand ? { open: expand.isOpen(row.tcId), onToggle: () => expand.toggle(row.tcId) } : undefined}
             />
-            ${cells?.open || (expandable && expanded.has(row.tcId))
+            ${cells?.open || expand?.isOpen(row.tcId)
               ? html`<tr key=${"detail:" + row.tcId} class="row-detail">
                   <td colspan=${span}>
                     <div class="cards">
-                      <${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${0} /></${RunContext.Provider}>
+                      ${plan
+                        ? html`<${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${4} /></${RunContext.Provider}>`
+                        : html`<${TestCaseCard} tc=${row.tc} level=${4} />`}
                     </div>
                   </td>
                 </tr>`
@@ -1581,8 +1594,25 @@ function CaseCountLabel({ shown, total, filtered }: { shown: number; total: numb
 }
 
 /**
- * The page for one node of the tree: its cases as a table, and for a suite the guide and the
- * case cards below it. The filter narrows the table and, on a suite, the cards with the same rule.
+ * What a run's plan keeps off a page, and a way back. The counts say why: skipped and undecided cases
+ * once something is decided Run, otherwise whatever lies outside the range.
+ */
+function ScopeNote({ pageRows, shownCount, plan, onShowAll, editHref }: { pageRows: OverviewRow[]; shownCount: number; plan: Plan; onShowAll: () => void; editHref: string }) {
+  const decidedRun = Object.values(plan.d).includes("r");
+  const skipped = pageRows.filter((row) => plan.d[row.tcId] === "s").length;
+  const undecided = pageRows.filter((row) => !row.inactive && !plan.d[row.tcId]).length;
+  const outside = pageRows.length - shownCount;
+  if ((decidedRun ? skipped + undecided : outside) <= 0) return null;
+  return html`<p class="hidden-note">
+    ${decidedRun ? t("plan.hidden", { skipped, undecided }) : t("plan.hiddenRange", { n: outside })}${" "}
+    <button class="link-btn" onClick=${onShowAll}>${t("hidden.show")}</button>${" · "}
+    <a class="scope-link" href=${editHref}>${t("plan.edit")}</a>
+  </p>`;
+}
+
+/**
+ * The page for one node of the tree: its cases as a table, where each case opens below its row and
+ * is recorded in place. The filter narrows the table with the same rule that decides what is shown.
  */
 function ScopePage({
   route,
@@ -1592,8 +1622,6 @@ function ScopePage({
   onQueryChange,
   guideOpen,
   onToggleGuide,
-  showInactive,
-  onToggleInactive,
   plan,
   planHasRun,
   scopeOnly,
@@ -1606,14 +1634,34 @@ function ScopePage({
   onQueryChange: (query: string) => void;
   guideOpen: boolean;
   onToggleGuide: () => void;
-  showInactive: boolean;
-  onToggleInactive: () => void;
   plan: Plan;
   /** The run's plan names cases to run or a range, so there is a list to narrow the page to */
   planHasRun: boolean;
   scopeOnly: boolean;
   onToggleScopeOnly: () => void;
 }) {
+  // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
+  const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
+  const pendingJump = useRef<string | null>(null);
+  const target = route.target;
+  const isOpen = (tcId: string) => opened.get(tcId) ?? (target !== null && testCaseAnchorId(tcId) === target);
+  const toggleCase = (tcId: string) => setOpened((current) => new Map(current).set(tcId, !isOpen(tcId)));
+  // A link to a case the reader had closed opens it again
+  useEffect(() => {
+    if (!target) return;
+    setOpened((current) => {
+      const next = new Map(current);
+      for (const id of current.keys()) if (testCaseAnchorId(id) === target) next.delete(id);
+      return next;
+    });
+  }, [route.hash]);
+  // Runs once the opened case is in the DOM, where jumping to it can measure its sticky header
+  useEffect(() => {
+    if (!pendingJump.current) return;
+    jumpToId(testCaseAnchorId(pendingJump.current));
+    pendingJump.current = null;
+  });
+
   if (!resolved) {
     return html`<p class="empty">${t("scope.notFound")} <a href=${OVERVIEW_HASH}>${t("scope.backToAll")}</a></p>`;
   }
@@ -1624,28 +1672,21 @@ function ScopePage({
   const { rowKey } = resolved;
   const pageRows = rowKey ? rows.filter((row) => row.keys[rowKey.level] === rowKey.value) : rows;
   // The case the route points at stays, so a link to a case outside the plan still lands on it
-  // Cases decided Run are the scope; until one is, the range stands in for it, so choosing a range alone narrows the run pages
-  const decidedRun = Object.values(plan.d).includes("r");
   const scopeIds = planScopeIds(rows, plan);
   const scopeRows = scopeOnly && scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
-  const skippedCount = pageRows.filter((row) => plan.d[row.tcId] === "s").length;
-  const undecidedCount = pageRows.filter((row) => !row.inactive && !plan.d[row.tcId]).length;
   const trimmedQuery = query.trim();
   const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
-  const visibleIds = new Set(visibleRows.map((row) => row.tcId));
   const suite = route.scope.kind === "suite" ? resolved.suites[0] : null;
   const hasGuide = !!suite?.guideHtml;
-  const hasInactive = !!suite?.testCases.some(isInactive);
-  // Inactive cases stay in the table, where coverage is read; their cards are only noise for whoever
-  // runs the suite. A case the route points at is always shown, so a table row never opens onto nothing.
-  const cardCases = suite
-    ? suite.testCases.filter(
-        (tc) =>
-          visibleIds.has(tc._tcId) &&
-          (showInactive || !isInactive(tc) || testCaseAnchorId(tc._tcId) === route.target)
-      )
-    : [];
-  const hiddenCount = suite ? suite.testCases.filter((tc) => visibleIds.has(tc._tcId)).length - cardCases.length : 0;
+  const allOpen = visibleRows.length > 0 && visibleRows.every((row) => isOpen(row.tcId));
+  const setAll = (open: boolean) => setOpened(new Map(visibleRows.map((row) => [row.tcId, open])));
+  const nav: CaseNav = {
+    order: visibleRows.map((row) => row.tcId),
+    go: (tcId) => {
+      pendingJump.current = tcId;
+      setOpened((current) => new Map(current).set(tcId, true));
+    },
+  };
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
@@ -1658,12 +1699,6 @@ function ScopePage({
             value=${query}
             onInput=${(e: Event) => onQueryChange((e.target as HTMLInputElement).value)}
           />
-          ${hasInactive
-            ? html`<label class="filter-toggle" title=${t("filter.showInactiveTitle")}>
-                <input type="checkbox" checked=${showInactive} onChange=${onToggleInactive} />
-                <span class="filter-toggle-text">${t("filter.showInactive")}</span>
-              </label>`
-            : null}
           ${planHasRun
             ? html`<label class="filter-toggle" title=${t("scope.onlyTitle")}>
                 <input type="checkbox" checked=${scopeOnly} onChange=${onToggleScopeOnly} />
@@ -1674,6 +1709,12 @@ function ScopePage({
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
             <${RunProgress} rows=${visibleRows} />
             <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== ""} />
+            ${visibleRows.length > 0
+              ? html`<button class="copy-btn" title=${allOpen ? t("scope.collapseAll") : t("scope.expandAll")} onClick=${() => setAll(!allOpen)}>
+                  <span aria-hidden="true">${allOpen ? "▾" : "▸"}</span>
+                  <span>${allOpen ? t("scope.collapseAll") : t("scope.expandAll")}</span>
+                </button>`
+              : null}
             ${hasGuide
               ? html`<button
                   class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
@@ -1693,25 +1734,12 @@ function ScopePage({
         </div>
         ${visibleRows.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
-          : html`<${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} />`}
+          : html`<${CaseNavContext.Provider} value=${nav}>
+              <${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} expand=${{ isOpen, toggle: toggleCase }} />
+            </${CaseNavContext.Provider}>`}
       </div>
-      ${hiddenCount > 0
-        ? html`<p class="hidden-note">
-            ${tn("hidden", hiddenCount)}${" "}
-            <button class="link-btn" onClick=${onToggleInactive}>${t("hidden.show")}</button>
-          </p>`
-        : null}
-      ${scopeOnly && (decidedRun ? skippedCount + undecidedCount : pageRows.length - scopeRows.length) > 0
-        ? html`<p class="hidden-note">
-            ${decidedRun ? t("plan.hidden", { skipped: skippedCount, undecided: undecidedCount }) : t("plan.hiddenRange", { n: pageRows.length - scopeRows.length })}${" "}
-            <button class="link-btn" onClick=${onToggleScopeOnly}>${t("hidden.show")}</button>${" · "}
-            <a class="scope-link" href=${planHashForScope(route.scope)}>${t("plan.edit")}</a>
-          </p>`
-        : null}
-      ${suite && cardCases.length > 0
-        ? html`<${CaseOrderContext.Provider} value=${groupByCategory(cardCases).flatMap(([, cases]) => cases.map((tc) => tc._tcId))}>
-            <${SuiteCategories} suite=${suite} testCases=${cardCases} level=${0} showIndex=${false} />
-          </${CaseOrderContext.Provider}>`
+      ${scopeOnly && scopeIds
+        ? html`<${ScopeNote} pageRows=${pageRows} shownCount=${scopeRows.length} plan=${plan} onShowAll=${onToggleScopeOnly} editHref=${planHashForScope(route.scope)} />`
         : null}
     </section>
   `;
@@ -3052,24 +3080,6 @@ function LanguageMenu({ current, onChange }: { current: string; onChange: (code:
   `;
 }
 
-const SHOW_INACTIVE_STORAGE_KEY = "test-sheet-show-inactive";
-
-function readShowInactive(): boolean {
-  try {
-    return localStorage.getItem(SHOW_INACTIVE_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeShowInactive(show: boolean) {
-  try {
-    localStorage.setItem(SHOW_INACTIVE_STORAGE_KEY, show ? "1" : "0");
-  } catch {
-    // Blocked storage (e.g. over file://) just means the choice is not remembered
-  }
-}
-
 const SCOPE_ONLY_STORAGE_KEY = "test-sheet-in-scope-only";
 
 /** On unless turned off: a plan that says what to run is there to narrow the pages */
@@ -3621,7 +3631,6 @@ function App() {
   );
   useEffect(() => writeFilters(filters), [filters]);
   const [guideOpen, setGuideOpen] = useState(readGuideOpen);
-  const [showInactive, setShowInactive] = useState(readShowInactive);
   const [runIndex, setRunIndex] = useState(readRunIndex);
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const activeRun = useMemo<ActiveRun | null>(() => {
@@ -3812,12 +3821,6 @@ function App() {
     return () => window.removeEventListener("storage", onStorage);
   }, [activeRunId]);
 
-  const toggleInactive = useCallback(() => {
-    setShowInactive((show) => {
-      writeShowInactive(!show);
-      return !show;
-    });
-  }, []);
 
   const resetGuideWidth = useCallback(() => {
     setGuideWidth(null);
@@ -3836,7 +3839,11 @@ function App() {
     });
   }, []);
 
-  const domains = groupByDomainAndFeature(suites);
+  // The one-page read follows the plan like the tables do: with the switch on it lists only what the run covers
+  const fullScopeIds = route.mode === "full" && scopeOnly ? planScopeIds(overviewRows, plan) : null;
+  const domains = groupByDomainAndFeature(
+    fullScopeIds ? suites.map((suite) => ({ ...suite, testCases: suite.testCases.filter((tc) => fullScopeIds.has(tc._tcId)) })).filter((suite) => suite.testCases.length > 0) : suites
+  );
   const resolvedScope = route.mode !== "full" ? resolveScope(route.scope, suites) : null;
   const crumbs: Crumb[] =
     route.mode === "full"
@@ -3861,9 +3868,20 @@ function App() {
         <${NavOutline} suites=${suites} route=${route} onNavigate=${navigate} width=${navWidth} onResize=${resizeNav} planRangeCounts=${planRangeCounts} />
         <div class=${"app" + (route.mode !== "full" ? " app-scope" : "")}>
           ${route.mode === "full"
-            ? domains.length === 0
-              ? html`<p class="empty">${t("scope.noFiles")}</p>`
-              : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)
+            ? html`${planHasRun
+                  ? html`<div class="full-scope-bar">
+                      <label class="filter-toggle" title=${t("scope.onlyTitle")}>
+                        <input type="checkbox" checked=${scopeOnly} onChange=${toggleScopeOnly} />
+                        <span class="filter-toggle-text">${t("scope.only")}</span>
+                      </label>
+                      ${fullScopeIds ? html`<${ScopeNote} pageRows=${overviewRows} shownCount=${fullScopeIds.size} plan=${plan} onShowAll=${toggleScopeOnly} editHref=${PLAN_HASH} />` : null}
+                    </div>`
+                  : null}
+                <${RunContext.Provider} value=${null}>
+                  ${domains.length === 0
+                    ? html`<p class="empty">${planHasRun && scopeOnly ? t("filter.none") : t("scope.noFiles")}</p>`
+                    : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
+                </${RunContext.Provider}>`
             : route.mode === "plan"
               ? html`<${PlanPage}
                   run=${activeRun}
@@ -3884,8 +3902,6 @@ function App() {
                 onQueryChange=${setQuery}
                 guideOpen=${guidePanelOpen}
                 onToggleGuide=${() => setGuide(!guidePanelOpen)}
-                showInactive=${showInactive}
-                onToggleInactive=${toggleInactive}
                 plan=${plan}
                 planHasRun=${planHasRun}
                 scopeOnly=${scopeOnly}
