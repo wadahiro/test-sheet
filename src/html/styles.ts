@@ -822,6 +822,11 @@ body {
   .run-plan { display: none; }
 }
 
+/* Icon alone where the header is short of room: the title and aria-label still name the button */
+@media (max-width: 1100px) {
+  .guide-toggle-text { display: none; }
+}
+
 /* The name opens the case as the ID does, for the mouse; the ID button stays the one keyboard and assistive technology use */
 .expand-name { cursor: pointer; }
 
@@ -1319,6 +1324,8 @@ a.link-btn { text-decoration: none; }
   scroll-margin-top: calc(var(--stick-top) + var(--sticky-h) * var(--guide-depth, 3));
 }
 
+.guide-empty { margin: 0; padding: 16px; color: var(--fg-muted); font-size: 0.9rem; }
+
 /*
  * The guide docked beside the cases. Like .nav-outline it is a sticky column with its own scroll,
  * mirrored on the right; overscroll-behavior stops a flick at the end of the guide from carrying
@@ -1381,9 +1388,7 @@ a.link-btn { text-decoration: none; }
 }
 
 .header-btn-on,
-.guide-toggle-on,
-.header-btn-on:hover,
-.guide-toggle-on:hover {
+.header-btn-on:hover {
   background: var(--accent-bg);
   color: var(--accent);
   border-color: var(--accent);

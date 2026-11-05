@@ -133,6 +133,10 @@ export const ja: Record<MessageKey, string> = {
   "guide.show": "テストケースの横にガイドを表示",
   "guide.hide": "ガイドを隠す",
   "guide.close": "ガイドを閉じる",
+  "guide.unavailable": "ガイドはテストケース一覧の横に表示されます",
+  "guide.panelNone": "📖 ガイド",
+  "guide.none": "このテストスイートにはガイドがありません。",
+  "guide.noneHere": "ガイドはテストスイートごとに用意されます。スイートを開くとそのガイドを読めます。",
   "guide.resize": "ガイドの幅を変更",
 
   "case.prev": "前のケース",

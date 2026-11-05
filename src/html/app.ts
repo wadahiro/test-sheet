@@ -1758,8 +1758,6 @@ function ScopePage({
   rows,
   query,
   onQueryChange,
-  guideOpen,
-  onToggleGuide,
   plan,
   scoped,
 }: {
@@ -1768,8 +1766,6 @@ function ScopePage({
   rows: OverviewRow[];
   query: string;
   onQueryChange: (query: string) => void;
-  guideOpen: boolean;
-  onToggleGuide: () => void;
   plan: Plan;
   /** A run is in use, so the page lists what its plan covers; without one the whole sheet is listed */
   scoped: boolean;
@@ -1811,8 +1807,6 @@ function ScopePage({
   const shownIds = new Set(scopeRows.map((row) => row.tcId));
   const trimmedQuery = query.trim();
   const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
-  const suite = route.scope.kind === "suite" ? resolved.suites[0] : null;
-  const hasGuide = !!suite?.guideHtml;
   const allOpen = visibleRows.length > 0 && visibleRows.every((row) => isOpen(row.tcId));
   const setAll = (open: boolean) => setOpened(new Map(visibleRows.map((row) => [row.tcId, open])));
   const nav: CaseNav = {
@@ -1842,17 +1836,6 @@ function ScopePage({
               ? html`<button class="copy-btn" title=${allOpen ? t("scope.collapseAll") : t("scope.expandAll")} onClick=${() => setAll(!allOpen)}>
                   <span aria-hidden="true">${allOpen ? "▾" : "▸"}</span>
                   <span>${allOpen ? t("scope.collapseAll") : t("scope.expandAll")}</span>
-                </button>`
-              : null}
-            ${hasGuide
-              ? html`<button
-                  class=${"copy-btn guide-toggle" + (guideOpen ? " guide-toggle-on" : "")}
-                  aria-pressed=${guideOpen}
-                  title=${guideOpen ? t("guide.hide") : t("guide.show")}
-                  onClick=${onToggleGuide}
-                >
-                  <${GuideIcon} />
-                  <span>${t("guide.label")}</span>
                 </button>`
               : null}
             <${CopyButton}
@@ -2302,13 +2285,17 @@ function SuiteGuide({ suite }: { suite: SuitePageData }) {
  */
 function GuidePanel({
   suite,
+  onSuite,
   width,
   limit,
   onClose,
   onResize,
   onResetWidth,
 }: {
-  suite: SuitePageData;
+  /** The page's suite when it has a guide; absent on a page that has none */
+  suite: SuitePageData | undefined;
+  /** The page is a suite's, so a missing guide means that suite has none rather than that the page is not a suite */
+  onSuite: boolean;
   width: number;
   limit: number;
   onClose: () => void;
@@ -2325,13 +2312,15 @@ function GuidePanel({
     >
       <${Resizer} edge="start" width=${width} size=${GUIDE_SIZE} limit=${limit} label=${t("guide.resize")} onResize=${onResize} onReset=${onResetWidth} />
       <div class="guide-panel-head">
-        <span class="guide-panel-title" title=${`${suite.idPrefix}: ${suite.typeName}`}>${t("guide.panelTitle", { name: suite.typeName })}</span>
+        <span class="guide-panel-title" title=${suite ? `${suite.idPrefix}: ${suite.typeName}` : undefined}>${suite ? t("guide.panelTitle", { name: suite.typeName }) : t("guide.panelNone")}</span>
         <button class="header-btn header-btn-icon" title=${t("guide.close")} aria-label=${t("guide.close")} onClick=${onClose}>✕</button>
       </div>
       <div class="guide-panel-body" tabindex="0">
-        <div class="guide" id=${guideAnchorId(suite.idPrefix)}>
-          <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
-        </div>
+        ${suite
+          ? html`<div class="guide" id=${guideAnchorId(suite.idPrefix)}>
+              <div class="guide-body" dangerouslySetInnerHTML=${{ __html: suite.guideHtml }} />
+            </div>`
+          : html`<p class="guide-empty">${onSuite ? t("guide.none") : t("guide.noneHere")}</p>`}
       </div>
     </aside>
   `;
@@ -2939,6 +2928,11 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
 
 /** Breathing room kept above a heading when the guide panel scrolls to it */
 const GUIDE_PANEL_GAP = 12;
+
+/** Whether keys typed here belong to a field, so a single-letter shortcut must stand aside */
+function isTypingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
 
 /** Shared jump-to-ID logic, used by both NavOutline and CommandPalette. */
 function jumpToId(id: string, onDone?: () => void) {
@@ -3594,6 +3588,9 @@ function AppHeader({
   onDeleteRun,
   lang,
   onChangeLang,
+  guideOpen,
+  guideAvailable,
+  onToggleGuide,
 }: {
   /** Where the reader is, outermost first; the last is the page and is not a link */
   crumbs: Crumb[];
@@ -3611,6 +3608,10 @@ function AppHeader({
   lang: string;
   onChangeLang: (code: string) => void;
   onOpenPalette: () => void;
+  /** The guide panel is shown; it exists only beside a table page, where the button is otherwise disabled */
+  guideOpen: boolean;
+  guideAvailable: boolean;
+  onToggleGuide: () => void;
   navCollapsed: boolean;
   onToggleNav: () => void;
   runIndex: RunIndex;
@@ -3696,6 +3697,18 @@ function AppHeader({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>`
           : null}
+        <button
+          class=${"header-btn guide-toggle" + (guideOpen ? " header-btn-on" : "")}
+          aria-pressed=${guideOpen}
+          disabled=${!guideAvailable}
+          title=${!guideAvailable ? t("guide.unavailable") : `${guideOpen ? t("guide.hide") : t("guide.show")} (G)`}
+          aria-label=${t("guide.label")}
+          aria-keyshortcuts="g"
+          onClick=${onToggleGuide}
+        >
+          <${GuideIcon} />
+          <span class="guide-toggle-text">${t("guide.label")}</span>
+        </button>
         <button class="header-btn" title=${t("header.searchTitle")} onClick=${onOpenPalette}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <span>${t("header.search")}</span>
@@ -3840,15 +3853,12 @@ function App() {
     route.mode === "table" && route.scope.kind === "suite"
       ? suites.find((suite) => suite.idPrefix === (route.scope as { idPrefix: string }).idPrefix && suite.guideHtml)
       : undefined;
-  /**
-   * The guide stays on screen when the reader moves to a page that has none, so it can be read
-   * while going on to other cases or suites. It switches when another page brings its own.
-   */
-  const [lastGuideId, setLastGuideId] = useState<string | null>(null);
-  const guideSuite = pageGuideSuite ?? suites.find((suite) => suite.idPrefix === lastGuideId);
+  // Only the page's own suite's guide is ever shown. The panel itself stays while it is wanted, saying so on a page without a guide, so moving about does not make it come and go
+  const guideSuite = pageGuideSuite;
   const routeTargetsGuide = !!pageGuideSuite && !!route.target?.startsWith(`suite-${pageGuideSuite.idPrefix}-guide`);
+  const guideAvailable = route.mode === "table";
   // Derived rather than set in an effect, so the panel is already in the DOM when the route's scroll runs
-  const guidePanelOpen = !!guideSuite && (guideOpen || (routeTargetsGuide && guideDismissedOn !== route.hash));
+  const guidePanelOpen = guideAvailable && (guideOpen || (routeTargetsGuide && guideDismissedOn !== route.hash));
   const spaceBesideNav = viewportWidth - (navCollapsed ? 0 : navWidth);
   const guideLimit = Math.max(GUIDE_SIZE.min, spaceBesideNav - MAIN_MIN_WIDTH);
   const guideShownWidth = clampWidth(GUIDE_SIZE, guideWidth ?? Math.round(spaceBesideNav / 2), guideLimit);
@@ -3860,10 +3870,6 @@ function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [suites]);
-
-  useEffect(() => {
-    if (pageGuideSuite) setLastGuideId(pageGuideSuite.idPrefix);
-  }, [pageGuideSuite?.idPrefix]);
 
   // Runs after the new page is in the DOM, so the scroll target exists
   const jumpAfterRender = useRef<Route | null>(null);
@@ -3917,6 +3923,10 @@ function App() {
     [route.hash]
   );
 
+  // Null where there is no guide panel to toggle, so the key is left alone there
+  const toggleGuideRef = useRef<(() => void) | null>(null);
+  toggleGuideRef.current = guideAvailable && !paletteOpen ? () => setGuide(!guidePanelOpen) : null;
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -3924,6 +3934,9 @@ function App() {
         setPaletteOpen(true);
       } else if (e.key === "Escape") {
         setPaletteOpen(false);
+      } else if (e.key === "g" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && toggleGuideRef.current) {
+        e.preventDefault();
+        toggleGuideRef.current();
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -4058,7 +4071,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} planHash=${planHashForScope(route.scope)} onCancelPlan=${planning && activeRun ? cancelPlanning : null} startAll=${startAll} onStart=${startTesting} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} planHash=${planHashForScope(route.scope)} onCancelPlan=${planning && activeRun ? cancelPlanning : null} startAll=${startAll} onStart=${startTesting} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} guideOpen=${guidePanelOpen} guideAvailable=${guideAvailable} onToggleGuide=${() => setGuide(!guidePanelOpen)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
@@ -4093,15 +4106,14 @@ function App() {
                 rows=${overviewRows}
                 query=${query}
                 onQueryChange=${setQuery}
-                guideOpen=${guidePanelOpen}
-                onToggleGuide=${() => setGuide(!guidePanelOpen)}
                 plan=${plan}
                 scoped=${activeRun !== null}
               />`}
         </div>
-        ${guidePanelOpen && guideSuite
+        ${guidePanelOpen
           ? html`<${GuidePanel}
               suite=${guideSuite}
+              onSuite=${route.scope.kind === "suite"}
               width=${guideShownWidth}
               limit=${guideLimit}
               onClose=${() => setGuide(false)}

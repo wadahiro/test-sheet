@@ -143,6 +143,10 @@ export const en = {
   "guide.show": "Show the guide beside the test cases",
   "guide.hide": "Hide the guide",
   "guide.close": "Close the guide",
+  "guide.unavailable": "The guide is shown beside a list of test cases",
+  "guide.panelNone": "📖 Guide",
+  "guide.none": "This test suite has no guide.",
+  "guide.noneHere": "A guide belongs to a test suite. Open a suite to read its guide.",
   "guide.resize": "Resize guide",
 
   // Test case card
