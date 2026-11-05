@@ -174,8 +174,16 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
   // Across every suite, since a case may point at one in another suite
   const caseReferences = caseReferenceRule(suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean));
 
+  // A feature holding one suite would show the same thing twice (feature, then suite), so the two fold into one node
+  const suitesPerFeature = new Map<string, number>();
+  for (const suite of suites) {
+    const key = `${suite.domain}\u0000${suite.feature}`;
+    suitesPerFeature.set(key, (suitesPerFeature.get(key) ?? 0) + 1);
+  }
+
   const pageSuites = await Promise.all(
     suites.map(async (suite) => {
+      const folded = suitesPerFeature.get(`${suite.domain}\u0000${suite.feature}`) === 1;
       const idPrefix = suite.metadata.id_prefix;
       // The suite's own rules come first, so where two match the same text its more specific one wins
       const autolinks = [...caseReferences, ...suite.autolinks, ...globalAutolinks];
@@ -188,7 +196,9 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         domain: suite.domain,
         domainLabel: suite.domainLabel,
         feature: suite.feature,
-        featureLabel: suite.featureLabel,
+        // Without a README heading the label is just the directory name, which the suite's own name describes better
+        featureLabel: folded && suite.featureLabel === suite.feature ? suite.metadata.type_name : suite.featureLabel,
+        folded,
         typeName: suite.metadata.type_name,
         idPrefix,
         testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase(tc, renderers))),

@@ -14,6 +14,8 @@ Renders `testcases.yaml` files into one browsable, self-contained HTML page. Bun
 
 domain → feature → test suite → section → test case. Domain and feature are the first two path segments under the scan root; a suite is one `testcases.yaml`; a section is a test case's `category`. A `README.md` in a domain/feature directory supplies its label from the first `# Heading`.
 
+A feature with exactly one suite is folded (`SuitePageData.folded`, set in `generate.ts`): navigation, breadcrumb, search and Markdown show one `domain › name` node, named by the README heading or else the suite's `type_name`. The node's page is the suite scope, and `#/f/<domain>/<feature>` resolves to it in `parseRoute`, so the feature hash survives a second suite arriving.
+
 `loadTestCases()` in `testCases.ts` is the single source of truth for the YAML schema — read it there, not from docs.
 
 ## Layout invariants

@@ -349,26 +349,55 @@ body {
 }
 
 .nav-outline-feature .nav-outline-item {
-  padding-left: 12px;
+  padding-left: 20px;
   font-weight: 500;
   font-size: 0.9rem;
 }
 
 .nav-outline-suite .nav-outline-item {
-  padding-left: 24px;
+  padding-left: 32px;
   font-weight: 400;
   font-size: 0.85rem;
 }
 
 .nav-outline-guide .nav-outline-item {
-  padding-left: 36px;
+  padding-left: 44px;
   font-style: italic;
   color: var(--fg-muted);
 }
 
 .nav-outline-category .nav-outline-item {
-  padding-left: 36px;
+  padding-left: 44px;
   font-weight: 400;
+}
+
+/*
+ * Vertical rules show what hangs under what: one per ancestor level, at the ancestor's text indent
+ * plus a small step, painted behind the buttons so hover and current backgrounds cover them.
+ */
+.nav-outline li {
+  --rule: linear-gradient(var(--border), var(--border));
+}
+
+.nav-outline-feature {
+  background: var(--rule) 14px 0 / 1px 100% no-repeat;
+}
+
+.nav-outline-suite,
+.nav-outline-folded.nav-outline-guide,
+.nav-outline-folded.nav-outline-category {
+  background: var(--rule) 14px 0 / 1px 100% no-repeat, var(--rule) 26px 0 / 1px 100% no-repeat;
+}
+
+.nav-outline-guide:not(.nav-outline-folded),
+.nav-outline-category:not(.nav-outline-folded) {
+  background: var(--rule) 14px 0 / 1px 100% no-repeat, var(--rule) 26px 0 / 1px 100% no-repeat, var(--rule) 38px 0 / 1px 100% no-repeat;
+}
+
+/* A folded suite's node is a feature-level row, so what hangs under it sits one step in from it, not two */
+.nav-outline-folded.nav-outline-guide .nav-outline-item,
+.nav-outline-folded.nav-outline-category .nav-outline-item {
+  padding-left: 32px;
 }
 
 .app {

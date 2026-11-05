@@ -69,6 +69,8 @@ interface SuitePageData {
   /** Human-readable name from the feature's README.md heading (falls back to feature) */
   featureLabel: string;
   typeName: string;
+  /** The only suite of its feature: the two levels are one node, named by `featureLabel` */
+  folded: boolean;
   idPrefix: string;
   testCases: TestCase[];
   guideHtml: string;
@@ -169,7 +171,7 @@ function categoryToMarkdown(category: string, testCases: TestCase[], headingLeve
 function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string {
   const grouped = groupByCategory(suite.testCases);
   const lines = [
-    `${"#".repeat(headingLevel)} ${t("md.suiteTitle", { prefix: suite.idPrefix, type: suite.typeName })}`,
+    `${"#".repeat(headingLevel)} ${suite.folded ? suite.featureLabel : t("md.suiteTitle", { prefix: suite.idPrefix, type: suite.typeName })}`,
     "",
     `> ${t("md.caseCount", { count: suite.testCases.length })}`,
     "",
@@ -1305,6 +1307,14 @@ interface OverviewRow {
   keys: Record<OverviewLevel, string>;
 }
 
+/** The row's labels from `depth` down, without repeating a name a folded feature and suite share */
+function labelPath(row: OverviewRow, depth: number): string {
+  return OVERVIEW_LEVELS.slice(depth)
+    .map((level) => row.labels[level])
+    .filter((label, i, all) => i === 0 || label !== all[i - 1])
+    .join(" › ");
+}
+
 /** Flattens every test suite into one row per test case, in document order. */
 function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
   const rows: OverviewRow[] = [];
@@ -1316,7 +1326,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
           const labels: Record<OverviewLevel, string> = {
             domain: d.domainLabel,
             feature: f.featureLabel,
-            suite: suite.typeName,
+            suite: suite.folded ? f.featureLabel : suite.typeName,
             category,
           };
           // Keyed by the full path, so an identically named feature under a different
@@ -1426,11 +1436,13 @@ function resolveScope(scope: Scope, suites: SuitePageData[]): ResolvedScope | nu
     const suite = suites.find((candidate) => candidate.idPrefix === scope.idPrefix);
     if (!suite) return null;
     return {
-      title: `${suite.idPrefix}: ${suite.typeName}`,
-      ancestors: [
-        { label: suite.domainLabel, hash: domainHash(suite.domain) },
-        { label: suite.featureLabel, hash: featureHash(suite.domain, suite.feature) },
-      ],
+      title: suite.folded ? suite.featureLabel : `${suite.idPrefix}: ${suite.typeName}`,
+      ancestors: suite.folded
+        ? [{ label: suite.domainLabel, hash: domainHash(suite.domain) }]
+        : [
+            { label: suite.domainLabel, hash: domainHash(suite.domain) },
+            { label: suite.featureLabel, hash: featureHash(suite.domain, suite.feature) },
+          ],
       anchorId: suiteAnchorId(suite.idPrefix),
       suites: [suite],
       count: suiteTestCaseCount(suite),
@@ -1556,7 +1568,7 @@ function ScopeTable({
                           return html`<${TriCheck} checked=${state.all} some=${state.some} label=${t("plan.selectSection", { name: row.labels.category })} onChange=${(on: boolean) => planSelect.onMany(ids, on)} />`;
                         })()
                       : null}
-                    <a href=${groupHref}><${Highlight} text=${OVERVIEW_LEVELS.slice(depth).map((level) => row.labels[level]).join(" › ")} query=${query} /></a>
+                    <a href=${groupHref}><${Highlight} text=${labelPath(row, depth)} query=${query} /></a>
                     ${plan
                       ? null
                       : html`<span class="scope-group-copy"
@@ -1861,7 +1873,7 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
     list.map((row) => {
       const cells = [
         row.tcId,
-        OVERVIEW_LEVELS.map((level) => row.labels[level]).join(" › "),
+        labelPath(row, 0),
         row.name,
         decisionText(row),
         row.inactive ? row.statusTitle : (plan.why[row.tcId] ?? ""),
@@ -2244,17 +2256,20 @@ function SuiteCategories({
 }
 
 function SuiteSection({ suite }: { suite: SuitePageData }) {
+  // A folded suite has no heading of its own: the feature's heading above it is the same node
   return html`
-    <section class="suite-section" id=${suiteAnchorId(suite.idPrefix)}>
-      <h1 class="suite-title sticky-header sticky-level-2">
-        <span class="suite-title-text">${suite.idPrefix}: ${suite.typeName}</span>
-        <span class="suite-title-right">
-          <span class="suite-title-count"><${CountLabel} testCases=${suite.testCases} /></span>
-          <${CopyButton} title=${t("copy.suite")} getText=${() => allTestCasesToMarkdown(suite)} />
-        </span>
-      </h1>
+    <section class="suite-section" id=${suiteAnchorId(suite.idPrefix)} style=${suite.folded ? "--guide-depth: 2" : undefined}>
+      ${suite.folded
+        ? null
+        : html`<h1 class="suite-title sticky-header sticky-level-2">
+            <span class="suite-title-text">${suite.idPrefix}: ${suite.typeName}</span>
+            <span class="suite-title-right">
+              <span class="suite-title-count"><${CountLabel} testCases=${suite.testCases} /></span>
+              <${CopyButton} title=${t("copy.suite")} getText=${() => allTestCasesToMarkdown(suite)} />
+            </span>
+          </h1>`}
       <${SuiteGuide} suite=${suite} />
-      <${SuiteCategories} suite=${suite} testCases=${suite.testCases} level=${3} showIndex=${true} />
+      <${SuiteCategories} suite=${suite} testCases=${suite.testCases} level=${suite.folded ? 2 : 3} showIndex=${true} />
     </section>
   `;
 }
@@ -2287,6 +2302,8 @@ function formatCaseCount({ active, total }: CaseCount): string {
 }
 
 function featureToMarkdown(group: FeatureGroup, headingLevel = 1): string {
+  // Its suite's heading already carries the feature's name
+  if (group.suites.length === 1 && group.suites[0].folded) return allTestCasesToMarkdown(group.suites[0], headingLevel);
   const lines = [`${"#".repeat(headingLevel)} ${group.featureLabel}`, "", `> ${t("md.caseCount", { count: formatCaseCount(featureTestCaseCount(group)) })}`, ""];
   for (const suite of group.suites) {
     lines.push(allTestCasesToMarkdown(suite, headingLevel + 1));
@@ -2383,6 +2400,8 @@ interface NavEntry {
   rangeKey?: string;
   /** Anchor of the suite this guide/section/case belongs to, so the outline can open just the active suite */
   suiteId?: string;
+  /** Belongs to a folded suite, whose node sits one level higher than a suite's, so its children indent one less */
+  folded?: boolean;
 }
 
 const KIND_LABEL_KEY: Record<NavEntry["kind"], MessageKey> = {
@@ -2430,31 +2449,50 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
       rangeKey: rangeKeyOf("domain", d.domain),
     });
     for (const f of d.features) {
-      entries.push({
-        kind: "feature",
-        id: featureAnchorId(d.domain, f.feature),
-        hash: featureHash(d.domain, f.feature),
-        label: f.featureLabel,
-        searchText: `${f.feature} ${f.featureLabel}`,
-        breadcrumb: d.domainLabel,
-        count: featureTestCaseCount(f).active,
-        rangeKey: rangeKeyOf("feature", `${d.domain}\u0000${f.feature}`),
-      });
-      for (const suite of f.suites) {
+      const folded = f.suites.length === 1 && f.suites[0].folded;
+      if (!folded) {
         entries.push({
-          kind: "suite",
-          id: suiteAnchorId(suite.idPrefix),
-          hash: suiteHash(suite.idPrefix),
-          label: suite.typeName,
-          // Not part of the display label, but lets searching by idPrefix (e.g. "CR") match the suite itself
-          searchText: `${suite.idPrefix} ${suite.typeName}`,
-          breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
-          count: suiteTestCaseCount(suite).active,
-          hasGuide: !!suite.guideHtml,
-          rangeKey: rangeKeyOf("suite", `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}`),
+          kind: "feature",
+          id: featureAnchorId(d.domain, f.feature),
+          hash: featureHash(d.domain, f.feature),
+          label: f.featureLabel,
+          searchText: `${f.feature} ${f.featureLabel}`,
+          breadcrumb: d.domainLabel,
+          count: featureTestCaseCount(f).active,
+          rangeKey: rangeKeyOf("feature", `${d.domain}\u0000${f.feature}`),
         });
+      }
+      for (const suite of f.suites) {
+        if (folded) {
+          // Takes the suite's anchor so the suite page's route and scroll tracking land on it, but keeps the feature's hash so the link survives a second suite
+          entries.push({
+            kind: "feature",
+            id: suiteAnchorId(suite.idPrefix),
+            hash: featureHash(d.domain, f.feature),
+            label: f.featureLabel,
+            searchText: `${f.feature} ${f.featureLabel} ${suite.idPrefix} ${suite.typeName}`,
+            breadcrumb: d.domainLabel,
+            count: suiteTestCaseCount(suite).active,
+            hasGuide: !!suite.guideHtml,
+            rangeKey: rangeKeyOf("feature", `${d.domain}\u0000${f.feature}`),
+          });
+        } else {
+          entries.push({
+            kind: "suite",
+            id: suiteAnchorId(suite.idPrefix),
+            hash: suiteHash(suite.idPrefix),
+            label: suite.typeName,
+            // Not part of the display label, but lets searching by idPrefix (e.g. "CR") match the suite itself
+            searchText: `${suite.idPrefix} ${suite.typeName}`,
+            breadcrumb: `${d.domainLabel} › ${f.featureLabel}`,
+            count: suiteTestCaseCount(suite).active,
+            hasGuide: !!suite.guideHtml,
+            rangeKey: rangeKeyOf("suite", `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}`),
+          });
+        }
         const suiteId = suiteAnchorId(suite.idPrefix);
-        const guideBreadcrumb = `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
+        const suitePath = folded ? `${d.domainLabel} › ${f.featureLabel}` : `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`;
+        const guideBreadcrumb = suitePath;
         if (guideDetail === "none") {
           // The sidebar leaves guides out: a guide is opened from the page it belongs to, and found by search
         } else if (guideDetail === "collapsed") {
@@ -2468,6 +2506,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
               searchText: `${suite.idPrefix} guide ${t("guide.label")} ${suite.guideText}`,
               breadcrumb: guideBreadcrumb,
               suiteId,
+              folded,
             });
           }
         } else {
@@ -2480,6 +2519,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
               searchText: `${suite.idPrefix} ${heading.text} ${heading.body}`,
               breadcrumb: guideBreadcrumb,
               suiteId,
+              folded,
             });
           });
         }
@@ -2491,9 +2531,10 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
             hash: sectionHash(suite.idPrefix, category),
             label: category,
             searchText: `${suite.idPrefix} ${category}`,
-            breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName}`,
+            breadcrumb: suitePath,
             count: cases.filter((tc) => !isInactive(tc)).length,
             suiteId,
+            folded,
             rangeKey: rangeKeyOf("category", `${d.domain}\u0000${f.feature}\u0000${suite.idPrefix}\u0000${category}`),
           });
           if (!includeTestCases) continue;
@@ -2504,7 +2545,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
               hash: testCaseHash(tc._tcId),
               label: `${tc._tcId}: ${tc.name}`,
               searchText: testCaseSearchText(tc),
-              breadcrumb: `${d.domainLabel} › ${f.featureLabel} › ${suite.typeName} › ${category}`,
+              breadcrumb: `${suitePath} › ${category}`,
               suiteId,
             });
           }
@@ -2678,7 +2719,7 @@ function NavOutline({
     route.scope.kind === "suite"
       ? suiteAnchorId(route.scope.idPrefix)
       : route.mode === "full"
-        ? currentEntry?.kind === "suite"
+        ? currentEntry && (currentEntry.kind === "suite" || suites.some((suite) => suiteAnchorId(suite.idPrefix) === currentEntry.id))
           ? currentEntry.id
           : (currentEntry?.suiteId ?? null)
         : null;
@@ -2689,7 +2730,7 @@ function NavOutline({
       <ul ref=${listRef}>
         ${visibleEntries.map(
           (entry) => html`
-            <li key=${entry.id} class=${entryKindClass(entry.kind)}>
+            <li key=${entry.id} class=${entryKindClass(entry.kind) + (entry.folded ? " nav-outline-folded" : "")}>
               <button
                 class=${"nav-outline-item" + (entry.id === highlightId ? " nav-outline-current" : "") + (inRange(entry) === 0 ? " nav-outline-empty" : "")}
                 title=${entry.label}
@@ -2768,6 +2809,9 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
     return { ...landing, scope: { kind: "domain", domain: segments[1] } };
   }
   if (segments[0] === "f" && segments.length === 3) {
+    // A feature with one suite is that suite's page; its own hash stays valid so links survive a second suite being added
+    const only = suites.filter((suite) => suite.domain === segments[1] && suite.feature === segments[2]);
+    if (only.length === 1) return { ...landing, scope: { kind: "suite", idPrefix: only[0].idPrefix } };
     return { ...landing, scope: { kind: "feature", domain: segments[1], feature: segments[2] } };
   }
   if (segments[0] === "s" && segments.length >= 2) {

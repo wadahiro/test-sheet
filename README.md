@@ -258,6 +258,10 @@ examples/
 
 If a directory has a `README.md`, its first `# Heading` is used as the display name in navigation (otherwise the directory name is used as-is).
 
+A feature holding a single `testcases.yaml` is shown as one node, `domain › name`, rather than repeating itself as
+`domain › feature › suite`. The name is the feature's README heading, or the suite's `type_name` when there is no
+README. The feature's URL (`#/f/<domain>/<feature>`) keeps working, so links survive a second suite being added.
+
 ### Embedding a guide (prerequisite knowledge)
 
 ```yaml
