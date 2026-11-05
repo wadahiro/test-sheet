@@ -46,6 +46,7 @@ export const ja: Record<MessageKey, string> = {
   "col.decision": "判断",
   "col.reason": "理由",
   "col.result": "結果",
+  "col.actions": "操作",
 
   "scope.notFound": "見つかりません。",
   "scope.backToAll": "すべてのテストケースに戻る",

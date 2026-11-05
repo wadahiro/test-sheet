@@ -559,6 +559,41 @@ body {
 }
 
 /* In the narrow table layout the toggles' labels give way (full text in the title) before the input does */
+/*
+ * Wide layout: the table is a grid, with each tbody and row a subgrid of it, because a sticky row
+ * is held by its containing block and in a real table that is the whole table: a case's row would
+ * stay pinned long after its case had scrolled past. As a grid, the containing block is the case's
+ * own tbody. The thead is dissolved so its row can be the sticky one (a sticky th would be held by
+ * a thead no taller than itself).
+ */
+@container scope-table (min-width: 601px) {
+  .scope-table:not(.plan-table) {
+    display: grid;
+    grid-template-columns: var(--scope-cols);
+  }
+  .scope-table:not(.plan-table) > thead { display: contents; }
+  .scope-table:not(.plan-table) > tbody,
+  .scope-table:not(.plan-table) > thead > tr,
+  .scope-table:not(.plan-table) > tbody > tr {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+  }
+  .scope-table:not(.plan-table) > thead > tr {
+    position: sticky;
+    top: calc(var(--stick-top) + var(--filter-h));
+    z-index: 9;
+  }
+  .scope-table:not(.plan-table) > thead > tr > th {
+    position: static;
+    border-top: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+  .scope-table:not(.plan-table) > tbody > tr > .row-detail-cell,
+  .scope-table:not(.plan-table) > tbody > tr.row-detail > td,
+  .scope-table:not(.plan-table) > tbody > tr.scope-group > th { grid-column: 1 / -1; }
+}
+
 @container scope-table (max-width: 600px) {
   .filter-toggle-text {
     max-width: 5.5rem;
@@ -797,28 +832,35 @@ body {
   color: var(--fg-muted);
 }
 
-/* A case opened in place: its card sits in a table cell, so its header must not join the sticky stack */
-.row-detail > td { padding: 0 8px 8px; border-top: none; }
-.row-detail .test-case { margin-bottom: 0; }
-.row-detail .test-case-head { position: static; }
-/* Planning stays on the plan page, so the card's link to its own page is not offered, and a plan has nothing to copy per case */
-.plan-table .row-detail .test-case-actions { display: none; }
-.plan-table .row-detail .test-case-head { position: static; }
+/*
+ * A case opened in place: each case is its own tbody, the row on top and its detail below. The
+ * detail is the card's body alone, since the row already carries the ID, name, tags and marks.
+ */
+.row-detail > td { padding: 0; border-top: none; }
+.row-detail .test-case { margin-bottom: 0; border: 0; border-radius: 0; background: transparent; }
+.case-open > .overview-row > td { background: var(--bg-subtle); }
+.case-open > .overview-row > td:first-child,
+.case-open > .row-detail > td { box-shadow: inset 3px 0 0 var(--accent); }
+.case-open > .row-detail > td { border-bottom: 1px solid var(--border); }
+.overview-actions { white-space: nowrap; text-align: right; }
+/* Empty until the case is open: the column should not claim width for buttons that are not there */
+.overview-actions:empty { padding: 0; }
 
 /*
- * On a scope page a case opens below its row and is recorded there, so a long case keeps its header
- * (result chip, Previous / Next) in view. It sticks under the filter bar and the table head, and is
- * not on the level stack: its top is that of the table, not of a section header.
+ * On a scope page a case opens below its row and is recorded there, so the row stays in view as
+ * the heading of a long case. It sticks under the filter bar and the table head (one level below
+ * the head, so the head stays on top) and, being inside the case's own tbody, lets go when the
+ * case has scrolled past. Its top is the table's, not a section header's, so it is not on the
+ * level stack.
  */
 .scope-table:not(.plan-table) { --scope-thead-h: 38px; }
-.scope-table:not(.plan-table) .row-detail .test-case-head.sticky-header {
+.scope-table:not(.plan-table) .overview-row.sticky-row {
   position: sticky;
   top: calc(var(--stick-top) + var(--filter-h) + var(--scope-thead-h));
-  z-index: 10;
+  z-index: 8;
 }
-/* Jump targets (a section's heading row, a closed case's row) clear the same stack */
-.scope-table:not(.plan-table) .scope-group,
-.scope-table:not(.plan-table) .overview-row {
+/* A section's heading row clears the same stack. A case's row does not: jumpToId nudges by its sticky top, and a margin as well would count it twice */
+.scope-table:not(.plan-table) .scope-group {
   scroll-margin-top: calc(var(--stick-top) + var(--filter-h) + var(--scope-thead-h));
 }
 .scope-group-copy { float: right; margin: -3px 0; }
@@ -1051,7 +1093,7 @@ a.link-btn { text-decoration: none; }
   border-left: 1px solid var(--border);
 }
 
-.overview-table > tbody > tr:last-child > td {
+.overview-table > tbody:last-child > tr:last-child > td {
   border-bottom: none;
 }
 
@@ -1207,7 +1249,7 @@ a.link-btn { text-decoration: none; }
     padding: 6px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .scope-table > tbody > tr:last-child { border-bottom: none; }
+  .scope-table > tbody:last-child > tr:last-child { border-bottom: none; }
   .scope-table .overview-row > td { padding: 0; border: 0; }
   .scope-table .overview-id { grid-area: id; }
   .scope-table .overview-name { grid-area: name; min-width: 0; }
@@ -1217,6 +1259,20 @@ a.link-btn { text-decoration: none; }
   .scope-table .overview-tags { grid-area: tags; }
   .scope-table .overview-row.has-result { grid-template-areas: "id name name result" "id status method tags"; }
   .scope-table .overview-result { grid-area: result; justify-self: end; }
+  .scope-table .overview-row:has(.overview-actions:not(:empty)) {
+    grid-template-areas: "id name name name" "id status method tags" "id actions actions actions";
+  }
+  .scope-table .overview-row.has-result:has(.overview-actions:not(:empty)) {
+    grid-template-areas: "id name name result" "id status method tags" "id actions actions actions";
+  }
+  .scope-table .overview-actions { grid-area: actions; justify-self: start; text-align: left; }
+  /* The row is the grid here, so it carries the fill that the cells carry in the wide layout */
+  .case-open > .overview-row { background: var(--bg-subtle); }
+  .case-open > .overview-row > td { background: none; }
+  .case-open > .overview-row > td:first-child { box-shadow: none; }
+  .case-open > .overview-row { box-shadow: inset 3px 0 0 var(--accent); }
+  .scope-table .overview-actions:empty { display: none; }
+  .scope-table > tbody > tr.row-detail { border-bottom: 1px solid var(--border); }
   .plan-table .overview-row {
     grid-template-columns: max-content max-content auto auto 1fr;
     grid-template-areas: "sel id name name name" "sel id status method tags" "sel id decision reason reason";
@@ -2258,4 +2314,19 @@ a.link-btn { text-decoration: none; }
 .sticky-header.jump-flash {
   animation-name: jump-flash-header;
 }
+
+/*
+ * A table's section row and case row paint their own cells, which would hide a flash on the row, so
+ * the cells flash instead and fade back to whatever fill they rest on.
+ */
+@keyframes jump-flash-cell {
+  0% { background: var(--flash); }
+  100% { background: var(--flash-to, transparent); }
+}
+.scope-group.jump-flash,
+.overview-row.jump-flash { animation: none; }
+.scope-group.jump-flash > th { --flash-to: var(--bg-subtle); animation: jump-flash-cell 1.2s ease-out; }
+.overview-row.jump-flash > td { animation: jump-flash-cell 1.2s ease-out; }
+.case-open > .overview-row.jump-flash > td { --flash-to: var(--bg-subtle); }
+.row-inactive.jump-flash > td { --flash-to: var(--inactive-bg); }
 `;

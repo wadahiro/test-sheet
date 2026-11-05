@@ -54,6 +54,7 @@ export const en = {
   "col.decision": "Decision",
   "col.reason": "Reason",
   "col.result": "Result",
+  "col.actions": "Actions",
 
   // Scope pages
   "scope.notFound": "Not found.",

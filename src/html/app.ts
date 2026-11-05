@@ -1,7 +1,7 @@
 // Browser-side UI (Preact + htm). Bundled by src/html/generate.ts via Bun.build()
 // and inlined into the generated HTML.
 
-import { h, render, createContext } from "preact";
+import { h, render, createContext, type ComponentChildren } from "preact";
 import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "preact/hooks";
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
@@ -861,20 +861,88 @@ function TestDataBody({ html: markup }: { html: string }) {
   return html`<div class="test-data-body" ref=${ref} onClick=${onClick} dangerouslySetInnerHTML=${{ __html: markup }} />`;
 }
 
-/** `level` is the card header's position in the stack of sticky headers above it */
-function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
+/** Previous / Next, the link to the case and its copy button: shared by a card's header and an open row */
+function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
   const activeRun = useContext(RunContext);
-  const run = useCaseRun(tc, activeRun);
-  const outcome = run ? caseOutcome(run.results) : "none";
   const nav = useContext(CaseNavContext);
   const position = run && nav ? nav.order.indexOf(tc._tcId) : -1;
   const prevId = position > 0 && nav ? nav.order[position - 1] : null;
   const nextId = position >= 0 && nav && position < nav.order.length - 1 ? nav.order[position + 1] : null;
   const hasShots = !!run && Object.values(run.images).some((list) => list.length > 0);
-  const inactive = isInactive(tc);
+  return html`<span class="test-case-actions">
+    ${position >= 0
+      ? html`<button class="icon-btn" disabled=${prevId === null} title=${t("case.prev")} aria-label=${t("case.prev")} onClick=${() => prevId && nav?.go(prevId)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" /></svg>
+          </button>
+          <button class="icon-btn" disabled=${nextId === null} title=${t("case.next")} aria-label=${t("case.next")} onClick=${() => nextId && nav?.go(nextId)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </button>`
+      : null}
+    <a class="icon-btn" href=${testCaseHash(tc._tcId)} title=${t("case.link")} aria-label=${t("case.link")}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+    </a>
+    <${CopyButton}
+      iconOnly=${true}
+      title=${hasShots ? t("copy.caseWithShots") : t("copy.case")}
+      getText=${() => testCaseToMarkdown(tc, 3, run && { ...run, runName: activeRun?.name })}
+    />
+  </span>`;
+}
+
+/**
+ * Everything of a case below its heading. A row that already shows the tags passes `tags=${false}`
+ * so they are not said twice.
+ */
+function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null; tags?: boolean }) {
   const note = inactiveNote(tc);
-  const hasMeta = !!(tc.tags && tc.tags.length > 0) || !!tc.legacy_marker || !!note;
+  const shownTags = tags ? (tc.tags ?? []) : [];
+  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note;
   const hasPreconditions = !!tc.preconditions && tc.preconditions.length > 0;
+  return html`
+    <div class="test-case-body">
+      ${hasMeta
+        ? html`<div class="test-case-meta">
+            ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
+            ${note ? html`<span class="inactive-note">${note}</span>` : null}
+            ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
+          </div>`
+        : null}
+      ${hasPreconditions || tc.testDataHtml
+        ? html`<div class="test-case-setup">
+            ${hasPreconditions
+              ? html`<div class="preconditions">
+                  <h5 class="eyebrow">${t("case.preconditions")}</h5>
+                  <ul>${tc.preconditions!.map((p, i) => html`<li key=${i}>${preconditionText(p)}</li>`)}</ul>
+                </div>`
+              : null}
+            ${tc.testDataHtml
+              ? html`<div class="test-data">
+                  <h5 class="eyebrow">${t("case.testData")}</h5>
+                  <${TestDataBody} html=${tc.testDataHtml} />
+                </div>`
+              : null}
+          </div>`
+        : null}
+      <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
+      ${tc.notesHtml
+        ? html`<aside class="notes">
+            <h5 class="eyebrow">${t("case.note")}</h5>
+            <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
+          </aside>`
+        : null}
+    </div>
+  `;
+}
+
+/**
+ * A case with its own heading band, for the one-page read where no table row stands above it.
+ * `level` is the band's position in the stack of sticky headers above it.
+ */
+function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
+  const activeRun = useContext(RunContext);
+  const run = useCaseRun(tc, activeRun);
+  const outcome = run ? caseOutcome(run.results) : "none";
+  const inactive = isInactive(tc);
 
   return html`
     <article class=${"test-case" + (inactive ? " test-case-inactive" : "")} id=${testCaseAnchorId(tc._tcId)}>
@@ -895,57 +963,9 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
               <button class="link-btn" onClick=${run.reset}>${t("chip.reset")}</button>
             </span>`
           : null}
-        <span class="test-case-actions">
-          ${position >= 0
-            ? html`<button class="icon-btn" disabled=${prevId === null} title=${t("case.prev")} aria-label=${t("case.prev")} onClick=${() => prevId && nav?.go(prevId)}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6" /></svg>
-                </button>
-                <button class="icon-btn" disabled=${nextId === null} title=${t("case.next")} aria-label=${t("case.next")} onClick=${() => nextId && nav?.go(nextId)}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-                </button>`
-            : null}
-          <a class="icon-btn" href=${testCaseHash(tc._tcId)} title=${t("case.link")} aria-label=${t("case.link")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-          </a>
-          <${CopyButton}
-            iconOnly=${true}
-            title=${hasShots ? t("copy.caseWithShots") : t("copy.case")}
-            getText=${() => testCaseToMarkdown(tc, 3, run && { ...run, runName: activeRun?.name })}
-          />
-        </span>
+        <${CaseActions} tc=${tc} run=${run} />
       </header>
-      <div class="test-case-body">
-        ${hasMeta
-          ? html`<div class="test-case-meta">
-              ${(tc.tags ?? []).map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
-              ${note ? html`<span class="inactive-note">${note}</span>` : null}
-              ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
-            </div>`
-          : null}
-        ${hasPreconditions || tc.testDataHtml
-          ? html`<div class="test-case-setup">
-              ${hasPreconditions
-                ? html`<div class="preconditions">
-                    <h5 class="eyebrow">${t("case.preconditions")}</h5>
-                    <ul>${tc.preconditions!.map((p, i) => html`<li key=${i}>${preconditionText(p)}</li>`)}</ul>
-                  </div>`
-                : null}
-              ${tc.testDataHtml
-                ? html`<div class="test-data">
-                    <h5 class="eyebrow">${t("case.testData")}</h5>
-                    <${TestDataBody} html=${tc.testDataHtml} />
-                  </div>`
-                : null}
-            </div>`
-          : null}
-        <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
-        ${tc.notesHtml
-          ? html`<aside class="notes">
-              <h5 class="eyebrow">${t("case.note")}</h5>
-              <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.notesHtml }} />
-            </aside>`
-          : null}
-      </div>
+      <${CaseBody} tc=${tc} run=${run} />
     </article>
   `;
 }
@@ -1078,6 +1098,9 @@ function IndexRow({
   expand,
   result,
   anchorId,
+  actions,
+  onReset,
+  sticky,
 }: {
   row: IndexRowData;
   onTag?: (tag: string) => void;
@@ -1088,6 +1111,12 @@ function IndexRow({
   result?: CaseProgress | null;
   /** Makes the row a jump target while its case is closed; an open case's card carries the id instead */
   anchorId?: string;
+  /** Present when the table has an actions column; null leaves the cell empty (a closed case) */
+  actions?: ComponentChildren | null;
+  /** Offered beside the chip of the open case, whose marks it clears */
+  onReset?: () => void;
+  /** Lets the row stay in view as the heading of an open case below it; a closed case's row is alone in its tbody, so it never moves */
+  sticky?: boolean;
 }) {
   const toggle: RowExpand | undefined = plan ? { open: plan.open, onToggle: plan.onToggleOpen } : expand;
   const decisionButton = (decision: Decision, label: string) => html`<button
@@ -1098,7 +1127,7 @@ function IndexRow({
   return html`
     <tr
       id=${anchorId}
-      class=${"overview-row" + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "") + (result !== undefined ? " has-result" : "")}
+      class=${"overview-row" + (sticky ? " sticky-row" : "") + (row.inactive ? " row-inactive" : "") + (plan && !row.inactive && !plan.decision ? " plan-undecided" : "") + (result !== undefined ? " has-result" : "")}
       onClick=${toggle ? undefined : () => goToTestCase(row.tcId)}
     >
       ${plan
@@ -1148,9 +1177,15 @@ function IndexRow({
       </td>
       ${result !== undefined
         ? html`<td class="overview-result" data-label=${t("col.result")}>
-            ${result && result.outcome !== "none" ? html`<span class=${`run-chip run-chip-${result.outcome}`}>${outcomeText(result.outcome, result.marked, result.total)}</span>` : null}
+            ${result && result.outcome !== "none"
+              ? html`<span class="run-status"
+                  ><span class=${`run-chip run-chip-${result.outcome}`}>${outcomeText(result.outcome, result.marked, result.total)}</span
+                  >${onReset ? html`<button class="link-btn" onClick=${onReset}>${t("chip.reset")}</button>` : null}</span
+                >`
+              : null}
           </td>`
         : null}
+      ${actions !== undefined ? html`<td class="overview-actions" onClick=${(e: Event) => e.stopPropagation()}>${actions}</td>` : null}
       ${plan
         ? html`<td class="overview-decision">
               ${row.inactive
@@ -1509,6 +1544,14 @@ function useRunProgress(rows: OverviewRow[], enabled: boolean): Map<string, Case
   }, [enabled, runId, rows, version]);
 }
 
+/**
+ * Track sizes for the scope table's grid layout, one per column of `indexColumns()` and then the
+ * optional Result and actions columns. Name takes what the others leave.
+ */
+function scopeColumnSizes(result: boolean, actions: boolean): string {
+  return ["max-content", "minmax(12rem, 1fr)", "fit-content(9rem)", "max-content", "fit-content(16rem)", ...(result ? ["max-content"] : []), ...(actions ? ["max-content"] : [])].join(" ");
+}
+
 function ScopeTable({
   rows,
   depth,
@@ -1528,8 +1571,10 @@ function ScopeTable({
   expand?: { isOpen: (tcId: string) => boolean; toggle: (tcId: string) => void };
 }) {
   const progress = useRunProgress(rows, !plan);
+  // Previous / Next, the link and copy sit in a column of their own, shown for a case that is open
+  const showActions = !plan && !!expand;
   const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : progress ? [...indexColumns(), t("col.result")] : indexColumns();
-  const span = columns.length + (plan ? 1 : 0);
+  const span = columns.length + (plan ? 1 : 0) + (showActions ? 1 : 0);
   const tickState = (ids: string[]) => {
     const ticked = ids.filter((id) => planSelect?.selected.has(id)).length;
     return { all: ids.length > 0 && ticked === ids.length, some: ticked > 0 && ticked < ids.length };
@@ -1540,7 +1585,7 @@ function ScopeTable({
   const showGroups = !(depth === OVERVIEW_LEVELS.length - 1 && sectionCount === 1);
 
   return html`
-    <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")}>
+    <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")} style=${plan ? undefined : `--scope-cols: ${scopeColumnSizes(!!progress, showActions)}`}>
       <thead>
         <tr>
           ${plan && planSelect
@@ -1549,62 +1594,118 @@ function ScopeTable({
               ? html`<th></th>`
               : null}
           ${columns.map((column) => html`<th key=${column}>${column}</th>`)}
+          ${showActions ? html`<th class="overview-actions"><span class="visually-hidden">${t("col.actions")}</span></th>` : null}
         </tr>
       </thead>
-      <tbody>
-        ${rows.map((row, i) => {
+      ${rows.map((row, i) => {
           const startsGroup = showGroups && (i === 0 || rows[i - 1].keys.category !== row.keys.category);
           const cells = plan?.(row);
           // Planning stays on the plan page: its section headings are targets here, as on a suite page
           const groupHref = plan ? PLAN_HASH + sectionHash(row.idPrefix, row.labels.category).replace(/^#/, "") : sectionHash(row.idPrefix, row.labels.category);
+          const open = !!(cells?.open || expand?.isOpen(row.tcId));
+          const rowProps = {
+            row,
+            onTag,
+            query,
+            plan: cells,
+            expand: expand ? { open, onToggle: () => expand.toggle(row.tcId) } : undefined,
+          };
           return html`
             ${startsGroup
-              ? html`<tr key=${"group:" + row.keys.category} class="scope-group" id=${categoryAnchorId(row.idPrefix, row.labels.category)}>
-                  <th colspan=${span}>
-                    ${plan && planSelect
-                      ? (() => {
-                          const ids = rows.filter((other) => other.keys.category === row.keys.category && !other.inactive).map((other) => other.tcId);
-                          const state = tickState(ids);
-                          return html`<${TriCheck} checked=${state.all} some=${state.some} label=${t("plan.selectSection", { name: row.labels.category })} onChange=${(on: boolean) => planSelect.onMany(ids, on)} />`;
-                        })()
-                      : null}
-                    <a href=${groupHref}><${Highlight} text=${labelPath(row, depth)} query=${query} /></a>
-                    ${plan
-                      ? null
-                      : html`<span class="scope-group-copy"
-                          ><${CopyButton}
-                            iconOnly=${true}
-                            title=${t("copy.section")}
-                            getText=${() => categoryToMarkdown(row.labels.category, rows.filter((other) => other.keys.category === row.keys.category).map((other) => other.tc))}
-                        /></span>`}
-                  </th>
-                </tr>`
-              : null}
-            <${IndexRow}
-              key=${row.tcId}
-              row=${row}
-              onTag=${onTag}
-              query=${query}
-              plan=${cells}
-              result=${progress ? (progress.get(row.tcId) ?? null) : undefined}
-              anchorId=${expand && !expand.isOpen(row.tcId) ? testCaseAnchorId(row.tcId) : undefined}
-              expand=${expand ? { open: expand.isOpen(row.tcId), onToggle: () => expand.toggle(row.tcId) } : undefined}
-            />
-            ${cells?.open || expand?.isOpen(row.tcId)
-              ? html`<tr key=${"detail:" + row.tcId} class="row-detail">
-                  <td colspan=${span}>
-                    <div class="cards">
+              ? html`<tbody key=${"group:" + row.keys.category}>
+                  <tr class="scope-group" id=${categoryAnchorId(row.idPrefix, row.labels.category)}>
+                    <th colspan=${span}>
+                      ${plan && planSelect
+                        ? (() => {
+                            const ids = rows.filter((other) => other.keys.category === row.keys.category && !other.inactive).map((other) => other.tcId);
+                            const state = tickState(ids);
+                            return html`<${TriCheck} checked=${state.all} some=${state.some} label=${t("plan.selectSection", { name: row.labels.category })} onChange=${(on: boolean) => planSelect.onMany(ids, on)} />`;
+                          })()
+                        : null}
+                      <a href=${groupHref}><${Highlight} text=${labelPath(row, depth)} query=${query} /></a>
                       ${plan
-                        ? html`<${RunContext.Provider} value=${null}><${TestCaseCard} tc=${row.tc} level=${4} /></${RunContext.Provider}>`
-                        : html`<${TestCaseCard} tc=${row.tc} level=${4} />`}
-                    </div>
-                  </td>
-                </tr>`
+                        ? null
+                        : html`<span class="scope-group-copy"
+                            ><${CopyButton}
+                              iconOnly=${true}
+                              title=${t("copy.section")}
+                              getText=${() => categoryToMarkdown(row.labels.category, rows.filter((other) => other.keys.category === row.keys.category).map((other) => other.tc))}
+                          /></span>`}
+                    </th>
+                  </tr>
+                </tbody>`
               : null}
+            ${plan
+              ? html`<tbody key=${row.tcId} class=${"case" + (open ? " case-open" : "")}>
+                  <${IndexRow} ...${rowProps} result=${undefined} />
+                  ${open
+                    ? html`<tr class="row-detail">
+                        <td colspan=${span}>
+                          <div class="cards">
+                            <div class="test-case"><${CaseBody} tc=${row.tc} run=${null} /></div>
+                          </div>
+                        </td>
+                      </tr>`
+                    : null}
+                </tbody>`
+              : open
+                ? html`<${OpenCase} key=${row.tcId} ...${rowProps} span=${span} fallback=${progress ? (progress.get(row.tcId) ?? null) : undefined} />`
+                : html`<tbody key=${row.tcId} class="case" id=${testCaseAnchorId(row.tcId)}>
+                    <${IndexRow} ...${rowProps} result=${progress ? (progress.get(row.tcId) ?? null) : undefined} actions=${showActions ? null : undefined} sticky=${true} />
+                  </tbody>`}
           `;
         })}
-      </tbody>
     </table>
+  `;
+}
+
+/**
+ * A case opened below its row. The row is the case's heading, so it carries what the card's header
+ * used to (marks, Reset, Previous / Next) and the detail below repeats none of it. The two share one
+ * tbody so the sticky row lets go when the case has scrolled past.
+ */
+function OpenCase({
+  row,
+  onTag,
+  query,
+  expand,
+  span,
+  fallback,
+}: {
+  row: OverviewRow;
+  onTag: (tag: string) => void;
+  query: string;
+  plan: undefined;
+  expand?: RowExpand;
+  span: number;
+  /** The row's mark as the table read it, for a table whose run has nothing open to read from */
+  fallback: CaseProgress | null | undefined;
+}) {
+  const activeRun = useContext(RunContext);
+  const run = useCaseRun(row.tc, activeRun);
+  const live: CaseProgress | null | undefined = run
+    ? { outcome: caseOutcome(run.results), marked: run.results.filter((result) => result !== "").length, total: run.results.length }
+    : fallback;
+  return html`
+    <tbody class="case case-open" id=${testCaseAnchorId(row.tc._tcId)}>
+      <${IndexRow}
+        row=${row}
+        onTag=${onTag}
+        query=${query}
+        expand=${expand}
+        result=${live}
+        onReset=${run?.reset}
+        sticky=${true}
+        actions=${html`<${CaseActions} tc=${row.tc} run=${run} />`}
+      />
+      <tr class="row-detail">
+        <td colspan=${span}>
+          <div class="cards">
+            <div class=${"test-case" + (isInactive(row.tc) ? " test-case-inactive" : "")}><${CaseBody} tc=${row.tc} run=${run} tags=${false} /></div>
+          </div>
+        </td>
+      </tr>
+    </tbody>
   `;
 }
 
@@ -2653,8 +2754,8 @@ function NavOutline({
   };
   const entries = [allEntry, ...buildNavEntries(suites, "none", false)];
   const inRange = (entry: NavEntry): number | undefined => (planRangeCounts && entry.rangeKey ? (planRangeCounts.get(entry.rangeKey) ?? 0) : undefined);
-  // Planning does not scroll-track, so a section picked in the outline is what stays highlighted
-  const selectedId = route.mode === "plan" && route.target && entries.some((entry) => entry.id === route.target) ? route.target : scopeEntryId(route.scope);
+  // A section picked in the outline stays selected on the page that opens, where the page may be too short to scroll it to the top and scroll tracking would never fire
+  const selectedId = route.target && entries.some((entry) => entry.id === route.target) ? route.target : scopeEntryId(route.scope);
   const tracksScroll = route.mode === "full" || (route.mode === "table" && route.scope.kind === "suite");
   const [currentId, setCurrentId] = useState<string>(selectedId);
   const suppressUntil = useRef(0);
@@ -2862,7 +2963,7 @@ function jumpToId(id: string, onDone?: () => void) {
   // scrollIntoView aligns the target with the viewport top, where the stacked sticky headers
   // would cover it. The target's own sticky header already knows where that stack ends, so
   // nudge back down by exactly its `top`.
-  const header = el.querySelector(".sticky-header");
+  const header = el.querySelector(".sticky-header, .sticky-row");
   if (header) {
     const offset = parseFloat(getComputedStyle(header).top);
     if (offset > 0) window.scrollBy(0, -offset);
@@ -2870,7 +2971,7 @@ function jumpToId(id: string, onDone?: () => void) {
   // A heading-level target (section, suite, feature…) wraps everything below it, so flashing the
   // whole element would light up its contents; its own header is what the reader asked for. A case
   // card is the leaf, and is flashed whole.
-  const flashed = el.matches(".test-case") ? el : (el.querySelector<HTMLElement>(":scope > .sticky-header") ?? el);
+  const flashed = el.matches(".test-case") ? el : (el.querySelector<HTMLElement>(":scope > .sticky-header, :scope > .overview-row") ?? el);
   flashed.classList.add("jump-flash");
   setTimeout(() => flashed.classList.remove("jump-flash"), 1200);
   onDone?.();
