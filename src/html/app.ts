@@ -1331,6 +1331,8 @@ interface OverviewRow {
   tags: string[];
   /** Suite this case belongs to, for linking to its sections */
   idPrefix: string;
+  /** Its feature holds only this suite, so the two are one node and the suite is not offered apart from the feature */
+  folded: boolean;
   /** The case itself, for the plan page to show it in place */
   tc: TestCase;
   labels: Record<OverviewLevel, string>;
@@ -1383,6 +1385,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               inactive: isInactive(tc),
               tags: tc.tags ?? [],
               idPrefix: suite.idPrefix,
+              folded: suite.folded,
               tc,
               labels,
               keys,
@@ -1899,6 +1902,7 @@ function rangePartsOf(rows: OverviewRow[]): RangePart[] {
   const parts = new Map<string, RangePart>();
   for (const row of rows) {
     RANGE_PART_LEVELS.forEach((level, depth) => {
+      if (level === "suite" && row.folded) return;
       const key = rangeKeyOf(level, row.keys[level]);
       if (!parts.has(key)) parts.set(key, { key, depth, label: RANGE_PART_LEVELS.slice(0, depth + 1).map((l) => row.labels[l]).join(" › ") });
     });
