@@ -27,6 +27,7 @@ export const en = {
   // Views and kinds of entry
   "view.all": "All test cases",
   "view.onePage": "Everything on one page",
+  "kind.tag": "Tag",
   "kind.view": "View",
   "kind.domain": "Domain",
   "kind.feature": "Feature",

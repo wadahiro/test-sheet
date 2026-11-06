@@ -21,6 +21,7 @@ export const ja: Record<MessageKey, string> = {
 
   "view.all": "すべてのテストケース",
   "view.onePage": "すべてを1ページで表示",
+  "kind.tag": "タグ",
   "kind.view": "ビュー",
   "kind.domain": "ドメイン",
   "kind.feature": "機能",

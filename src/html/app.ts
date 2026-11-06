@@ -192,14 +192,60 @@ const matchesTerms = (text: string, terms: string[]): boolean => {
   return terms.every((term) => lower.includes(term));
 };
 
+/**
+ * Where a word's letters fall in `text` when they appear in order but not together ("lgn" in "Login"),
+ * as the tightest such run, or null. Words under two letters are left to plain matching, and a run
+ * stretched over more than three times the word is not a match ("rate06" still reaches "RATELIMIT-006"): letters scattered through a long label would
+ * otherwise make nearly everything match.
+ */
+function fuzzyPositions(text: string, term: string): number[] | null {
+  if (term.length < 2) return null;
+  const lower = text.toLowerCase();
+  let best: number[] | null = null;
+  for (let start = lower.indexOf(term[0]); start >= 0; start = lower.indexOf(term[0], start + 1)) {
+    const at = [start];
+    for (let i = 1; i < term.length; i++) {
+      const next = lower.indexOf(term[i], at[i - 1] + 1);
+      if (next < 0) break;
+      at.push(next);
+    }
+    if (at.length < term.length) break;
+    if (!best || at[at.length - 1] - at[0] < best[best.length - 1] - best[0]) best = at;
+  }
+  return best && best[best.length - 1] - best[0] + 1 <= term.length * 3 ? best : null;
+}
+
+/**
+ * How well a palette entry answers a query, or null when it does not: each word counts most when it is
+ * in the shown title, less when only in the searchable text (steps, notes, tags), least when its
+ * letters merely occur in order in the title or breadcrumb.
+ */
+function paletteScore(entry: NavEntry, terms: string[]): number | null {
+  const shown = `${entry.breadcrumb ?? ""} ${entry.label}`;
+  const shownLower = shown.toLowerCase();
+  const fullLower = entry.searchText.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (shownLower.includes(term)) score += 3;
+    else if (fullLower.includes(term)) score += 2;
+    else if (fuzzyPositions(shown, term)) score += 1;
+    else return null;
+  }
+  return score;
+}
+
 /** The query's words as found in `text`, marked, so the reader sees why an entry or row matched */
-function Highlight({ text, query }: { text: string; query: string }) {
+function Highlight({ text, query, fuzzy = false }: { text: string; query: string; fuzzy?: boolean }) {
   const terms = searchTerms(query);
   if (terms.length === 0) return html`${text}`;
   const lower = text.toLowerCase();
   // Overlapping hits of different words become one mark
   const spans: Array<[number, number]> = [];
   for (const term of terms) {
+    if (!lower.includes(term) && fuzzy) {
+      for (const at of fuzzyPositions(text, term) ?? []) spans.push([at, at + 1]);
+      continue;
+    }
     for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) spans.push([at, at + term.length]);
   }
   spans.sort((x, y) => x[0] - y[0]);
@@ -924,7 +970,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
     <div class="test-case-body">
       ${hasMeta
         ? html`<div class="test-case-meta">
-            ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
+            ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
             ${note ? html`<span class="inactive-note">${note}</span>` : null}
             ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
           </div>`
@@ -1193,7 +1239,7 @@ function IndexRow({
           ${row.tags.map((tag) =>
             onTag
               ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
-              : html`<a class="tag-chip" key=${tag} href=${overviewHash(tag)} onClick=${(e: Event) => e.stopPropagation()}><${Highlight} text=${tag} query=${query} /></a>`
+              : html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} onClick=${(e: Event) => e.stopPropagation()}><${Highlight} text=${tag} query=${query} /></a>`
           )}
         </div>
       </td>
@@ -1973,6 +2019,10 @@ function ScopePage({
   const scopeHash = scopeHashFor(route.scope);
   // The parts on offer belong to the page, so a choice made on another one would only hide everything here
   useEffect(() => setPartFilter([]), [scopeHash]);
+  // A link naming tags (a tag chip, the palette) opens the page filtered by them
+  useEffect(() => {
+    if (route.tags.length > 0) setTagFilter(route.tags);
+  }, [route.hash]);
   const target = route.target;
   const isOpen = (tcId: string) => opened.get(tcId) ?? (target !== null && testCaseAnchorId(tcId) === target);
   const toggleCase = (tcId: string) => setOpened((current) => new Map(current).set(tcId, !isOpen(tcId)));
@@ -2667,8 +2717,13 @@ function overviewHash(query: string): string {
   return trimmed ? `${OVERVIEW_HASH}?q=${encodeURIComponent(trimmed)}` : OVERVIEW_HASH;
 }
 
+/** The overview filtered to exactly this tag, which a text query cannot say: it also matches names */
+function overviewTagHash(tag: string): string {
+  return `${OVERVIEW_HASH}?tag=${encodeURIComponent(tag)}`;
+}
+
 interface NavEntry {
-  kind: "view" | "domain" | "feature" | "suite" | "guide" | "category" | "testcase";
+  kind: "view" | "tag" | "domain" | "feature" | "suite" | "guide" | "category" | "testcase";
   /** An element ID to scroll to — except for `view` entries, where it is the route hash */
   id: string;
   /** The route that shows this entry; selecting it sets location.hash to this */
@@ -2691,6 +2746,7 @@ interface NavEntry {
 
 const KIND_LABEL_KEY: Record<NavEntry["kind"], MessageKey> = {
   view: "kind.view",
+  tag: "kind.tag",
   domain: "kind.domain",
   feature: "kind.feature",
   suite: "kind.suite",
@@ -2842,7 +2898,7 @@ function buildNavEntries(suites: SuitePageData[], guideDetail: GuideDetail, incl
 }
 
 function entryKindClass(kind: NavEntry["kind"]): string {
-  if (kind === "view") return "nav-outline-view";
+  if (kind === "view" || kind === "tag") return "nav-outline-view";
   if (kind === "domain") return "nav-outline-domain";
   if (kind === "feature") return "nav-outline-feature";
   if (kind === "suite") return "nav-outline-suite";
@@ -2879,6 +2935,8 @@ function planRangeCountsOf(rows: OverviewRow[], plan: Plan): Map<string, number>
 function planHashFor(entry: NavEntry, suites: SuitePageData[]): string {
   // A guide is a reading surface tied to the browsing pages, so it still opens there
   if (entry.kind === "guide") return entry.hash;
+  // A tag filters the browsing pages; the plan has its own tag picker, so a tag here just stays on the plan
+  if (entry.kind === "tag") return PLAN_HASH;
   const target = parseRoute(entry.hash, suites);
   if (target.mode !== "table") return entry.hash;
   // A section or a case is a target within its suite's page, here as there
@@ -3046,6 +3104,8 @@ interface Route {
   target: string | null;
   /** Filter seeded from `?q=<query>`; empty when unfiltered */
   query: string;
+  /** Tags the page opens filtered by, from `?tag=<tag>` (repeatable); exact tags, unlike `query` */
+  tags: string[];
   /** The hash this route was parsed from, so a changed hash can be told from a re-render */
   hash: string;
 }
@@ -3058,7 +3118,7 @@ const ALL_SCOPE: Scope = { kind: "all" };
  * Routes are namespaced under `#/` so they can never collide with an element ID and
  * trigger the browser's own anchor jump.
  *
- *   #/overview[?q=]                    all test cases, table only (the landing page)
+ *   #/overview[?q=][&tag=]             all test cases, table only (the landing page)
  *   #/all  (and #/)                    everything on one page
  *   #/plan[/d/…|/f/…|/s/…[/section/<name>]|/tc/<id>]
  *                                      choose which cases the active run covers, for all or one part of the sheet
@@ -3079,15 +3139,20 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
   const [path, queryString = ""] = hash.replace(/^#/, "").split("?", 2);
   const queryMatch = /(?:^|&)q=([^&]*)/.exec(queryString);
   const query = queryMatch ? safeDecode(queryMatch[1]) : "";
-  const landing: Route = { scope: ALL_SCOPE, mode: "table", target: null, query, hash };
+  const tags = queryString
+    .split("&")
+    .filter((pair) => pair.startsWith("tag="))
+    .map((pair) => safeDecode(pair.slice(4)))
+    .filter(Boolean);
+  const landing: Route = { scope: ALL_SCOPE, mode: "table", target: null, query, tags, hash };
   const segments = path.split("/").slice(1).map(safeDecode);
 
-  if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "" };
+  if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "", tags: [] };
   if (segments[0] === "plan") {
     // What follows is the part of the sheet being planned, in the same grammar as the pages it narrows
     const inner = segments.length > 1 ? parseRoute(`#/${segments.slice(1).map(encodeURIComponent).join("/")}`, suites) : null;
     const part = inner?.mode === "table" ? inner : null;
-    return { ...landing, mode: "plan", scope: part?.scope ?? ALL_SCOPE, target: part?.target ?? null, query: "" };
+    return { ...landing, mode: "plan", scope: part?.scope ?? ALL_SCOPE, target: part?.target ?? null, query: "", tags: [] };
   }
 
   if (segments[0] === "d" && segments.length === 2) {
@@ -3212,9 +3277,25 @@ function CommandPalette({
           },
         ]
       : [];
+  // Best answers first; the sort is stable, so equals keep the sheet's order
+  const rankedEntries =
+    terms.length > 0
+      ? entries
+          .map((entry) => ({ entry, score: paletteScore(entry, terms) }))
+          .filter((scored): scored is { entry: NavEntry; score: number } => scored.score !== null)
+          .sort((a, b) => b.score - a.score)
+          .map((scored) => scored.entry)
+      : [];
+  const tagEntries: NavEntry[] =
+    terms.length > 0
+      ? tagItemsOf(overviewRows)
+          .map((tag): NavEntry => ({ kind: "tag", id: overviewTagHash(tag.key), hash: overviewTagHash(tag.key), label: tag.label, searchText: tag.label, count: tag.count }))
+          .filter((entry) => paletteScore(entry, terms) !== null)
+      : [];
   const results = [
     ...overviewEntry,
-    ...(terms.length > 0 ? entries.filter((e) => matchesTerms(e.searchText, terms)) : entries),
+    ...tagEntries,
+    ...(terms.length > 0 ? rankedEntries : entries),
   ].slice(0, 50);
   const clampedSelected = Math.min(selected, Math.max(0, results.length - 1));
 
@@ -3273,9 +3354,9 @@ function CommandPalette({
                 >
                   <span class="palette-kind-badge">${t(KIND_LABEL_KEY[entry.kind])}</span>
                   <span class="palette-item-body">
-                    ${entry.breadcrumb ? html`<span class="palette-breadcrumb"><${Highlight} text=${entry.breadcrumb} query=${query} /></span>` : null}
+                    ${entry.breadcrumb ? html`<span class="palette-breadcrumb"><${Highlight} text=${entry.breadcrumb} query=${query} fuzzy=${true} /></span>` : null}
                     <span class="palette-label">
-                      <${Highlight} text=${entry.label} query=${query} />${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
+                      <${Highlight} text=${entry.label} query=${query} fuzzy=${true} />${entry.count !== undefined ? html` <span class="count">(${entry.count})</span>` : null}
                     </span>
                   </span>
                 </button>

@@ -42,7 +42,7 @@ A feature with exactly one suite is folded (`SuitePageData.folded`, set in `gene
 
 ## Search
 
-- A query is split on whitespace and an entry must contain every word (`searchTerms`/`matchesTerms`), in the palette and the table filters alike; `Highlight` marks each word.
+- A query is split on whitespace and an entry must contain every word (`searchTerms`/`matchesTerms`), in the palette and the table filters alike; `Highlight` marks each word. The palette alone is also fuzzy (`paletteScore`): a word whose letters occur in order within the shown title or breadcrumb matches ("rate06" finds RATELIMIT-006) and ranks below a plain hit; the tables stay substring, since fuzzy over a long cell would match nearly every row.
 - `NavEntry.searchText` is full-text and deliberately wider than the label an entry shows: test cases carry their steps, preconditions, test data and notes; guide headings carry their section's Markdown. Index new content types there — a search that only matches titles reads as broken.
 - A table's own filter is the exception: it matches only what the table shows (including its section heading rows), because it filters something the reader is looking at. On a suite page the same rule also narrows the cards.
 - Guides have no sidebar entry (they are opened from the page they belong to) but each guide heading is a palette entry (`GuideDetail` in `buildNavEntries`) — an outline is a structure map, a palette is a search surface.
