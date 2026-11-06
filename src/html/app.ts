@@ -311,7 +311,7 @@ function CopyButton({ getText, title, iconOnly = false }: { getText: () => strin
       onClick=${onClick}
     >
       ${copied
-        ? html`<span>✓</span>`
+        ? html`<span aria-hidden="true">✓</span>`
         : html`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>`}
       ${iconOnly ? null : html`<span>${copied ? t("copy.copied") : t("copy.copy")}</span>`}
     </button>
@@ -929,6 +929,31 @@ function TestDataBody({ html: markup }: { html: string }) {
   return html`<div class="test-data-body" ref=${ref} onClick=${onClick} dangerouslySetInnerHTML=${{ __html: markup }} />`;
 }
 
+/**
+ * The case's own address. A plain click copies it instead of following it: following would swap the page
+ * for the case's suite page and take the other open cases off the screen. The href stays so the browser's
+ * own "open in new tab" and "copy link" still work.
+ */
+function CaseLink({ tcId }: { tcId: string }) {
+  const [copied, setCopied] = useState(false);
+  const hash = testCaseHash(tcId);
+  const onClick = (e: MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    writeClipboardText(`${location.href.replace(/#.*$/, "")}${hash}`).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  };
+  const title = copied ? t("copy.copied") : t("case.link");
+  return html`<a class=${"icon-btn" + (copied ? " copy-btn-copied" : "")} href=${hash} title=${title} aria-label=${title} onClick=${onClick}>
+    ${copied
+      ? html`<span aria-hidden="true">✓</span>`
+      : html`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>`}
+  </a>`;
+}
+
 /** Previous / Next, the link to the case and its copy button: shared by a card's header and an open row */
 function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
   const activeRun = useContext(RunContext);
@@ -946,9 +971,7 @@ function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           </button>`
       : null}
-    <a class="icon-btn" href=${testCaseHash(tc._tcId)} title=${t("case.link")} aria-label=${t("case.link")}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-    </a>
+    <${CaseLink} tcId=${tc._tcId} />
     <${CopyButton}
       iconOnly=${true}
       title=${hasShots ? t("copy.caseWithShots") : t("copy.case")}
@@ -1179,8 +1202,8 @@ function IndexRow({
   result?: CaseProgress | null;
   /** Makes the row a jump target while its case is closed; an open case's card carries the id instead */
   anchorId?: string;
-  /** Present when the table has an actions column; null leaves the cell empty (a closed case) */
-  actions?: ComponentChildren | null;
+  /** Buttons shown at the right of the tags cell; given for an open case, so a closed row has none */
+  actions?: ComponentChildren;
   /** Offered beside the chip of the open case, whose marks it clears */
   onReset?: () => void;
   /** Lets the row stay in view as the heading of an open case below it; a closed case's row is alone in its tbody, so it never moves */
@@ -1235,12 +1258,15 @@ function IndexRow({
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
       <td class="overview-method overview-nowrap" data-label=${t("col.method")}><${Highlight} text=${row.method} query=${query} /></td>
       <td class="overview-tags">
-        <div class="tag-list">
-          ${row.tags.map((tag) =>
-            onTag
-              ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
-              : html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} onClick=${(e: Event) => e.stopPropagation()}><${Highlight} text=${tag} query=${query} /></a>`
-          )}
+        <div class="tags-cell">
+          <div class="tag-list">
+            ${row.tags.map((tag) =>
+              onTag
+                ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
+                : html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} onClick=${(e: Event) => e.stopPropagation()}><${Highlight} text=${tag} query=${query} /></a>`
+            )}
+          </div>
+          ${actions ? html`<span class="row-actions" onClick=${(e: Event) => e.stopPropagation()}>${actions}</span>` : null}
         </div>
       </td>
       ${result !== undefined
@@ -1253,7 +1279,6 @@ function IndexRow({
               : null}
           </td>`
         : null}
-      ${actions !== undefined ? html`<td class="overview-actions" onClick=${(e: Event) => e.stopPropagation()}>${actions}</td>` : null}
       ${plan
         ? html`<td class="overview-decision">
               ${row.inactive
@@ -1787,10 +1812,10 @@ function useRunProgress(rows: OverviewRow[], enabled: boolean): Map<string, Case
 
 /**
  * Track sizes for the scope table's grid layout, one per column of `indexColumns()` and then the
- * optional Result and actions columns. Name takes what the others leave.
+ * optional Result column. Name takes what the others leave.
  */
-function scopeColumnSizes(result: boolean, actions: boolean): string {
-  return ["max-content", "minmax(12rem, 1fr)", "fit-content(9rem)", "max-content", "fit-content(16rem)", ...(result ? ["max-content"] : []), ...(actions ? ["max-content"] : [])].join(" ");
+function scopeColumnSizes(result: boolean): string {
+  return ["max-content", "minmax(12rem, 1fr)", "fit-content(9rem)", "max-content", "fit-content(16rem)", ...(result ? ["max-content"] : [])].join(" ");
 }
 
 function ScopeTable({
@@ -1812,10 +1837,8 @@ function ScopeTable({
   expand?: { isOpen: (tcId: string) => boolean; toggle: (tcId: string) => void };
 }) {
   const progress = useRunProgress(rows, !plan);
-  // Previous / Next, the link and copy sit in a column of their own, shown for a case that is open
-  const showActions = !plan && !!expand;
   const columns = plan ? [...indexColumns(), t("col.decision"), t("col.reason")] : progress ? [...indexColumns(), t("col.result")] : indexColumns();
-  const span = columns.length + (plan ? 1 : 0) + (showActions ? 1 : 0);
+  const span = columns.length + (plan ? 1 : 0);
   const tickState = (ids: string[]) => {
     const ticked = ids.filter((id) => planSelect?.selected.has(id)).length;
     return { all: ids.length > 0 && ticked === ids.length, some: ticked > 0 && ticked < ids.length };
@@ -1826,7 +1849,7 @@ function ScopeTable({
   const showGroups = !(depth === OVERVIEW_LEVELS.length - 1 && sectionCount === 1);
 
   return html`
-    <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")} style=${plan ? undefined : `--scope-cols: ${scopeColumnSizes(!!progress, showActions)}`}>
+    <table class=${"overview-table scope-table" + (plan ? " plan-table" : "")} style=${plan ? undefined : `--scope-cols: ${scopeColumnSizes(!!progress)}`}>
       <thead>
         <tr>
           ${plan && planSelect
@@ -1835,7 +1858,6 @@ function ScopeTable({
               ? html`<th></th>`
               : null}
           ${columns.map((column) => html`<th key=${column}>${column}</th>`)}
-          ${showActions ? html`<th class="overview-actions"><span class="visually-hidden">${t("col.actions")}</span></th>` : null}
         </tr>
       </thead>
       ${rows.map((row, i) => {
@@ -1892,7 +1914,7 @@ function ScopeTable({
               : open
                 ? html`<${OpenCase} key=${row.tcId} ...${rowProps} span=${span} fallback=${progress ? (progress.get(row.tcId) ?? null) : undefined} />`
                 : html`<tbody key=${row.tcId} class="case" id=${testCaseAnchorId(row.tcId)}>
-                    <${IndexRow} ...${rowProps} result=${progress ? (progress.get(row.tcId) ?? null) : undefined} actions=${showActions ? null : undefined} sticky=${true} />
+                    <${IndexRow} ...${rowProps} result=${progress ? (progress.get(row.tcId) ?? null) : undefined} sticky=${true} />
                   </tbody>`}
           `;
         })}

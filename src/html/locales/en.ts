@@ -55,7 +55,6 @@ export const en = {
   "col.decision": "Decision",
   "col.reason": "Reason",
   "col.result": "Result",
-  "col.actions": "Actions",
 
   // Scope pages
   "scope.notFound": "Not found.",
@@ -163,7 +162,7 @@ export const en = {
   // Test case card
   "case.prev": "Previous case",
   "case.next": "Next case",
-  "case.link": "Link to this test case",
+  "case.link": "Copy the link to this test case",
   "case.tagLink": "Show test cases matching this tag",
   "case.legacyMarker": "Original marker: {marker}",
   "case.preconditions": "Preconditions",

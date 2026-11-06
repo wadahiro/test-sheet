@@ -47,7 +47,6 @@ export const ja: Record<MessageKey, string> = {
   "col.decision": "判断",
   "col.reason": "理由",
   "col.result": "結果",
-  "col.actions": "操作",
 
   "scope.notFound": "見つかりません。",
   "scope.backToAll": "すべてのテストケースに戻る",
@@ -152,7 +151,7 @@ export const ja: Record<MessageKey, string> = {
 
   "case.prev": "前のケース",
   "case.next": "次のケース",
-  "case.link": "このテストケースへのリンク",
+  "case.link": "このテストケースへのリンクをコピー",
   "case.tagLink": "このタグに一致するテストケースを表示",
   "case.legacyMarker": "元のマーカー: {marker}",
   "case.preconditions": "事前条件",

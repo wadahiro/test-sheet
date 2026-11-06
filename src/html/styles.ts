@@ -3,49 +3,62 @@
  * Kept as one constant so the two copies cannot drift apart.
  */
 const DARK_THEME_VARS = `
-  --fg: #c9d1d9;
-  --fg-muted: #9198a1;
-  --fg-faint: #4a525c;
+  --fg: #d4dbe3;
+  --fg-2: #b4bdc7;
+  --fg-muted: #98a2ad;
   --bg: #0d1117;
-  --bg-subtle: #161b22;
-  --bg-hover: #21262d;
-  --border: #3d444d;
-  --accent: #4493f8;
-  --accent-bg: #1f3a5f;
-  --success: #3fb950;
+  --bg-chrome: #1a2029;
+  --bg-subtle: #151b24;
+  --bg-hover: #121a25;
+  --bg-chip: #1f2630;
+  --border: #2f3741;
+  --border-strong: #636e7b;
+  --accent: #58a6ff;
+  --accent-bg: #13253d;
+  --zebra: #111923;
+  --success: #34c08b;
   --overlay: rgba(1, 4, 9, 0.7);
   --flash: #4d3800;
-  --inactive-bg: #262c36;
-  --warn: #d29922;
+  --hatch: rgba(212, 219, 227, 0.11);
+  --warn: #d4a72c;
   --warn-bg: #3a2d00;
-  --success-bg: #1a3d26;
-  --danger: #f85149;
-  --danger-bg: #3d1a1c;
+  --success-bg: #0f3326;
+  --danger: #ff6a62;
+  --danger-bg: #3a1a1c;
 `;
 
 export const STYLES = `
 :root {
   color-scheme: light dark;
   --fg: #1f2328;
-  --fg-muted: #57606a;
-  --fg-faint: #b6bec7;
+  --fg-2: #404850;
+  --fg-muted: #5a6470;
   /* Sticky headers repaint the page background to cover the content scrolling under them,
      so --bg must match body's background exactly rather than relying on the Canvas keyword */
   --bg: #ffffff;
-  --bg-subtle: #f6f8fa;
-  --bg-hover: #eaeef2;
-  --border: #d0d7de;
-  --accent: #0969da;
-  --accent-bg: #ddebfa;
-  --success: #1a7f37;
+  /* Surfaces, each with one meaning: chrome (header, nav) frames the page; --bg-subtle is a table's
+     structure (header and section rows); --accent-bg is the open or selected row; --bg-hover is the
+     pointer; --bg-chip is a small label. Inactive cases take no flat fill (--inactive-fill) */
+  --bg-chrome: #e9edf2;
+  --bg-subtle: #f0f3f7;
+  --bg-hover: #f3f7fc;
+  --bg-chip: #eef0f3;
+  --border: #d5dbe2;
+  /* Edges of controls and labels, which need 3:1 where a table's rules do not */
+  --border-strong: #8c959f;
+  --accent: #0b5cc7;
+  --accent-bg: #e8f1fc;
+  --zebra: #eef4fb;
+  --success: #0f7b3f;
   --overlay: rgba(15, 23, 42, 0.45);
   --flash: #fff2ba;
-  --inactive-bg: #eceff2;
-  --warn: #9a6700;
-  --warn-bg: #fff8c5;
-  --success-bg: #dafbe1;
-  --danger: #cf222e;
+  --hatch: rgba(31, 35, 40, 0.1);
+  --warn: #946200;
+  --warn-bg: #fff6c2;
+  --success-bg: #dff5e6;
+  --danger: #c9252f;
   --danger-bg: #ffebe9;
+  --inactive-fill: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 7px), var(--bg);
   --header-h: 48px;
   /* Breathing room between the app header and the first sticky header; sticky tops start below it */
   --page-gap: 16px;
@@ -94,7 +107,7 @@ body {
   gap: 16px;
   height: var(--header-h);
   padding: 0 16px;
-  background: var(--bg-subtle);
+  background: var(--bg-chrome);
   border-bottom: 1px solid var(--border);
 }
 
@@ -140,7 +153,7 @@ body {
 .crumb-ancestor::after {
   content: "›";
   margin: 0 8px;
-  color: var(--fg-faint);
+  color: var(--border-strong);
 }
 
 .crumb-ancestor a {
@@ -207,7 +220,7 @@ body {
   padding: 1px 5px;
   font-size: 0.72rem;
   font-family: inherit;
-  color: var(--fg-faint);
+  color: var(--fg-muted);
 }
 
 .layout {
@@ -255,7 +268,7 @@ body {
   overflow: hidden;
   border-right: 1px solid var(--border);
   padding: 20px 12px;
-  background: var(--bg-subtle);
+  background: var(--bg-chrome);
 }
 
 .nav-empty {
@@ -551,7 +564,7 @@ body {
   min-width: 0;
   height: 38px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   font-size: 0.9rem;
   background: var(--bg);
@@ -701,7 +714,7 @@ body {
   gap: 5px;
   height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--bg-subtle);
   color: var(--fg-muted);
@@ -779,15 +792,15 @@ body {
 .picker-item-on { font-weight: 600; }
 .picker-check { flex: 0 0 1em; color: var(--accent); }
 .picker-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.picker-count { flex: 0 0 auto; color: var(--fg-faint); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
-.picker-none { margin: 6px 10px; color: var(--fg-faint); font-size: 0.85rem; }
+.picker-count { flex: 0 0 auto; color: var(--fg-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.picker-none { margin: 6px 10px; color: var(--fg-muted); font-size: 0.85rem; }
 
 .chip-join { font-size: 0.8rem; font-weight: 600; color: var(--fg-muted); }
 .chip-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .plan-note {
   font-size: 0.8rem;
-  color: var(--fg-faint);
+  color: var(--fg-muted);
 }
 
 .plan-summary {
@@ -824,8 +837,8 @@ body {
 
 .decision-btn + .decision-btn { border-left: 1px solid var(--border); }
 .decision-btn:hover { background: var(--bg-hover); }
-.decision-r.decision-on { background: var(--success-bg); color: var(--success); font-weight: 600; }
-.decision-s.decision-on { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.decision-r.decision-on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.decision-s.decision-on { background: var(--bg-chip); color: var(--fg-muted); font-weight: 600; }
 
 /* A case still to be decided is marked at the row's edge, so it stands out in a long list */
 .plan-undecided td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
@@ -929,13 +942,13 @@ body {
  */
 .row-detail > td { padding: 0; border-top: none; }
 .row-detail .test-case { margin-bottom: 0; border: 0; border-radius: 0; background: transparent; }
-.case-open > .overview-row > td { background: var(--bg-subtle); }
+.case-open > .overview-row > td { background: var(--accent-bg); }
 .case-open > .overview-row > td:first-child,
 .case-open > .row-detail > td { box-shadow: inset 3px 0 0 var(--accent); }
 .case-open > .row-detail > td { border-bottom: 1px solid var(--border); }
-.overview-actions { white-space: nowrap; text-align: right; }
-/* Empty until the case is open: the column should not claim width for buttons that are not there */
-.overview-actions:empty { padding: 0; }
+/* An open case's buttons sit at the right of its tags cell, so the table has no column of its own that is empty until a case opens */
+.tags-cell { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.row-actions { margin-left: auto; white-space: nowrap; }
 
 /*
  * On a scope page a case opens below its row and is recorded there, so the row stays in view as
@@ -1206,7 +1219,7 @@ a.link-btn { text-decoration: none; }
 }
 
 .overview-row:hover {
-  background: var(--bg-subtle);
+  background: var(--bg-hover);
 }
 
 .overview-id {
@@ -1229,15 +1242,29 @@ a.link-btn { text-decoration: none; }
   margin: 0 0 16px;
 }
 
-/* A filled row rather than reduced opacity, so struck-off cases stay as legible as active ones */
+/*
+ * Struck-off cases get a hatch over the paper colour rather than a flat grey (which the section and
+ * header rows already use) or reduced opacity (which would drop the text under 4.5:1). Their ID and
+ * name are also struck through, so the state does not rest on the pattern alone.
+ */
 .row-inactive td {
-  background: var(--inactive-bg);
+  background: var(--inactive-fill);
+  color: var(--fg-muted);
 }
+
+.row-inactive .overview-link,
+.row-inactive .overview-name {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+}
+
+/* An inline-block child does not inherit the strike, so the open/close caret stays plain */
+.row-inactive .expand-caret { display: inline-block; text-decoration: none; }
 
 .status-lozenge {
   display: inline-block;
   padding: 1px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg-muted);
@@ -1350,19 +1377,11 @@ a.link-btn { text-decoration: none; }
   .scope-table .overview-tags { grid-area: tags; }
   .scope-table .overview-row.has-result { grid-template-areas: "id name name result" "id status method tags"; }
   .scope-table .overview-result { grid-area: result; justify-self: end; }
-  .scope-table .overview-row:has(.overview-actions:not(:empty)) {
-    grid-template-areas: "id name name name" "id status method tags" "id actions actions actions";
-  }
-  .scope-table .overview-row.has-result:has(.overview-actions:not(:empty)) {
-    grid-template-areas: "id name name result" "id status method tags" "id actions actions actions";
-  }
-  .scope-table .overview-actions { grid-area: actions; justify-self: start; text-align: left; }
   /* The row is the grid here, so it carries the fill that the cells carry in the wide layout */
-  .case-open > .overview-row { background: var(--bg-subtle); }
+  .case-open > .overview-row { background: var(--accent-bg); }
   .case-open > .overview-row > td { background: none; }
   .case-open > .overview-row > td:first-child { box-shadow: none; }
   .case-open > .overview-row { box-shadow: inset 3px 0 0 var(--accent); }
-  .scope-table .overview-actions:empty { display: none; }
   .scope-table > tbody > tr.row-detail { border-bottom: 1px solid var(--border); }
   .plan-table .overview-row {
     grid-template-columns: max-content max-content auto auto 1fr;
@@ -1372,7 +1391,7 @@ a.link-btn { text-decoration: none; }
   .plan-table .overview-decision { grid-area: decision; }
   .plan-table .overview-reason { grid-area: reason; }
   /* The row carries the inactive fill now that its cells have no box of their own */
-  .scope-table .row-inactive { background: var(--inactive-bg); }
+  .scope-table .row-inactive { background: var(--inactive-fill); }
   .scope-table .row-inactive td { background: none; }
   .scope-table .scope-group th { border-bottom: 1px solid var(--border); }
 }
@@ -1392,7 +1411,7 @@ a.link-btn { text-decoration: none; }
 }
 
 .guide {
-  background: var(--bg-subtle);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px 20px;
@@ -1427,7 +1446,7 @@ a.link-btn { text-decoration: none; }
   flex-direction: column;
   overflow: hidden;
   border-left: 1px solid var(--border);
-  background: var(--bg-subtle);
+  background: var(--bg);
   /* Above every sticky header and table head (up to 14) that the page's cases can slide under it */
   z-index: 15;
 }
@@ -1555,18 +1574,18 @@ a.link-btn { text-decoration: none; }
 }
 
 .guide th {
-  background: var(--bg-hover);
+  background: var(--bg-chip);
 }
 
 .guide code {
-  background: var(--bg-hover);
+  background: var(--bg-chip);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.9em;
 }
 
 .guide pre {
-  background: var(--bg-hover);
+  background: var(--bg-chip);
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
@@ -1715,6 +1734,9 @@ a.link-btn { text-decoration: none; }
 
 .icon-btn.copy-btn-copied { color: var(--success); }
 
+/* The check replaces a 13px icon, so it takes the icon's box: text at the row's line height would be taller and push the row down while it shows */
+.icon-btn > span[aria-hidden] { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; line-height: 1; }
+
 .test-case-body {
   display: grid;
   gap: 14px;
@@ -1790,7 +1812,7 @@ a.link-btn { text-decoration: none; }
   background-color: var(--success);
 }
 
-.test-data-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
+.test-data-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-chip); padding: 1px 5px; border-radius: 4px; }
 
 /* Fixed layout so every case's table shares the same column edges as they stack down the page;
    with auto layout each table sized itself to its own content, and the grid jumped between cases */
@@ -1822,7 +1844,7 @@ a.link-btn { text-decoration: none; }
   color: var(--fg-muted);
 }
 
-.steps-table tbody tr.step-even > * { background: var(--bg-subtle); }
+.steps-table tbody tr.step-even > * { background: var(--zebra); }
 
 .steps-table .step-no {
   text-align: right;
@@ -1833,15 +1855,15 @@ a.link-btn { text-decoration: none; }
   white-space: nowrap;
 }
 
-.step-expected { border-left: 1px solid var(--border); }
+.step-expected { border-left: 1px solid var(--border); color: var(--fg-2); }
 
 /* Rendered Markdown in narrow cells: block margins would pad every cell, and the default list indent wastes width */
 .step-cell > :first-child { margin-top: 0; }
 .step-cell > :last-child { margin-bottom: 0; }
 .step-cell p { margin: 0 0 6px; }
 .step-cell ul, .step-cell ol { margin: 0 0 6px; padding-left: 1.3em; }
-.step-cell code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
-.step-cell pre { overflow-x: auto; margin: 6px 0; padding: 8px; background: var(--bg-hover); border-radius: 4px; font-size: 0.85em; }
+.step-cell code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-chip); padding: 1px 5px; border-radius: 4px; }
+.step-cell pre { overflow-x: auto; margin: 6px 0; padding: 8px; background: var(--bg-chip); border-radius: 4px; font-size: 0.85em; }
 .step-cell pre code { background: none; padding: 0; }
 .step-cell table { display: block; overflow-x: auto; border-collapse: collapse; margin: 6px 0; font-size: 0.85em; }
 .step-cell table th, .step-cell table td { border: 1px solid var(--border); padding: 3px 8px; }
@@ -1868,7 +1890,7 @@ a.link-btn { text-decoration: none; }
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
   }
-  .steps-table tbody tr.step-even { background: var(--bg-subtle); }
+  .steps-table tbody tr.step-even { background: var(--zebra); }
   .steps-table tr > * { padding: 0 8px; border: 0; background: none !important; }
   .steps-table.steps-run tr.step-row {
     grid-template-areas: "no action" "no expected" "no result";
@@ -1913,7 +1935,7 @@ a.link-btn { text-decoration: none; }
   min-width: 3.5rem;
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg-muted);
@@ -2169,7 +2191,7 @@ a.link-btn { text-decoration: none; }
   padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg-hover);
+  background: var(--bg-chip);
   color: var(--fg-muted);
   font-size: 0.7rem;
   font-weight: 700;
@@ -2211,16 +2233,16 @@ a.link-btn { text-decoration: none; }
 .notes-body > :last-child { margin-bottom: 0; }
 .notes-body p { margin: 0 0 8px; }
 .notes-body ul, .notes-body ol { margin: 0 0 8px; padding-left: 1.3em; }
-.notes-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
-.notes-body pre { overflow-x: auto; margin: 8px 0; padding: 8px; background: var(--bg-hover); border-radius: 4px; font-size: 0.85em; }
+.notes-body code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-chip); padding: 1px 5px; border-radius: 4px; }
+.notes-body pre { overflow-x: auto; margin: 8px 0; padding: 8px; background: var(--bg-chip); border-radius: 4px; font-size: 0.85em; }
 .notes-body pre code { background: none; padding: 0; }
 .notes-body table { display: block; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.85rem; }
 .notes-body th, .notes-body td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
-.notes-body th { background: var(--bg-hover); }
+.notes-body th { background: var(--bg-chip); }
 .notes-body blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--fg-muted); }
 
 /* A filled band rather than a faded card, so an inactive case's steps stay as legible as an active one's */
-.test-case-inactive .test-case-head { background: var(--inactive-bg); }
+.test-case-inactive .test-case-head { background: var(--inactive-fill); }
 .test-case-inactive .test-case-name { color: var(--fg-muted); text-decoration: line-through; }
 
 .badge {
@@ -2228,7 +2250,7 @@ a.link-btn { text-decoration: none; }
   padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg-hover);
+  background: var(--bg-chip);
   color: var(--fg-muted);
   font-size: 0.7rem;
   font-weight: 600;
@@ -2259,7 +2281,7 @@ a.link-btn { text-decoration: none; }
   padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg-hover);
+  background: var(--bg-chip);
   color: var(--fg-muted);
   font: inherit;
   font-size: 0.7rem;
@@ -2275,7 +2297,7 @@ a.link-btn { text-decoration: none; }
 
 .legacy-marker {
   font-size: 0.8rem;
-  color: var(--fg-faint);
+  color: var(--fg-muted);
   font-family: monospace;
 }
 
@@ -2418,6 +2440,6 @@ a.link-btn { text-decoration: none; }
 .overview-row.jump-flash { animation: none; }
 .scope-group.jump-flash > th { --flash-to: var(--bg-subtle); animation: jump-flash-cell 1.2s ease-out; }
 .overview-row.jump-flash > td { animation: jump-flash-cell 1.2s ease-out; }
-.case-open > .overview-row.jump-flash > td { --flash-to: var(--bg-subtle); }
-.row-inactive.jump-flash > td { --flash-to: var(--inactive-bg); }
+.case-open > .overview-row.jump-flash > td { --flash-to: var(--accent-bg); }
+.row-inactive.jump-flash > td { --flash-to: var(--bg); }
 `;
