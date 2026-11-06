@@ -663,6 +663,9 @@ body {
   gap: 8px;
 }
 
+/* Not sticky: the filter bar's height is fixed and the sticky offsets below it count on that, so these scroll away and the picker's badge keeps the filter visible */
+.filter-chips { padding: 8px 0; }
+
 .plan-label {
   font-size: 0.8rem;
   font-weight: 600;
@@ -688,16 +691,99 @@ body {
 
 .plan-chip-x:hover { color: var(--danger); }
 
-.plan-tag-add {
-  max-width: 14rem;
-  padding: 3px 6px;
+
+/* Multi-choice picker (tags, hierarchy parts): a button with a checklist popover under it */
+.picker-anchor { position: relative; display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: 8px; }
+
+.picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.plan-range .picker-btn { height: auto; padding: 3px 8px; font-size: 0.8rem; }
+.plan-range .picker-anchor { margin-left: 0; }
+.picker-btn:disabled { opacity: 0.5; cursor: default; }
+.picker-btn:hover:not(:disabled) { background: var(--accent-bg); color: var(--accent); }
+.picker-btn-on { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.picker-btn:focus-visible, .picker-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.picker-badge {
+  min-width: 1.3em;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+
+
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  width: 18rem;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px var(--overlay);
+}
+
+.picker-search {
+  flex: 0 0 auto;
+  margin-bottom: 4px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  color: var(--fg-muted);
+  color: var(--fg);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
+
+.picker-list { max-height: min(20rem, calc(100vh - var(--header-h) - 140px)); overflow-y: auto; }
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.picker-item:hover { background: var(--bg-subtle); }
+.picker-item-on { font-weight: 600; }
+.picker-check { flex: 0 0 1em; color: var(--accent); }
+.picker-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.picker-count { flex: 0 0 auto; color: var(--fg-faint); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.picker-none { margin: 6px 10px; color: var(--fg-faint); font-size: 0.85rem; }
+
+.chip-join { font-size: 0.8rem; font-weight: 600; color: var(--fg-muted); }
+.chip-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .plan-note {
   font-size: 0.8rem;
@@ -2206,7 +2292,7 @@ a.link-btn { text-decoration: none; }
 }
 
 .palette {
-  width: min(40rem, 92vw);
+  width: min(56rem, 94vw);
   max-height: 70vh;
   background: var(--bg);
   border-radius: 10px;

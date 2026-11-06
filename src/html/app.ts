@@ -182,17 +182,39 @@ function allTestCasesToMarkdown(suite: SuitePageData, headingLevel = 1): string 
   return lines.join("\n");
 }
 
-/** The query's occurrences in `text`, marked, so the reader sees why an entry or row matched */
-function Highlight({ text, query }: { text: string; query: string }) {
-  const q = query.trim().toLowerCase();
-  if (!q) return html`${text}`;
+/** The words of a query: whitespace (full-width too) separates them, and an entry has to contain every one */
+function searchTerms(query: string): string[] {
+  return query.toLowerCase().split(/[\s\u3000]+/).filter(Boolean);
+}
+
+const matchesTerms = (text: string, terms: string[]): boolean => {
   const lower = text.toLowerCase();
+  return terms.every((term) => lower.includes(term));
+};
+
+/** The query's words as found in `text`, marked, so the reader sees why an entry or row matched */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const terms = searchTerms(query);
+  if (terms.length === 0) return html`${text}`;
+  const lower = text.toLowerCase();
+  // Overlapping hits of different words become one mark
+  const spans: Array<[number, number]> = [];
+  for (const term of terms) {
+    for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) spans.push([at, at + term.length]);
+  }
+  spans.sort((x, y) => x[0] - y[0]);
+  const merged: Array<[number, number]> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push([...span]);
+  }
   const parts: Array<string | ReturnType<typeof html>> = [];
   let from = 0;
-  for (let at = lower.indexOf(q); at >= 0; at = lower.indexOf(q, from)) {
-    if (at > from) parts.push(text.slice(from, at));
-    parts.push(html`<mark class="hit">${text.slice(at, at + q.length)}</mark>`);
-    from = at + q.length;
+  for (const [start, end] of merged) {
+    if (start > from) parts.push(text.slice(from, start));
+    parts.push(html`<mark class="hit">${text.slice(start, end)}</mark>`);
+    from = end;
   }
   parts.push(text.slice(from));
   return html`${parts}`;
@@ -1403,10 +1425,180 @@ function overviewRowSearchText(row: OverviewRow): string {
   return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, ...row.tags].join(" ");
 }
 
+/** One choice in a `MultiPicker` */
+interface PickerItem {
+  key: string;
+  label: string;
+  /** Indents the choice the way the side nav indents its level */
+  depth?: number;
+  count?: number;
+}
+
+/**
+ * A button opening a checklist of choices, any number of which can be on. Tags and the parts of the
+ * hierarchy are picked the same way on a scope page's filter and in a plan's range, so the two look
+ * and behave alike. The choices are checkboxes in a popover rather than a native <select>, which
+ * can only take one choice per opening.
+ */
+function MultiPicker({
+  label,
+  items,
+  selected,
+  onToggle,
+  searchable = true,
+}: {
+  label: string;
+  items: PickerItem[];
+  selected: string[];
+  onToggle: (key: string) => void;
+  searchable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    anchorRef.current?.querySelector<HTMLElement>(".picker-search, .picker-item")?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!anchorRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Kept in place and disabled rather than removed, so the row does not change shape from one page to the next
+  const empty = items.length === 0;
+
+  const needle = text.trim().toLowerCase();
+  // A hierarchy is shown whole until someone searches it, since its indentation only means something with its parents
+  const shown = needle ? items.filter((item) => matchesTerms(item.label, searchTerms(needle))) : items;
+
+  return html`
+    <div class="picker-anchor" ref=${anchorRef}>
+      <button
+        ref=${buttonRef}
+        class=${"picker-btn" + (selected.length > 0 ? " picker-btn-on" : "")}
+        aria-haspopup="listbox"
+        aria-expanded=${open && !empty}
+        disabled=${empty}
+        onClick=${() => {
+          setOpen(!open);
+          setText("");
+        }}
+      >
+        <span>${label}</span>
+        ${selected.length > 0 ? html`<span class="picker-badge">${selected.length}</span>` : null}
+        <span aria-hidden="true">▾</span>
+      </button>
+      ${open && !empty
+        ? html`<div class="picker-menu" role="listbox" aria-multiselectable="true" aria-label=${label}>
+            ${searchable
+              ? html`<input
+                  class="picker-search"
+                  type="search"
+                  placeholder=${t("picker.search")}
+                  value=${text}
+                  onInput=${(e: Event) => setText((e.target as HTMLInputElement).value)}
+                />`
+              : null}
+            <div class="picker-list">
+              ${shown.length === 0
+                ? html`<p class="picker-none">${t("picker.none")}</p>`
+                : shown.map((item) => {
+                    const on = selected.includes(item.key);
+                    return html`<button
+                      key=${item.key}
+                      class=${"picker-item" + (on ? " picker-item-on" : "")}
+                      role="option"
+                      aria-selected=${on}
+                      style=${{ paddingLeft: `${10 + (needle ? 0 : (item.depth ?? 0) * 14)}px` }}
+                      onClick=${() => onToggle(item.key)}
+                    >
+                      <span class="picker-check" aria-hidden="true">${on ? "✓" : ""}</span>
+                      <span class="picker-label">${item.label}</span>
+                      ${item.count !== undefined ? html`<span class="picker-count">${item.count}</span>` : null}
+                    </button>`;
+                  })}
+            </div>
+          </div>`
+        : null}
+    </div>
+  `;
+}
+
+/** Chosen tags as removable chips, the same in a plan's range and above a scope page's filter */
+const tagChips = (tags: string[], onRemove: (tag: string) => void) =>
+  tags.map(
+    (tag) => html`<span class="tag-chip plan-range-chip" key=${tag}>
+      ${tag}
+      <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onRemove(tag)}>×</button>
+    </span>`
+  );
+
+/** Chosen hierarchy parts as removable chips; `parts` are the choices on offer, for naming a key */
+const partChips = (keys: string[], parts: RangePart[], onRemove: (key: string) => void) =>
+  keys.map((key) => {
+    const label = rangePartLabel(parts, key);
+    return html`<span class="tag-chip plan-range-chip plan-range-part" key=${key}>
+      ${label}
+      <button class="plan-chip-x" aria-label=${t("plan.removePart", { name: label })} title=${t("plan.removePart", { name: label })} onClick=${() => onRemove(key)}>×</button>
+    </span>`;
+  });
+
+/**
+ * Puts the word that combines the chips between them. The range and the filter combine the same chips
+ * differently (the range takes any of them, the filter any part and any tag), and the words are what
+ * tells a reader which, so they are drawn rather than left to be remembered.
+ */
+function joinChips(chips: ReturnType<typeof html>[], word: string) {
+  return chips.flatMap((chip, i) => (i === 0 ? [chip] : [html`<span class="chip-join" key=${`join-${i}`}>${word}</span>`, chip]));
+}
+
+/** Cases under any of the chosen parts; every case when none is chosen */
+function filterByParts(rows: OverviewRow[], keys: string[]): OverviewRow[] {
+  if (keys.length === 0) return rows;
+  const chosen = new Set(keys);
+  return rows.filter((row) => OVERVIEW_LEVELS.some((level) => chosen.has(rangeKeyOf(level, row.keys[level]))));
+}
+
+/**
+ * The parts worth offering inside a scope: those that split its cases. The scope itself and its
+ * parents hold every case, so choosing them would filter nothing.
+ */
+function scopePartsOf(rows: OverviewRow[]): RangePart[] {
+  const all = rangePartsOf(rows);
+  const splitting = all.filter((part) => filterByParts(rows, [part.key]).length < rows.length);
+  const base = Math.min(...splitting.map((part) => part.depth));
+  return splitting.map((part) => ({ ...part, depth: part.depth - base }));
+}
+
+/** The tags of these rows with how many cases carry each, in name order */
+function tagItemsOf(rows: OverviewRow[]): PickerItem[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) for (const tag of row.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([key, count]) => ({ key, label: key, count }));
+}
+
+/** Cases carrying any of the tags (as a plan's range does); every case when none is chosen */
+const filterByTags = (rows: OverviewRow[], tags: string[]): OverviewRow[] => (tags.length === 0 ? rows : rows.filter((row) => row.tags.some((tag) => tags.includes(tag))));
+
+const toggled = (list: string[], key: string): string[] => (list.includes(key) ? list.filter((other) => other !== key) : [...list, key]);
+
 function filterOverviewRows(rows: OverviewRow[], query: string): OverviewRow[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((row) => overviewRowSearchText(row).toLowerCase().includes(q));
+  const terms = searchTerms(query);
+  if (terms.length === 0) return rows;
+  return rows.filter((row) => matchesTerms(overviewRowSearchText(row), terms));
 }
 
 /** Column headings, shared by the rendered table and the Markdown export so they cannot drift */
@@ -1776,6 +1968,11 @@ function ScopePage({
   // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
   const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
   const pendingJump = useRef<string | null>(null);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [partFilter, setPartFilter] = useState<string[]>([]);
+  const scopeHash = scopeHashFor(route.scope);
+  // The parts on offer belong to the page, so a choice made on another one would only hide everything here
+  useEffect(() => setPartFilter([]), [scopeHash]);
   const target = route.target;
   const isOpen = (tcId: string) => opened.get(tcId) ?? (target !== null && testCaseAnchorId(tcId) === target);
   const toggleCase = (tcId: string) => setOpened((current) => new Map(current).set(tcId, !isOpen(tcId)));
@@ -1809,7 +2006,14 @@ function ScopePage({
   const scopeRows = scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
   const shownIds = new Set(scopeRows.map((row) => row.tcId));
   const trimmedQuery = query.trim();
-  const visibleRows = filterOverviewRows(scopeRows, trimmedQuery);
+  const visibleRows = filterByTags(filterByParts(filterOverviewRows(scopeRows, trimmedQuery), partFilter), tagFilter);
+  const partItems = scopePartsOf(scopeRows);
+  const tagItems = tagItemsOf(scopeRows);
+  const partChipList = partChips(partFilter, partItems, (key) => setPartFilter((current) => current.filter((other) => other !== key)));
+  const tagChipList = tagChips(tagFilter, (tag) => setTagFilter((current) => current.filter((other) => other !== tag)));
+  // Any of the parts, and any of the tags; no frame around each group, which only added another outline to every chip
+  const both = partChipList.length > 0 && tagChipList.length > 0;
+  const filterChips = html`${partChipList.length > 0 ? html`<span class="chip-group">${joinChips(partChipList, t("chips.or"))}</span>` : null}${both ? html`<span class="chip-join">${t("chips.and")}</span>` : null}${tagChipList.length > 0 ? html`<span class="chip-group">${joinChips(tagChipList, t("chips.or"))}</span>` : null}`;
   const allOpen = visibleRows.length > 0 && visibleRows.every((row) => isOpen(row.tcId));
   const setAll = (open: boolean) => setOpened(new Map(visibleRows.map((row) => [row.tcId, open])));
   const nav: CaseNav = {
@@ -1823,6 +2027,17 @@ function ScopePage({
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
       <div class="scope-table-wrap">
+        ${html`<div class="plan-range filter-chips">
+              <span class="plan-label" title=${t("filter.byHelp")}>${t("filter.by")}</span>
+              <${MultiPicker}
+                label=${t("picker.parts")}
+                items=${partItems.map((part) => ({ key: part.key, label: part.label.split(" › ").pop() ?? part.label, depth: part.depth }))}
+                selected=${partFilter}
+                onToggle=${(key: string) => setPartFilter((current) => toggled(current, key))}
+              />
+              <${MultiPicker} label=${t("picker.tags")} items=${tagItems} selected=${tagFilter} onToggle=${(tag: string) => setTagFilter((current) => toggled(current, tag))} />
+              ${filterChips}
+            </div>`}
         <div class="filter-bar">
           <input
             class="overview-search"
@@ -1834,7 +2049,7 @@ function ScopePage({
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
             <${RunProgress} rows=${visibleRows} />
-            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== ""} />
+            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== "" || tagFilter.length > 0 || partFilter.length > 0} />
             ${visibleRows.length > 0
               ? html`<button class="copy-btn" title=${allOpen ? t("scope.collapseAll") : t("scope.expandAll")} onClick=${() => setAll(!allOpen)}>
                   <span aria-hidden="true">${allOpen ? "▾" : "▸"}</span>
@@ -1850,7 +2065,7 @@ function ScopePage({
         ${visibleRows.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
           : html`<${CaseNavContext.Provider} value=${nav}>
-              <${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${onQueryChange} query=${trimmedQuery} expand=${{ isOpen, toggle: toggleCase }} />
+              <${ScopeTable} rows=${visibleRows} depth=${resolved.depth} onTag=${(tag: string) => setTagFilter((current) => toggled(current, tag))} query=${trimmedQuery} expand=${{ isOpen, toggle: toggleCase }} />
             </${CaseNavContext.Provider}>`}
       </div>
       ${scopeIds ? html`<${ScopeNote} hiddenRows=${pageRows.filter((row) => !shownIds.has(row.tcId))} plan=${plan} editHref=${planHashForScope(route.scope)} />` : null}
@@ -1982,7 +2197,7 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
     `> ${t("plan.review.summary", {
       range: !planHasRange(plan)
         ? t("plan.review.allTags")
-        : [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(", "),
+        : [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(` ${t("chips.or")} `),
       total: inRange.length,
       run: tally.run,
       skip: tally.skip,
@@ -2066,7 +2281,7 @@ function PlanPage({
   if (!run) return html`<p class="empty">${t("plan.needRun")}</p>`;
   if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${PLAN_HASH}>${t("scope.backToAll")}</a></p>`;
 
-  const allTags = [...new Set(rows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
+  const allTags = tagItemsOf(rows);
   const allParts = rangePartsOf(rows);
   const rangeRows = planRange(rows, plan);
   const { rowKey } = resolved;
@@ -2142,51 +2357,27 @@ function PlanPage({
       <div class="plan-bar" ref=${barRef}>
         <div class="plan-head">
           <div class="plan-range">
-            <span class="plan-label">${t("plan.range")}</span>
-            ${plan.tags.map(
-              (tag) => html`<span class="tag-chip plan-range-chip" key=${tag}>
-                ${tag}
-                <button class="plan-chip-x" aria-label=${t("plan.removeTag", { tag })} title=${t("plan.removeTag", { tag })} onClick=${() => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))}>×</button>
-              </span>`
+            <span class="plan-label" title=${t("plan.rangeHelp")}>${t("plan.range")}</span>
+            <${MultiPicker}
+              label=${t("plan.addPart")}
+              items=${allParts.map((part) => ({ key: part.key, label: part.label.split(" › ").pop() ?? part.label, depth: part.depth }))}
+              selected=${plan.parts}
+              onToggle=${(key: string) => onPlan((current) => ({ ...current, parts: toggled(current.parts, key) }))}
+            />
+            <${MultiPicker}
+              label=${t("plan.addTag")}
+              items=${allTags}
+              selected=${plan.tags}
+              onToggle=${(tag: string) => onPlan((current) => ({ ...current, tags: toggled(current.tags, tag) }))}
+            />
+            ${joinChips(
+              [
+                ...partChips(plan.parts, allParts, (key) => onPlan((current) => ({ ...current, parts: current.parts.filter((other) => other !== key) }))),
+                ...tagChips(plan.tags, (tag) => onPlan((current) => ({ ...current, tags: current.tags.filter((other) => other !== tag) }))),
+              ],
+              t("chips.or")
             )}
-            ${plan.parts.map((key) => {
-              const label = rangePartLabel(allParts, key);
-              return html`<span class="tag-chip plan-range-chip plan-range-part" key=${key}>
-                ${label}
-                <button class="plan-chip-x" aria-label=${t("plan.removePart", { name: label })} title=${t("plan.removePart", { name: label })} onClick=${() => onPlan((current) => ({ ...current, parts: current.parts.filter((other) => other !== key) }))}>×</button>
-              </span>`;
-            })}
-            <select
-              class="plan-tag-add"
-              aria-label=${t("plan.addPart")}
-              value=""
-              onChange=${(e: Event) => {
-                const select = e.target as HTMLSelectElement;
-                const key = select.value;
-                select.value = "";
-                if (key) onPlan((current) => ({ ...current, parts: [...current.parts, key] }));
-              }}
-            >
-              <option value="">${t("plan.addPart")}</option>
-              ${allParts
-                .filter((part) => !plan.parts.includes(part.key))
-                .map((part) => html`<option key=${part.key} value=${part.key}>${"\u00a0\u00a0".repeat(part.depth)}${part.label.split(" › ").pop()}</option>`)}
-            </select>
-            <select
-              class="plan-tag-add"
-              aria-label=${t("plan.addTag")}
-              value=""
-              onChange=${(e: Event) => {
-                const select = e.target as HTMLSelectElement;
-                const tag = select.value;
-                select.value = "";
-                if (tag) onPlan((current) => ({ ...current, tags: [...current.tags, tag] }));
-              }}
-            >
-              <option value="">${t("plan.addTag")}</option>
-              ${allTags.filter((tag) => !plan.tags.includes(tag)).map((tag) => html`<option key=${tag} value=${tag}>${tag}</option>`)}
-            </select>
-            ${!planHasRange(plan) ? html`<span class="plan-note">${t("plan.rangeAll")}</span>` : null}
+            ${planHasRange(plan) ? html`<span class="plan-note">${t("plan.inRange", { count: caseCountText(rangeRows.length) })}</span>` : html`<span class="plan-note">${t("plan.rangeAll")}</span>`}
           </div>
           <div class="plan-summary">${t("plan.summary", { ...tally })}</div>
         </div>
@@ -2261,7 +2452,7 @@ function PlanPage({
           : html`<${ScopeTable}
               rows=${listed}
               depth=${resolved.depth}
-              onTag=${onQueryChange}
+              onTag=${(tag: string) => onPlan((current) => ({ ...current, tags: toggled(current.tags, tag) }))}
               query=${trimmedQuery}
               plan=${cellsFor}
               planSelect=${{ selected, listedIds, onMany: tick }}
@@ -3004,7 +3195,7 @@ function CommandPalette({
   }, []);
 
   const trimmed = query.trim();
-  const q = trimmed.toLowerCase();
+  const terms = searchTerms(trimmed);
   const matched = trimmed ? filterOverviewRows(overviewRows, trimmed).length : 0;
   // Offered first, so the same typing that finds a single test case can instead open the
   // overview narrowed to everything that matched
@@ -3023,7 +3214,7 @@ function CommandPalette({
       : [];
   const results = [
     ...overviewEntry,
-    ...(q ? entries.filter((e) => e.searchText.toLowerCase().includes(q)) : entries),
+    ...(terms.length > 0 ? entries.filter((e) => matchesTerms(e.searchText, terms)) : entries),
   ].slice(0, 50);
   const clampedSelected = Math.min(selected, Math.max(0, results.length - 1));
 

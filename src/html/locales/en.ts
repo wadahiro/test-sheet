@@ -36,7 +36,7 @@ export const en = {
   "kind.testcase": "Test Case",
 
   // Command palette
-  "palette.placeholder": "🔍 Search test suites, sections, test cases (Esc to close)",
+  "palette.placeholder": "🔍 Search test suites, sections, test cases; several words must all match (Esc to close)",
   "palette.filterAll": 'Filter all test cases by "{query}"',
   "palette.none": "No matches",
 
@@ -65,6 +65,16 @@ export const en = {
   "scope.count.other": "{count} cases",
   "filter.placeholder": "🔍 Filter by ID, name, section, status, method, or tag",
   "filter.none": "No matches",
+  "filter.by": "Filter",
+  "picker.parts": "Domain / feature / suite",
+  "chips.or": "or",
+  "chips.and": "and",
+  "filter.byHelp": "Within the chosen domains, features or suites, and carrying one of the chosen tags",
+  "plan.rangeHelp": "Cases carrying any of these tags, or under any of these domains, features or suites",
+  "plan.inRange": "{count} in range",
+  "picker.tags": "Tags",
+  "picker.search": "Search",
+  "picker.none": "Nothing matches",
   "filter.byTag": "Filter by this tag",
   "scope.expandAll": "Expand all",
   "scope.collapseAll": "Collapse all",
