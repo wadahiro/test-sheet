@@ -198,7 +198,10 @@ In `parameterized_tests`, `automation` and `automation_note` can be set on the e
 (pattern, then template, then entry). `{{key}}` placeholders work in `automation_note` too.
 
 `--tests <dir|glob>` (repeatable, relative to the working directory) searches test code for each
-case's ID. An `automated` or `semi` case shows the test around the ID; the ID can be in:
+case's ID. An `automated` or `semi` case shows the test around the ID, headed by its path below
+the directory `--tests` names; hovering it shows the path as `--tests` wrote it (`../app/src/test/…`).
+No absolute path goes into the page, so the generated file is the same wherever it is built and
+does not show your home directory. The ID can be in:
 
 - the test's name or an annotation (`"LOGIN-001: …" { }`, `@DisplayName("LOGIN-001 …")`): that
   test is shown

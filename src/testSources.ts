@@ -2,12 +2,16 @@
 // case's ID, and the test method around each hit is cut out so the page can show it.
 
 import { readFileSync, statSync } from "fs";
-import { relative, resolve } from "path";
+import { isAbsolute, posix, relative, resolve } from "path";
 
 export interface SourceSnippet {
   /** Path as shown to the reader: relative to the directory `--tests` named, so a deep checkout does not put its own location in front */
   file: string;
-  /** Where the file really is, for a tooltip */
+  /**
+   * `file` under the directory as `--tests` wrote it, for a tooltip saying which file it is. Never absolute
+   * (an absolute `--tests` adds nothing to `file`): the page is handed around, and an absolute path would
+   * show the user's home and differ from machine to machine.
+   */
   path: string;
   startLine: number;
   endLine: number;
@@ -20,6 +24,8 @@ interface SourceFile {
   path: string;
   /** The directory the pattern that found the file starts from */
   base: string;
+  /** That directory as the pattern wrote it, or "" when it was absolute */
+  shownBase: string;
   text: string;
 }
 
@@ -38,17 +44,17 @@ const IGNORED_DIRECTORIES = ["node_modules", ".git", "build", "dist", "target", 
 const GLOB_CHARS = /[*?[\]{}!]/;
 
 /** The directory a pattern starts from and the glob below it; a plain directory means everything under it */
-function splitPattern(pattern: string): { base: string; glob: string } {
-  const absolute = resolve(pattern);
+function splitPattern(pattern: string): { base: string; written: string; glob: string } {
+  const at = (written: string, glob: string) => ({ base: resolve(written), written, glob });
   try {
-    if (!GLOB_CHARS.test(pattern) && statSync(absolute).isDirectory()) return { base: absolute, glob: "**/*" };
+    if (!GLOB_CHARS.test(pattern) && statSync(resolve(pattern)).isDirectory()) return at(pattern.replace(/\/+$/, "") || "/", "**/*");
   } catch {
     // Not on disk: treated as a glob below, which then matches nothing
   }
   const segments = pattern.split("/");
   const firstGlob = segments.findIndex((segment) => GLOB_CHARS.test(segment));
-  if (firstGlob === -1) return { base: resolve(segments.slice(0, -1).join("/") || "."), glob: segments[segments.length - 1] };
-  return { base: resolve(segments.slice(0, firstGlob).join("/") || "."), glob: segments.slice(firstGlob).join("/") };
+  if (firstGlob === -1) return at(segments.slice(0, -1).join("/") || ".", segments[segments.length - 1]);
+  return at(segments.slice(0, firstGlob).join("/") || ".", segments.slice(firstGlob).join("/"));
 }
 
 /** The directories the patterns start from, for watching them */
@@ -57,7 +63,8 @@ export const testRoots = (patterns: string[]): string[] => [...new Set(patterns.
 async function readSourceFiles(patterns: string[]): Promise<{ files: SourceFile[] }> {
   const files = new Map<string, SourceFile>();
   for (const pattern of patterns) {
-    const { base, glob } = splitPattern(pattern);
+    const { base, written, glob } = splitPattern(pattern);
+    const shownBase = isAbsolute(written) ? "" : written;
     for await (const path of new Bun.Glob(glob).scan({ cwd: base, absolute: true, onlyFiles: true })) {
       if (files.has(path)) continue;
       if (path.split("/").some((segment) => IGNORED_DIRECTORIES.includes(segment))) continue;
@@ -66,7 +73,7 @@ async function readSourceFiles(patterns: string[]): Promise<{ files: SourceFile[
         const text = readFileSync(path, "utf8");
         // A NUL byte means a binary file, which has no method to show
         if (text.includes("\u0000")) continue;
-        files.set(path, { path, base, text });
+        files.set(path, { path, base, shownBase, text });
       } catch {
         // Unreadable files are as good as absent
       }
@@ -309,9 +316,10 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
 
       const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
+      const shown = relative(file.base, file.path).replaceAll("\\", "/");
       const snippet: SourceSnippet = {
-        file: relative(file.base, file.path),
-        path: file.path,
+        file: shown,
+        path: posix.join(file.shownBase, shown),
         startLine: range.start + 1,
         endLine: end + 1,
         code: shape.lines.slice(range.start, end + 1).join("\n"),
