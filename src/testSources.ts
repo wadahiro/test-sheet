@@ -223,19 +223,22 @@ function declaredName(lineBefore: string): string | undefined {
   return lineBefore.match(/(\w+)\s*(?::[^=]*)?=\s*[\w.<>]*\s*$/)?.[1];
 }
 
-/** The first block in the file that a line naming `name` opens: `name.forEach {`, `for (c in name) {`, `withData(name) {` */
-function loopOver(shape: FileShape, text: string, name: string, declaration: BracketPair): BracketPair | undefined {
+/** The blocks in the file that lines naming `name` open: `name.forEach {`, `for (c in name) {`, `withData(name) {` */
+function loopsOver(shape: FileShape, text: string, name: string, declaration: BracketPair): BracketPair[] {
+  const blocks = new Map<number, BracketPair>();
   const declarationLine = lineOf(shape.starts, declaration.open);
   for (const match of text.matchAll(new RegExp(`(?<![\\w.])${escapeRegExp(name)}(?!\\w)`, "g"))) {
     const at = match.index!;
     const line = lineOf(shape.starts, at);
     if (line === declarationLine || contains(declaration, at)) continue;
     // `val byId = CASES.associateBy { … }` derives more data rather than running the cases
-    if (declaredName(text.slice(shape.starts[line], at))) continue;
-    const block = shape.braces.find((pair) => pair.open > at && lineOf(shape.starts, pair.open) === line);
-    if (block) return block;
+    // An assignment inside call arguments (ts = ROWS) names an argument, not derived data.
+    if (declaredName(text.slice(shape.starts[line], at)) && argDepthAt(shape, at) === argDepthAt(shape, shape.starts[line])) continue;
+    // Inline lambdas in filter/sortedBy belong to the loop expression, not its body.
+    const block = shape.braces.filter((pair) => pair.open > at && lineOf(shape.starts, pair.open) === line && lineOf(shape.starts, pair.close) > line).at(-1);
+    if (block) blocks.set(block.open, block);
   }
-  return undefined;
+  return [...blocks.values()];
 }
 
 const onlyBlankBetween = (lines: string[], from: number, to: number): boolean => lines.slice(from + 1, to).every((line) => line.trim() === "");
@@ -287,10 +290,15 @@ function snippetRanges(shape: FileShape, text: string, offset: number): LineRang
     const after = bodyBelow(shape, data.close + 1);
     return after ? joined({ start: dataEnd, end: lineOf(starts, after.close) }) : window;
   }
-  const loop = loopOver(shape, text, name, data);
-  if (!loop) return window;
-  const loopRange = withLeadIn(lines, { start: lineOf(starts, loop.open), end: lineOf(starts, loop.close) });
-  return loopRange.start > dataEnd && onlyBlankBetween(lines, dataEnd, loopRange.start) ? joined(loopRange) : [row, loopRange];
+  const loops = loopsOver(shape, text, name, data);
+  if (loops.length === 0) return window;
+  const ranges = loops.map((loop) => withLeadIn(lines, { start: lineOf(starts, loop.open), end: lineOf(starts, loop.close) }));
+  if (ranges.length === 1) {
+    const loopRange = ranges[0];
+    return loopRange.start > dataEnd && onlyBlankBetween(lines, dataEnd, loopRange.start) ? joined(loopRange) : [row, loopRange];
+  }
+  // The predicates are arbitrary code, so every consumer is shown rather than guessing which runs a row.
+  return [row, ...ranges];
 }
 
 function escapeRegExp(value: string): string {
@@ -324,6 +332,8 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
           const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
           const kotest = header.match(/^\s*"((?:\\.|[^"\\])*)"\s*-\s*$/) ?? header.match(/^\s*(?:context|describe|given|when|and)\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)\s*$/);
           if (kotest) return [kotest[1]];
+          const dynamic = header.match(/^\s*((?:withContexts|withData)(?:<[^>]+>)?\s*\(.*\))\s*$/);
+          if (dynamic) return [dynamic[1]];
           if (!/\bclass\s+\w+/.test(header)) return [];
           const lead = withLeadIn(shape!.lines, { start: line, end: line });
           const annotations = shape!.lines.slice(lead.start, line + 1).join("\n");

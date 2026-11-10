@@ -208,8 +208,15 @@ does not show your home directory. The ID can be in:
 - data passed straight to a test (`withData(Case("LOGIN-001", …)) { }`, `@CsvSource({"LOGIN-001, …"})`,
   `@ValueSource(strings = ["LOGIN-001"])`): the data and the test it feeds
 - data in a variable that a loop in the same file goes over (`val cases = listOf(Case("LOGIN-001", …))`
-  and later `cases.forEach { … }`): the row holding the ID and the loop, one snippet if they are
-  next to each other and two otherwise
+  and later `cases.forEach { … }`, `withTests(cases) { … }`, `withContexts(cases) { … }` or
+  `withData(cases) { … }`): the row holding the ID and every matching loop. With one
+  adjacent loop they share a snippet; otherwise the row and loops are separate snippets. Inline
+  blocks in expressions such as `ROWS.filter { … }.forEach {` are skipped when locating the
+  multiline loop body. When several loops consume the same variable, all are shown for every ID
+  because their predicates cannot be evaluated statically. Kotest calls with name functions such as
+  `withTests<Row>(::name, ROWS)`, `withTests({ "${it.id}: …" }, ROWS)` and
+  `withTests(nameFn = { it.id }, ts = ROWS)` are also supported when the body opens on that line
+  and continues on subsequent lines
 
 Anything else, such as data in a different file from its loop, a language without braces, or an
 ID built at run time (`"LOGIN-00$n"`), shows the lines around the ID, or nothing when the ID never
@@ -434,7 +441,10 @@ Parameterized cases inherit `layer` and `automation_reason` in pattern > templat
 
 The layer summary lists each suite's totals and automated / semi / manual counts. Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
 
-With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. Unrecognized containers are omitted; names are not automatically compared with preconditions.
+With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. Dynamic `withContexts(…)` and
+`withData(…)` containers whose call is on one line are shown as their source call (for example,
+`withContexts(END_DATES)`), since their runtime names cannot be determined statically.
+Unrecognized containers are omitted; names are not automatically compared with preconditions.
 
 ### Project layer declarations and display names
 
