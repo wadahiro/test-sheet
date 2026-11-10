@@ -11,6 +11,7 @@ import { formatTestData } from "./caseFormat";
 import type { LocaleDefinition } from "./i18n";
 import type { SourceIndex, SourceSnippet } from "../testSources";
 import { autolinkExtension, caseReferenceRule, type AutolinkRule } from "../autolinks";
+import { warn } from "../warnings";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -151,10 +152,10 @@ function sourceFields(tc: TestSuiteTestCases["testCases"][number], index: Source
   const found = index.snippetsFor(tc._tcId ?? "");
   const where = (snippet: SourceSnippet) => `${snippet.file}:${snippet.startLine}`;
   if (!tc.automation || tc.automation === "manual") {
-    if (found.length > 0) console.error(`Warning: ${tc._tcId} is manual but test code mentions it (${found.map(where).join(", ")}); is automation out of date?`);
+    if (found.length > 0) warn(`${tc._tcId} is manual but test code mentions it (${found.map(where).join(", ")}); is automation out of date?`);
     return found.length > 0 ? { unexpectedSources: found.map(where) } : {};
   }
-  if (found.length === 0) console.error(`Warning: ${tc._tcId} is ${tc.automation} but no test code mentions it`);
+  if (found.length === 0) warn(`${tc._tcId} is ${tc.automation} but no test code mentions it`);
   return { sources: found };
 }
 
@@ -171,6 +172,7 @@ async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { not
       }))
     ),
     ...(tc.notes ? { notesHtml: await notesMarked.parse(tc.notes) } : {}),
+    ...(tc.automation_note ? { automationNoteHtml: await notesMarked.parse(tc.automation_note) } : {}),
     ...(testDataHtml ? { testDataHtml } : {}),
   };
 }

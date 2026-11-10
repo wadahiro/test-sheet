@@ -1,0 +1,22 @@
+metadata:
+  type_name: Password policy
+  id_prefix: PWPOLICY
+parameterized_tests:
+  - category: Rejected passwords
+    id_prefix: PWPOLICY-REJECT-
+    # Every pattern below inherits this unless it sets its own
+    automation: automated
+    patterns:
+      - id: "01"
+        input: "fewer than 8 characters"
+      - id: "02"
+        input: "no digit"
+      - id: "03"
+        input: "the login ID itself"
+        automation: semi
+        automation_note: "The error message names the rule that was broken"
+    template:
+      name: "A password with {{input}} is rejected"
+      steps:
+        - action: "Set a new password with {{input}}"
+          expected: "The password is rejected and the old one stays valid"

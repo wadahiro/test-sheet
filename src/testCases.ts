@@ -4,6 +4,7 @@ import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
 import { readFileSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { parse } from "yaml";
+import { warn } from "./warnings";
 
 export interface Step {
   action: string;
@@ -49,6 +50,8 @@ export interface TestCase {
   tags?: string[];
   /** manual (default) / automated / semi — automation state, orthogonal to status. */
   automation?: "manual" | "automated" | "semi";
+  /** semi: what a person still checks by hand, since the automated part covers only some of the case */
+  automation_note?: string;
   _tcId?: string;
 }
 
@@ -149,6 +152,8 @@ function mergeTags(...lists: unknown[]): string[] | undefined {
   return unique.length > 0 ? unique : undefined;
 }
 
+const firstDefined = (...values: unknown[]): unknown => values.find((value) => value !== undefined && value !== null);
+
 function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
   if (!parameterizedTests || parameterizedTests.length === 0) {
     return [];
@@ -161,13 +166,15 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
     const category = pt.category as string | undefined;
     const idPrefix = (pt.id_prefix as string | undefined) ?? "";
     const entryTags = pt.tags;
+    const entryAutomation = pt.automation;
+    const entryAutomationNote = pt.automation_note;
     const preconditions = pt.preconditions as unknown[] | undefined;
     const patterns = pt.patterns as Array<Record<string, unknown>>;
     const template = pt.template as Record<string, unknown>;
     const formatConfig = (pt.format as FormatConfig) || {};
 
     for (const pattern of patterns) {
-      const { id, notes, tags: patternTags, ...params } = pattern;
+      const { id, notes, tags: patternTags, automation, automation_note: automationNote, ...params } = pattern;
       const hasId = id !== undefined && id !== null;
       const tcId = hasId ? `${idPrefix}${id}` : idPrefix;
       const allParams = { ...params, ...(hasId ? { id } : {}), tc_id: tcId };
@@ -203,6 +210,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         }
       }
 
+      const note = firstDefined(automationNote, template.automation_note, entryAutomationNote);
       expandedCases.push({
         name,
         category,
@@ -211,6 +219,9 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         notes: (notes as string) || null,
         id: hasId ? tcId : undefined,
         tags: mergeTags(entryTags, template.tags, patternTags),
+        // Unlike tags these are one value each, so the most specific level that sets one wins
+        automation: firstDefined(automation, template.automation, entryAutomation) as TestCase["automation"],
+        automation_note: typeof note === "string" ? expandPlaceholders(note, allParams, formatConfig) : (note as undefined),
       });
     }
   }
@@ -278,6 +289,28 @@ function validateTags(testCases: TestCase[], metadataTags: unknown, sourceFile: 
   }
 }
 
+const AUTOMATION_VALUES = ["manual", "automated", "semi"];
+
+/**
+ * A misspelt automation value would otherwise read as manual everywhere. A semi case's note says what is
+ * left to a person, which is what whoever runs it needs; on any other case it has nothing to describe.
+ */
+function validateAutomation(testCases: TestCase[], sourceFile: string): void {
+  for (const tc of testCases) {
+    const label = tc.id ?? tc.name;
+    if (tc.automation !== undefined && tc.automation !== null && !AUTOMATION_VALUES.includes(tc.automation)) {
+      throw new Error(`Invalid automation "${String(tc.automation)}" on test case "${label}" in ${sourceFile}: use ${AUTOMATION_VALUES.join(", ")}.`);
+    }
+    const note = tc.automation_note;
+    if (note !== undefined && note !== null && typeof note !== "string") {
+      throw new Error(`Invalid automation_note on test case "${label}" in ${sourceFile}: it must be text.`);
+    }
+    const hasNote = typeof note === "string" && note.trim() !== "";
+    if (tc.automation === "semi" && !hasNote) warn(`${label} is semi but has no automation_note saying what is checked by hand (${sourceFile})`);
+    if (tc.automation !== "semi" && hasNote) warn(`${label} has an automation_note but is ${tc.automation ?? "manual"}, not semi (${sourceFile})`);
+  }
+}
+
 function sortByCategoryOrder(testCases: TestCase[], categoryOrder: string[] | undefined): TestCase[] {
   if (!categoryOrder || categoryOrder.length === 0) {
     return testCases;
@@ -320,7 +353,7 @@ function loadGuides(guidePaths: string[]): string {
         contents.push(content);
       }
     } else {
-      console.error(`Warning: guide file not found: ${guidePath}`);
+      warn(`guide file not found: ${guidePath}`);
     }
   }
 
@@ -379,6 +412,7 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
   const suiteTags = yamlData.metadata.tags;
   const taggedCases = suiteTags ? sortedCases.map((tc) => ({ ...tc, tags: mergeTags(suiteTags, tc.tags) })) : sortedCases;
   const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
+  validateAutomation(testCases.map((tc) => ({ ...tc, id: tc._tcId })), yamlFile);
 
   const autolinks = parseAutolinkRules(yamlData.metadata.autolinks, `${yamlFile} (metadata)`);
 
@@ -461,7 +495,7 @@ export async function loadAllTestSuites(rootDir: string, exclude: string[] = [])
       const featureLabel = (domain && feature && readReadmeTitle(resolve(rootDir, domain, feature))) || feature;
       results.push({ ...loaded, sourceFile: file, domain, domainLabel, feature, featureLabel });
     } catch (err) {
-      console.error(`Warning: failed to load ${file}:`, err);
+      warn(`failed to load ${file}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return results;

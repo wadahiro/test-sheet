@@ -2251,6 +2251,17 @@ a.link-btn { text-decoration: none; }
 }
 
 .notes .eyebrow { margin-bottom: 2px; color: var(--warn); }
+
+/* What the automated test of a semi case leaves to a person: read before the steps, so it sits above them */
+.automation-note {
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-subtle);
+  font-size: 0.875rem;
+}
+
+.automation-note .eyebrow { margin-bottom: 2px; }
 .notes-body { min-width: 0; }
 .notes-body > :first-child { margin-top: 0; }
 .notes-body > :last-child { margin-bottom: 0; }

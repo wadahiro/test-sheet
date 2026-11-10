@@ -176,6 +176,51 @@ rejected at load time.
 An explicit `id` must start with `<metadata.id_prefix>-`, and IDs must be unique across every
 `testcases.yaml` under the scan root — a suite whose IDs collide with an earlier one fails to load.
 
+### Automated tests (`automation`, `--tests`)
+
+`automation` says how a case is run: `manual` (the default), `automated`, or `semi`, where an
+automated test checks part of the case and a person checks the rest. For a `semi` case,
+`automation_note` says what that rest is. It is shown above the case's steps, as a tooltip on its
+Method cell, and in Markdown copied from the page. A `semi` case without it, or a note on a case
+that is not `semi`, is warned about when the sheet is generated. Any other `automation` value
+stops the file from loading.
+
+```yaml
+test_cases:
+  - name: Can log in with a valid ID and password
+    id: LOGIN-001
+    automation: semi
+    automation_note: "How the dashboard looks after login, and the wording of the notification email"
+```
+
+In `parameterized_tests`, `automation` and `automation_note` can be set on the entry, its
+`template` or a pattern. Unlike `tags`, which add up, the most specific level that sets one wins
+(pattern, then template, then entry). `{{key}}` placeholders work in `automation_note` too.
+
+`--tests <dir|glob>` (repeatable, relative to the working directory) searches test code for each
+case's ID. An `automated` or `semi` case shows the test around the ID; the ID can be in:
+
+- the test's name or an annotation (`"LOGIN-001: …" { }`, `@DisplayName("LOGIN-001 …")`): that
+  test is shown
+- data passed straight to a test (`withData(Case("LOGIN-001", …)) { }`, `@CsvSource({"LOGIN-001, …"})`,
+  `@ValueSource(strings = ["LOGIN-001"])`): the data and the test it feeds
+- data in a variable that a loop in the same file goes over (`val cases = listOf(Case("LOGIN-001", …))`
+  and later `cases.forEach { … }`): the row holding the ID and the loop, one snippet if they are
+  next to each other and two otherwise
+
+Anything else, such as data in a different file from its loop, a language without braces, or an
+ID built at run time (`"LOGIN-00$n"`), shows the lines around the ID, or nothing when the ID never
+appears as written. A case marked `automated` or `semi` that no test code mentions is warned
+about, and so is a `manual` case that some test code does mention.
+
+For CI, `--strict` with `--out` writes the file and then exits with status 1 if anything was
+warned about, for example a suite that failed to load, a mismatch between `automation` and the
+test code, a `semi` case without `automation_note`, a missing guide file or a bad autolink rule.
+
+```bash
+bun run src/cli.ts ./tests --tests ../app/src/test --out test-cases.html --strict
+```
+
 ### Linking ticket numbers (`autolinks`)
 
 Write a ticket number as plain text and let the configuration say where it leads, as GitHub and GitLab

@@ -22,6 +22,7 @@ import type { LocaleDefinition } from "./html/i18n";
 import { loadLocaleFile, localeTemplate } from "./locales";
 import { buildSourceIndex, testRoots } from "./testSources";
 import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
+import { warn, warningCount } from "./warnings";
 
 interface CliArgs {
   rootDir: string;
@@ -31,6 +32,7 @@ interface CliArgs {
   localeFiles: string[];
   autolinks: AutolinkRule[];
   tests: string[];
+  strict: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -41,6 +43,7 @@ function parseArgs(argv: string[]): CliArgs {
   const localeFiles: string[] = [];
   const autolinks: AutolinkRule[] = [];
   const tests: string[] = [];
+  let strict = false;
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -76,6 +79,8 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       tests.push(pattern);
+    } else if (argv[i] === "--strict") {
+      strict = true;
     } else if (argv[i] === "--print-locale") {
       // Starting point for a translation: every key, in English, as a locale file
       process.stdout.write(localeTemplate(argv[++i] || "xx"));
@@ -99,6 +104,9 @@ Options:
                          after each suite's own metadata.autolinks; repeatable.
   --tests <dir|glob>     Search these files (relative to the working directory) for each automated
                          case's ID and show the test method around it in the case. Repeatable.
+  --strict               With --out: write the file, then exit with status 1 if anything was warned
+                         about (a suite that failed to load, automation that disagrees with the test
+                         code, a semi case without automation_note, a missing guide, ...), for CI
   --print-locale [code]  Print a locale file with every UI string in English, to translate
 
 Examples:
@@ -106,6 +114,7 @@ Examples:
   bun run src/cli.ts ./tests
   bun run src/cli.ts ./tests --out test-cases.html
   bun run src/cli.ts ./tests --exclude "**/_template/**"
+  bun run src/cli.ts ./tests --tests ../app/src/test --out test-cases.html --strict
 `);
       process.exit(0);
     } else {
@@ -113,14 +122,19 @@ Examples:
     }
   }
 
-  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests };
+  if (strict && !outFile) {
+    console.error("Error: --strict needs --out (the server keeps running whatever it warns about)");
+    process.exit(1);
+  }
+
+  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict };
 }
 
 async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
   const locales: LocaleDefinition[] = [];
   for (const file of files) {
     const { locale, unknownKeys } = await loadLocaleFile(file);
-    if (unknownKeys.length > 0) console.error(`Warning: ${file}: ignoring unknown keys: ${unknownKeys.join(", ")}`);
+    if (unknownKeys.length > 0) warn(`${file}: ignoring unknown keys: ${unknownKeys.join(", ")}`);
     locales.push(locale);
   }
   return locales;
@@ -143,10 +157,16 @@ async function render(config: RenderConfig, liveReload: boolean): Promise<{ html
   return { html };
 }
 
-async function generateStatic(config: RenderConfig, outFile: string) {
+/** The file is written even when strict fails, since it shows the cases the warnings are about */
+async function generateStatic(config: RenderConfig, outFile: string, strict: boolean) {
   const { html } = await render(config, false);
   await Bun.write(outFile, html);
   console.log(`Generated: ${outFile}`);
+  const warnings = warningCount();
+  if (strict && warnings > 0) {
+    console.error(`Error: ${warnings} warning(s) with --strict`);
+    process.exit(1);
+  }
 }
 
 function serve(config: RenderConfig, port: number) {
@@ -227,11 +247,11 @@ function serve(config: RenderConfig, port: number) {
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests } = parseArgs(process.argv.slice(2));
+  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict } = parseArgs(process.argv.slice(2));
   const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests };
 
   if (outFile) {
-    await generateStatic(config, outFile);
+    await generateStatic(config, outFile, strict);
     return;
   }
 

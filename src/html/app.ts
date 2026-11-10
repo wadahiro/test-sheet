@@ -46,6 +46,10 @@ interface TestCase {
   skip?: Skip;
   tags?: string[];
   automation?: "manual" | "automated" | "semi";
+  /** semi: what a person still checks by hand */
+  automation_note?: string;
+  /** `automation_note` rendered as Markdown at generation time */
+  automationNoteHtml?: string;
   /** Test code that mentions the case; only for an automated or semi case, and absent when no code was searched */
   sources?: SourceSnippet[];
   /** Where test code mentions a case declared manual, which suggests the declaration is out of date */
@@ -134,6 +138,12 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
 
   if (tc.tags && tc.tags.length > 0) {
     lines.push(`**${t("md.tags")}:** ${tc.tags.join(", ")}`, "");
+  }
+
+  if (tc.automation && tc.automation !== "manual") lines.push(`**${t("md.method")}:** ${testMethod(tc)}`, "");
+  if (tc.automation_note) {
+    const noteLines = tc.automation_note.trim().split("\n");
+    lines.push(`**${t("md.automationNote")}:** ${noteLines[0]}`, ...noteLines.slice(1), "");
   }
 
   if (recorded) {
@@ -1020,6 +1030,12 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
               : null}
           </div>`
         : null}
+      ${tc.automationNoteHtml
+        ? html`<aside class="automation-note">
+            <h5 class="eyebrow">${t("case.automationNote")}</h5>
+            <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.automationNoteHtml }} />
+          </aside>`
+        : null}
       <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
       ${tc.sources ? html`<${CaseSources} sources=${tc.sources} />` : null}
       ${tc.notesHtml
@@ -1144,6 +1160,8 @@ interface IndexRowData {
   status: string | null;
   statusTitle: string;
   method: string;
+  /** A semi case's automation note, so the method cell says what is left to a person */
+  methodTitle: string;
   tags: string[];
   inactive: boolean;
 }
@@ -1155,6 +1173,7 @@ function indexRowData(tc: TestCase): IndexRowData {
     status: statusLabel(tc),
     statusTitle: tc.reason ?? tc.skip?.reason ?? "",
     method: testMethod(tc),
+    methodTitle: tc.automation_note ?? "",
     tags: tc.tags ?? [],
     inactive: isInactive(tc),
   };
@@ -1300,7 +1319,7 @@ function IndexRow({
           : undefined}
       ><${Highlight} text=${row.name} query=${query} /></td>
       <td class="overview-status">${row.status ? html`<span class="status-lozenge" title=${row.statusTitle}><${Highlight} text=${row.status} query=${query} /></span>` : null}</td>
-      <td class="overview-method overview-nowrap" data-label=${t("col.method")}><${Highlight} text=${row.method} query=${query} /></td>
+      <td class="overview-method overview-nowrap" data-label=${t("col.method")} title=${row.methodTitle || undefined}><${Highlight} text=${row.method} query=${query} /></td>
       <td class="overview-tags">
         <div class="tags-cell">
           <div class="tag-list">
@@ -1464,6 +1483,7 @@ interface OverviewRow {
   status: string | null;
   statusTitle: string;
   method: string;
+  methodTitle: string;
   statusKey: CaseStatus;
   methodKey: CaseMethod;
   inactive: boolean;
@@ -1521,6 +1541,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               status: statusLabel(tc),
               statusTitle: tc.reason ?? tc.skip?.reason ?? "",
               method: testMethod(tc),
+              methodTitle: tc.automation_note ?? "",
               statusKey: caseStatusKey(tc),
               methodKey: caseMethodKey(tc),
               inactive: isInactive(tc),
@@ -2869,6 +2890,7 @@ function testCaseSearchText(tc: TestCase): string {
   if (tc.test_data) parts.push(formatTestData(tc.test_data));
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
+  if (tc.automation_note) parts.push(tc.automation_note);
   if (tc.tags) parts.push(...tc.tags);
   for (const source of tc.sources ?? []) parts.push(source.file, source.code);
   return parts.join(" ");

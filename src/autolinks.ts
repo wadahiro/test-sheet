@@ -3,6 +3,7 @@
 // numbers lead. A tracker that moves then needs one edit, not one per case.
 
 import type { MarkedExtension, Tokens } from "marked";
+import { warn as reportWarning } from "./warnings";
 
 export interface AutolinkRule {
   /** Regular expression source; matched against the text between Markdown constructs */
@@ -22,10 +23,10 @@ const HTTP_URL = /^https?:\/\//i;
  * Checks what a configuration holds and keeps the rules that can work. A wrong rule is reported and
  * left out rather than failing the whole sheet, since the cases are readable without links.
  */
-export function parseAutolinkRules(raw: unknown, source: string, warn: Warn = console.error): AutolinkRule[] {
+export function parseAutolinkRules(raw: unknown, source: string, warn: Warn = reportWarning): AutolinkRule[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
-    warn(`Warning: ${source}: autolinks must be a list of { pattern, url } pairs; ignoring it.`);
+    warn(`${source}: autolinks must be a list of { pattern, url } pairs; ignoring it.`);
     return [];
   }
   const rules: AutolinkRule[] = [];
@@ -34,7 +35,7 @@ export function parseAutolinkRules(raw: unknown, source: string, warn: Warn = co
     const item = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
     const { pattern, url } = item;
     if (typeof pattern !== "string" || pattern === "" || typeof url !== "string" || url === "") {
-      warn(`Warning: ${where} needs a non-empty "pattern" and "url"; ignoring it.`);
+      warn(`${where} needs a non-empty "pattern" and "url"; ignoring it.`);
       return;
     }
     let groups: number;
@@ -42,22 +43,22 @@ export function parseAutolinkRules(raw: unknown, source: string, warn: Warn = co
       const probe = new RegExp(`${pattern}|`);
       groups = (probe.exec("") ?? []).length - 1;
       if (new RegExp(pattern).exec("")) {
-        warn(`Warning: ${where}: pattern "${pattern}" matches an empty string; ignoring it.`);
+        warn(`${where}: pattern "${pattern}" matches an empty string; ignoring it.`);
         return;
       }
     } catch (err) {
-      warn(`Warning: ${where}: pattern "${pattern}" is not a valid regular expression (${err instanceof Error ? err.message : String(err)}); ignoring it.`);
+      warn(`${where}: pattern "${pattern}" is not a valid regular expression (${err instanceof Error ? err.message : String(err)}); ignoring it.`);
       return;
     }
     if (!HTTP_URL.test(url)) {
-      warn(`Warning: ${where}: url "${url}" must start with http:// or https://; ignoring it.`);
+      warn(`${where}: url "${url}" must start with http:// or https://; ignoring it.`);
       return;
     }
     const used = [...url.matchAll(/\{(\d+)\}/g)].map((m) => Number(m[1]));
-    if (used.length === 0) warn(`Warning: ${where}: url has no {0} placeholder, so every match links to the same page.`);
+    if (used.length === 0) warn(`${where}: url has no {0} placeholder, so every match links to the same page.`);
     const missing = used.filter((n) => n > groups);
     if (missing.length > 0) {
-      warn(`Warning: ${where}: url uses {${missing[0]}} but pattern "${pattern}" has ${groups} capture group(s); ignoring it.`);
+      warn(`${where}: url uses {${missing[0]}} but pattern "${pattern}" has ${groups} capture group(s); ignoring it.`);
       return;
     }
     rules.push({ pattern, url });
