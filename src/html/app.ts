@@ -43,7 +43,7 @@ interface TestCase {
   legacy_marker?: string;
   skip?: Skip;
   tags?: string[];
-  automation?: "manual" | "idweave" | "semi";
+  automation?: "manual" | "automated" | "semi";
   scenario?: string;
 }
 

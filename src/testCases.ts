@@ -47,9 +47,9 @@ export interface TestCase {
   skip?: Skip;
   /** Free-form labels for attributes not worth a dedicated field (e.g. db_verup). */
   tags?: string[];
-  /** manual (default) / idweave / semi — automation state, orthogonal to status. */
-  automation?: "manual" | "idweave" | "semi";
-  /** Path to the idweave scenario.yaml when automation is idweave/semi. */
+  /** manual (default) / automated / semi — automation state, orthogonal to status. */
+  automation?: "manual" | "automated" | "semi";
+  /** Path to the automation script or scenario when automation is automated/semi. */
   scenario?: string;
   _tcId?: string;
 }
