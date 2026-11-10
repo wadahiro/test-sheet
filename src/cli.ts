@@ -15,8 +15,8 @@
 // (handy for pasting into a PR or issue comment).
 
 import { watch } from "fs";
-import { resolve } from "path";
-import { loadAllTestSuites } from "./testCases";
+import { dirname, resolve } from "path";
+import { loadAllTestSuites, loadLayers } from "./testCases";
 import { generateHtml } from "./html/generate";
 import type { LocaleDefinition } from "./html/i18n";
 import { loadLocaleFile, localeTemplate } from "./locales";
@@ -32,6 +32,7 @@ interface CliArgs {
   localeFiles: string[];
   autolinks: AutolinkRule[];
   tests: string[];
+  layersFile?: string;
   strict: boolean;
 }
 
@@ -44,6 +45,7 @@ function parseArgs(argv: string[]): CliArgs {
   const autolinks: AutolinkRule[] = [];
   const tests: string[] = [];
   let strict = false;
+  let layersFile: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -79,6 +81,10 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       tests.push(pattern);
+    } else if (argv[i] === "--layers") {
+      const file = argv[++i];
+      if (!file || file.startsWith("--")) throw new Error("--layers requires a YAML file");
+      layersFile = resolve(file);
     } else if (argv[i] === "--strict") {
       strict = true;
     } else if (argv[i] === "--print-locale") {
@@ -104,6 +110,7 @@ Options:
                          after each suite's own metadata.autolinks; repeatable.
   --tests <dir|glob>     Search these files (relative to the working directory) for each automated
                          case's ID and show the test method around it in the case. Repeatable.
+  --layers <file>        Declare project layers in a YAML mapping; suite declarations override fields.
   --strict               With --out: write the file, then exit with status 1 if anything was warned
                          about (a suite that failed to load, automation that disagrees with the test
                          code, a semi case without automation_note, a missing guide, ...), for CI
@@ -127,7 +134,7 @@ Examples:
     process.exit(1);
   }
 
-  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict };
+  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile };
 }
 
 async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
@@ -146,11 +153,12 @@ interface RenderConfig {
   locales: LocaleDefinition[];
   autolinks: AutolinkRule[];
   tests: string[];
+  layersFile?: string;
 }
 
 /** Test code is searched afresh on every render, so a saved test file shows up on the next reload */
 async function render(config: RenderConfig, liveReload: boolean): Promise<{ html: string }> {
-  const suites = await loadAllTestSuites(config.rootDir, config.exclude);
+  const suites = await loadAllTestSuites(config.rootDir, config.exclude, config.layersFile ? loadLayers(config.layersFile) : undefined);
   const ids = suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean);
   const sources = config.tests.length > 0 ? await buildSourceIndex(config.tests, ids) : undefined;
   const html = await generateHtml(suites, { liveReload, locales: config.locales, autolinks: config.autolinks, sources });
@@ -242,13 +250,23 @@ function serve(config: RenderConfig, port: number) {
     }
   }
 
+  if (config.layersFile) {
+    try {
+      watch(dirname(config.layersFile), (_event, filename) => {
+        if (!filename || resolve(dirname(config.layersFile!), String(filename)) === config.layersFile) notify();
+      });
+    } catch (err) {
+      console.error(`Warning: could not watch layers file: ${config.layersFile}`, err);
+    }
+  }
+
   const open = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   Bun.spawn([open, `http://localhost:${server.port}`], { stdout: "ignore", stderr: "ignore" });
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict } = parseArgs(process.argv.slice(2));
-  const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests };
+  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile } = parseArgs(process.argv.slice(2));
+  const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests, layersFile };
 
   if (outFile) {
     await generateStatic(config, outFile, strict);

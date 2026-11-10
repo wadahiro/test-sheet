@@ -1,0 +1,11 @@
+config:
+  label: Configuration tests
+  description: Configuration and decision logic with dependencies replaced
+  automation: expected
+connector:
+  label: Connector tests
+  description: The connector is real and the external service is a stub
+  automation: expected
+e2e:
+  label: End-to-end tests
+  description: The external service used by the case is real

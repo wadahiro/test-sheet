@@ -159,7 +159,7 @@ function sourceFields(tc: TestSuiteTestCases["testCases"][number], index: Source
   return { sources: found };
 }
 
-async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { notes: notesMarked, step: stepMarked }: CaseRenderers, sources: SourceIndex | undefined) {
+async function renderTestCase(tc: TestSuiteTestCases["testCases"][number] & { layerLabel?: string; layerDescription?: string }, { notes: notesMarked, step: stepMarked }: CaseRenderers, sources: SourceIndex | undefined) {
   const testDataHtml = await renderTestData(tc.test_data, notesMarked);
   return {
     ...tc,
@@ -224,9 +224,10 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         // Without a README heading the label is just the directory name, which the suite's own name describes better
         featureLabel: folded && suite.featureLabel === suite.feature ? suite.metadata.type_name : suite.featureLabel,
         folded,
+        layers: suite.metadata.layers,
         typeName: suite.metadata.type_name,
         idPrefix,
-        testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase(tc, renderers, sources))),
+        testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase({ ...tc, layerLabel: tc.layer ? suite.metadata.layers?.[tc.layer]?.label ?? tc.layer : undefined, layerDescription: tc.layer ? suite.metadata.layers?.[tc.layer]?.description : undefined }, renderers, sources))),
         guideHtml,
         guideHeadings,
         /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */

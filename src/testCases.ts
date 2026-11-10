@@ -57,8 +57,37 @@ export interface TestCase {
   _tcId?: string;
 }
 
+export interface LayerDefinition {
+  label?: string;
+  description?: string;
+  automation?: "expected" | null;
+}
+export type Layers = Record<string, LayerDefinition>;
+
+export function parseLayers(value: unknown, source: string): Layers {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid layers in ${source}: expected a mapping.`);
+  for (const [name, raw] of Object.entries(value)) {
+    if (!name.trim() || !raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Invalid layer "${name}" in ${source}.`);
+    const rule = raw as Record<string, unknown>;
+    for (const key of ["label", "description"]) if (rule[key] !== undefined && (typeof rule[key] !== "string" || !(rule[key] as string).trim())) throw new Error(`Invalid ${key} for layer "${name}" in ${source}: expected non-empty text.`);
+    if (rule.automation !== undefined && rule.automation !== null && rule.automation !== "expected") throw new Error(`Invalid automation for layer "${name}" in ${source}.`);
+  }
+  return value as Layers;
+}
+
+export function loadLayers(file: string): Layers {
+  return parseLayers(parse(readFileSync(file, "utf8")), file);
+}
+
+export function mergeLayers(base: Layers | undefined, overrides: Layers | undefined): Layers | undefined {
+  if (!base && !overrides) return undefined;
+  const merged: Layers = { ...base };
+  for (const [key, rule] of Object.entries(overrides ?? {})) merged[key] = { ...merged[key], ...rule };
+  return merged;
+}
+
 export interface Metadata {
-  layers?: Record<string, { automation?: "expected" }>;
+  layers?: Layers;
   type_name: string;
   id_prefix: string;
   guides?: string[];
@@ -389,7 +418,7 @@ export interface LoadedTestCases {
 /**
  * Loads testcases.yaml, expanding parameterized tests, assigning IDs, and sorting by section order.
  */
-export function loadTestCases(yamlFile: string): LoadedTestCases {
+export function loadTestCases(yamlFile: string, projectLayers?: Layers): LoadedTestCases {
   const content = readFileSync(yamlFile, "utf-8");
   const yamlData = parse(content) as TestCasesFileData;
 
@@ -419,13 +448,9 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
   const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
   validateAutomation(testCases.map((tc) => ({ ...tc, id: tc._tcId })), yamlFile);
 
-  const layers = yamlData.metadata.layers;
-  if (layers !== undefined) {
-    if (!layers || typeof layers !== "object" || Array.isArray(layers)) throw new Error(`Invalid metadata.layers in ${yamlFile}: expected a mapping.`);
-    for (const [name, rule] of Object.entries(layers)) {
-      if (!name.trim() || !rule || typeof rule !== "object" || Array.isArray(rule) || (rule.automation !== undefined && rule.automation !== "expected")) throw new Error(`Invalid layer declaration "${name}" in ${yamlFile}.`);
-    }
-  }
+  const ownLayers = yamlData.metadata.layers === undefined ? undefined : parseLayers(yamlData.metadata.layers, yamlFile);
+  const layers = mergeLayers(projectLayers, ownLayers);
+  yamlData.metadata.layers = layers;
   for (const tc of testCases) {
     if (tc.layer !== undefined && (typeof tc.layer !== "string" || !tc.layer.trim())) throw new Error(`Invalid layer on ${tc._tcId} in ${yamlFile}: expected non-empty text.`);
     if (tc.automation_reason !== undefined && typeof tc.automation_reason !== "string") throw new Error(`Invalid automation_reason on ${tc._tcId} in ${yamlFile}.`);
@@ -495,14 +520,14 @@ function readReadmeTitle(dir: string): string | null {
  * Loads every testcases.yaml under rootDir. A failure in one file is logged and skipped so it
  * doesn't prevent the other test suites from rendering.
  */
-export async function loadAllTestSuites(rootDir: string, exclude: string[] = []): Promise<TestSuiteTestCases[]> {
+export async function loadAllTestSuites(rootDir: string, exclude: string[] = [], projectLayers?: Layers): Promise<TestSuiteTestCases[]> {
   const files = await findAllTestCaseFiles(rootDir, exclude);
   const results: TestSuiteTestCases[] = [];
   // Anchors and routes carry only the test case id, so it must be unique across the whole scan root
   const idOwners = new Map<string, string>();
   for (const file of files) {
     try {
-      const loaded = loadTestCases(file);
+      const loaded = loadTestCases(file, projectLayers);
       for (const tc of loaded.testCases) {
         const owner = idOwners.get(tc._tcId!);
         if (owner !== undefined) {

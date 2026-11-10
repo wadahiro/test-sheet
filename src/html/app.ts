@@ -7,6 +7,7 @@ import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
 import { highlightHtml } from "./highlight";
+import type { Layers } from "../testCases";
 import type { SourceSnippet } from "../testSources";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
@@ -49,6 +50,8 @@ interface TestCase {
   /** semi: what a person still checks by hand */
   automation_note?: string;
   layer?: string;
+  layerLabel?: string;
+  layerDescription?: string;
   automation_reason?: string;
   /** `automation_note` rendered as Markdown at generation time */
   automationNoteHtml?: string;
@@ -71,6 +74,7 @@ interface GuideHeading {
 }
 
 interface SuitePageData {
+  layers?: Layers;
   /** Top-level directory name under the root (e.g. "web", "api"). The domain. */
   domain: string;
   /** Human-readable name from the domain's README.md heading (falls back to domain) */
@@ -142,7 +146,7 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
     lines.push(`**${t("md.tags")}:** ${tc.tags.join(", ")}`, "");
   }
 
-  if (tc.layer) lines.push(`**${t("layer.label")}:** ${tc.layer}`, "");
+  if (tc.layer) lines.push(`**${t("layer.label")}:** ${tc.layerLabel ?? tc.layer}`, "");
   if (tc.automation_reason) lines.push(`**${t("layer.reason")}:** ${tc.automation_reason}`, "");
   if (tc.automation && tc.automation !== "manual") lines.push(`**${t("md.method")}:** ${testMethod(tc)}`, "");
   if (tc.automation_note) {
@@ -187,15 +191,14 @@ function premiseHeadings(tc: TestCase, previous?: TestCase): { text: string; dep
   return values.slice(shared).map((value, i) => ({ text: preconditionText(value), depth: shared + i }));
 }
 
-function layerSummary(cases: TestCase[]): string {
-  const groups = new Map<string, Record<CaseMethod, number>>();
-  for (const tc of cases) {
-    const key = tc.layer ?? t("layer.unspecified");
-    const counts = groups.get(key) ?? { automated: 0, semi: 0, manual: 0 };
-    counts[caseMethodKey(tc)]++;
-    groups.set(key, counts);
-  }
-  return [...groups].map(([key, c]) => `${key}: ${c.automated + c.semi + c.manual} (${t("method.automated")} ${c.automated} / ${t("method.semi")} ${c.semi} / ${t("method.manual")} ${c.manual})`).join(" · ");
+function layerSummary(cases: TestCase[], declarations: Layers = {}): ComponentChildren {
+  const keys = [...new Set([...Object.keys(declarations), ...cases.map((tc) => tc.layer ?? "")])];
+  return keys.map((key) => {
+    const matching = cases.filter((tc) => (tc.layer ?? "") === key);
+    const counts = { automated: 0, semi: 0, manual: 0 };
+    for (const tc of matching) counts[caseMethodKey(tc)]++;
+    return html`<div title=${declarations[key]?.description}><strong>${declarations[key]?.label ?? (key || t("layer.unspecified"))}</strong>: ${matching.length} (${t("method.automated")} ${counts.automated} / ${t("method.semi")} ${counts.semi} / ${t("method.manual")} ${counts.manual})</div>`;
+  });
 }
 
 /** Renders every test case in a section as a single Markdown document */
@@ -1183,6 +1186,8 @@ function caseStatusKey(tc: TestCase): CaseStatus {
 
 interface IndexRowData {
   layer?: string;
+  layerLabel?: string;
+  layerDescription?: string;
   tcId: string;
   name: string;
   status: string | null;
@@ -1197,6 +1202,8 @@ interface IndexRowData {
 function indexRowData(tc: TestCase): IndexRowData {
   return {
     layer: tc.layer,
+    layerLabel: tc.layerLabel,
+    layerDescription: tc.layerDescription,
     tcId: tc._tcId,
     name: tc.name,
     status: statusLabel(tc),
@@ -1352,7 +1359,7 @@ function IndexRow({
       <td class="overview-tags">
         <div class="tags-cell">
           <div class="tag-list">
-            ${row.layer ? html`<span class="tag-chip" title=${t("layer.label")}>${row.layer}</span>` : null}
+            ${row.layer ? html`<span class="tag-chip" title=${row.layerDescription ?? row.layer}>${row.layerLabel ?? row.layer}</span>` : null}
             ${row.tags.map((tag) =>
               onTag
                 ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
@@ -1509,6 +1516,8 @@ type OverviewLevel = (typeof OVERVIEW_LEVELS)[number];
 
 interface OverviewRow {
   layer?: string;
+  layerLabel?: string;
+  layerDescription?: string;
   tcId: string;
   name: string;
   status: string | null;
@@ -1568,7 +1577,9 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
           for (const tc of cases) {
             rows.push({
               layer: tc.layer,
-    tcId: tc._tcId,
+              layerLabel: tc.layerLabel,
+              layerDescription: tc.layerDescription,
+              tcId: tc._tcId,
               name: tc.name,
               status: statusLabel(tc),
               statusTitle: tc.reason ?? tc.skip?.reason ?? "",
@@ -1594,11 +1605,12 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
 
 /** Everything shown in the row, so the filter matches exactly what the reader can see */
 function overviewRowSearchText(row: OverviewRow): string {
-  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, row.tc.layer ?? "", ...row.tags].join(" ");
+  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, row.tc.layerLabel ?? row.tc.layer ?? "", ...row.tags].join(" ");
 }
 
 /** One choice in a `MultiPicker` */
 interface PickerItem {
+  description?: string;
   key: string;
   label: string;
   /** Indents the choice the way the side nav indents its level */
@@ -1654,7 +1666,7 @@ function MultiPicker({
 
   const needle = text.trim().toLowerCase();
   // A hierarchy is shown whole until someone searches it, since its indentation only means something with its parents
-  const shown = needle ? items.filter((item) => matchesTerms(item.label, searchTerms(needle))) : items;
+  const shown = needle ? items.filter((item) => matchesTerms(`${item.label} ${item.key} ${item.description ?? ""}`, searchTerms(needle))) : items;
 
   return html`
     <div class="picker-anchor" ref=${anchorRef}>
@@ -1692,6 +1704,7 @@ function MultiPicker({
                     return html`<button
                       key=${item.key}
                       class=${"picker-item" + (on ? " picker-item-on" : "")}
+                      title=${item.description}
                       role="option"
                       aria-selected=${on}
                       style=${{ paddingLeft: `${10 + (needle ? 0 : (item.depth ?? 0) * 14)}px` }}
@@ -1756,10 +1769,14 @@ function scopePartsOf(rows: OverviewRow[]): RangePart[] {
 }
 
 /** The tags of these rows with how many cases carry each, in name order */
-function layerItemsOf(rows: OverviewRow[]): PickerItem[] {
+function layerItemsOf(rows: OverviewRow[], declarations: Layers[] = window.__SUITES__.map((suite) => suite.layers ?? {})): PickerItem[] {
   const counts = new Map<string, number>();
   for (const row of rows) { const key = row.tc.layer ?? ""; counts.set(key, (counts.get(key) ?? 0) + 1); }
-  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([key, count]) => ({ key, label: key || t("layer.unspecified"), count }));
+  const keys = [...new Set([...declarations.flatMap((layers) => Object.keys(layers)), ...counts.keys()])];
+  return keys.filter((key) => counts.has(key)).map((key) => {
+    const row = rows.find((row) => (row.tc.layer ?? "") === key);
+    return { key, label: row?.tc.layerLabel ?? (key || t("layer.unspecified")), description: row?.tc.layerDescription, count: counts.get(key) ?? 0 };
+  });
 }
 
 function tagItemsOf(rows: OverviewRow[]): PickerItem[] {
@@ -2225,7 +2242,7 @@ function ScopePage({
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
-      <details class="layer-summary"><summary>${t("layer.summary")}</summary><table><thead><tr><th>${t("col.suite")}</th><th>${t("layer.summary")}</th></tr></thead><tbody>${resolved.suites.map((suite) => html`<tr><th>${suite.typeName}</th><td>${layerSummary(scopeRows.filter((row) => row.idPrefix === suite.idPrefix).map((row) => row.tc))}</td></tr>`)}</tbody></table></details>
+      <details class="layer-summary"><summary>${t("layer.summary")}</summary><table><thead><tr><th>${t("col.suite")}</th><th>${t("layer.summary")}</th></tr></thead><tbody>${resolved.suites.map((suite) => html`<tr><th>${suite.typeName}</th><td>${layerSummary(scopeRows.filter((row) => row.idPrefix === suite.idPrefix).map((row) => row.tc), suite.layers)}</td></tr>`)}</tbody></table></details>
       <div class="scope-table-wrap">
         ${html`<div class="plan-range filter-chips">
               <span class="plan-label" title=${t("filter.byHelp")}>${t("filter.by")}</span>
@@ -2235,7 +2252,7 @@ function ScopePage({
                 selected=${partFilter}
                 onToggle=${(key: string) => setPartFilter((current) => toggled(current, key))}
               />
-              <${MultiPicker} label=${t("layer.label")} items=${layerItemsOf(scopeRows)} selected=${layerFilter} onToggle=${(key: string) => setLayerFilter((current) => toggled(current, key))} />
+              <${MultiPicker} label=${t("layer.label")} items=${layerItemsOf(scopeRows, resolved.suites.map((suite) => suite.layers ?? {}))} selected=${layerFilter} onToggle=${(key: string) => setLayerFilter((current) => toggled(current, key))} />
               <${MultiPicker} label=${t("picker.tags")} items=${tagItems} selected=${tagFilter} onToggle=${(tag: string) => setTagFilter((current) => toggled(current, tag))} />
               <${MultiPicker} label=${t("picker.status")} items=${statusItems} selected=${statusFilter} onToggle=${(key: string) => setStatusFilter((current) => toggled(current, key))} searchable=${false} />
               <${MultiPicker} label=${t("picker.method")} items=${methodItems} selected=${methodFilter} onToggle=${(key: string) => setMethodFilter((current) => toggled(current, key))} searchable=${false} />
@@ -2403,7 +2420,7 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
         ? t("plan.review.allTags")
         : [
             [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(` ${t("chips.or")} `),
-            plan.layers.length ? `${t("layer.label")}: ${plan.layers.map((layer) => layer || t("layer.unspecified")).join(` ${t("chips.or")} `)}` : "",
+            plan.layers.length ? `${t("layer.label")}: ${plan.layers.map((layer) => layerItemsOf(rows).find((item) => item.key === layer)?.label ?? (layer || t("layer.unspecified"))).join(` ${t("chips.or")} `)}` : "",
           ].filter(Boolean).map((part) => `(${part})`).join(` ${t("chips.and")} `),
       total: inRange.length,
       run: tally.run,
@@ -2923,7 +2940,7 @@ function testCaseSearchText(tc: TestCase): string {
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
   if (tc.automation_note) parts.push(tc.automation_note);
-  if (tc.layer) parts.push(tc.layer);
+  if (tc.layer) parts.push(tc.layer, tc.layerLabel ?? "", tc.layerDescription ?? "");
   if (tc.automation_reason) parts.push(tc.automation_reason);
   if (tc.tags) parts.push(...tc.tags);
   for (const source of tc.sources ?? []) parts.push(source.file, source.code);

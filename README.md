@@ -435,3 +435,53 @@ Parameterized cases inherit `layer` and `automation_reason` in pattern > templat
 The layer summary lists each suite's totals and automated / semi / manual counts. Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
 
 With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. Unrecognized containers are omitted; names are not automatically compared with preconditions.
+
+### Project layer declarations and display names
+
+Use `--layers layers.yaml` to share declarations across suites. The file is a mapping
+of layer keys to definitions (without a `metadata` or `layers` wrapper):
+
+```yaml
+component:
+  label: Internal integration tests
+  description: Only the component under test is real; its dependencies are substitutes
+  automation: expected
+system:
+  label: System integration tests
+  description: All our components are real; external services are mocked
+external:
+  label: End-to-end tests
+  description: The external services exercised by the case are real
+```
+
+```bash
+bun run src/cli.ts examples/platform --layers examples/layers.yaml --out sheet.html --strict
+```
+
+Paths are relative to the working directory. Server mode reloads the declarations
+on each render and watches their directory, including when it is outside the scan root.
+Invalid project declarations fail generation rather than silently disabling the policy.
+
+Cases still use the key, such as `layer: component`. Filters, counts, Plan choices,
+and Markdown copies use `label`, falling back to the key. Descriptions appear as
+hover titles on layer chips, choices and summary entries. Saved Plan selections
+continue to use keys, so changing a label does not change a plan's range.
+
+Suite `metadata.layers` overrides individual fields of the project definitions:
+
+```yaml
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+  layers:
+    component: { automation: null }
+```
+
+This keeps the shared label and description while clearing only the automation
+policy. An empty definition `{}` inherits every field. Suite-only layers are appended
+after the project layers; overriding a layer does not move it. Without a project
+file, suite declaration order is used. Undeclared values and unspecified layers
+appear after declared layers. Summaries include declared layers with zero cases;
+filters offer layers present in their scope. Across suites, choices use the first
+applicable suite's label and declaration order; suite pages and summaries use each
+suite's own overrides.
