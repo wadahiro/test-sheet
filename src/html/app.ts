@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "p
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
+import type { SourceSnippet } from "../testSources";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
@@ -44,7 +45,10 @@ interface TestCase {
   skip?: Skip;
   tags?: string[];
   automation?: "manual" | "automated" | "semi";
-  scenario?: string;
+  /** Test code that mentions the case; only for an automated or semi case, and absent when no code was searched */
+  sources?: SourceSnippet[];
+  /** Where test code mentions a case declared manual, which suggests the declaration is out of date */
+  unexpectedSources?: string[];
 }
 
 /** status(permanent) is orthogonal to skip(temporary) — either one takes the case out of active coverage. */
@@ -987,7 +991,7 @@ function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
 function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null; tags?: boolean }) {
   const note = inactiveNote(tc);
   const shownTags = tags ? (tc.tags ?? []) : [];
-  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note || !!tc.scenario;
+  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note || !!tc.unexpectedSources;
   const hasPreconditions = !!tc.preconditions && tc.preconditions.length > 0;
   return html`
     <div class="test-case-body">
@@ -995,8 +999,8 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
         ? html`<div class="test-case-meta">
             ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
             ${note ? html`<span class="inactive-note">${note}</span>` : null}
+            ${tc.unexpectedSources ? html`<span class="inactive-note">${t("case.sourceUnexpected", { where: tc.unexpectedSources.join(", ") })}</span>` : null}
             ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
-            ${tc.scenario ? html`<span class="scenario-path">${t("case.scenario", { path: tc.scenario })}</span>` : null}
           </div>`
         : null}
       ${hasPreconditions || tc.testDataHtml
@@ -1016,6 +1020,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
           </div>`
         : null}
       <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
+      ${tc.sources ? html`<${CaseSources} sources=${tc.sources} />` : null}
       ${tc.notesHtml
         ? html`<aside class="notes">
             <h5 class="eyebrow">${t("case.note")}</h5>
@@ -1024,6 +1029,24 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
         : null}
     </div>
   `;
+}
+
+/** The test code behind an automated case, or a note that none was found where it was searched */
+function CaseSources({ sources }: { sources: SourceSnippet[] }) {
+  return html`<section class="case-sources">
+    <h5 class="eyebrow">${t("case.source")}</h5>
+    ${sources.length === 0
+      ? html`<p class="source-missing">${t("case.sourceMissing")}</p>`
+      : sources.map(
+          (source) => html`<figure class="source-snippet" key=${`${source.file}:${source.startLine}`}>
+            <figcaption>
+              <span class="source-path">${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
+              ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
+            </figcaption>
+            <pre><code>${source.code}</code></pre>
+          </figure>`
+        )}
+  </section>`;
 }
 
 /**
@@ -1046,7 +1069,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           ${tc.status === "superseded" ? html`<span class="badge">${statusLabel(tc)}</span>` : null}
           ${tc.skip ? html`<span class="badge badge-skip">${statusLabel(tc)}</span>` : null}
           ${tc.automation && tc.automation !== "manual"
-            ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${testMethod(tc)}</span>`
+            ? html`<span class="badge badge-automation">${testMethod(tc)}</span>`
             : null}
         </span>
         ${run && outcome !== "none"
@@ -2841,6 +2864,7 @@ function testCaseSearchText(tc: TestCase): string {
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
   if (tc.tags) parts.push(...tc.tags);
+  for (const source of tc.sources ?? []) parts.push(source.file, source.code);
   return parts.join(" ");
 }
 

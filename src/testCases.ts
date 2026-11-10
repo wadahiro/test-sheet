@@ -49,8 +49,6 @@ export interface TestCase {
   tags?: string[];
   /** manual (default) / automated / semi — automation state, orthogonal to status. */
   automation?: "manual" | "automated" | "semi";
-  /** Path to the automation script or scenario when automation is automated/semi. */
-  scenario?: string;
   _tcId?: string;
 }
 

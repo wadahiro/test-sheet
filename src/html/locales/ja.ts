@@ -176,7 +176,10 @@ export const ja: Record<MessageKey, string> = {
   "status.active": "有効",
   "picker.status": "状態",
   "picker.method": "方法",
-  "case.scenario": "自動化: {path}",
+  "case.source": "自動テスト",
+  "case.sourceMissing": "自動化と記されていますが、このケースに触れているテストコードが見つかりません。",
+  "case.sourceTruncated": "冒頭のみ",
+  "case.sourceUnexpected": "手動と記されていますが、テストコードに記述があります: {where}",
 
   "step.action": "操作",
   "step.expected": "期待結果",

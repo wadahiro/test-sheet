@@ -20,6 +20,7 @@ import { loadAllTestSuites } from "./testCases";
 import { generateHtml } from "./html/generate";
 import type { LocaleDefinition } from "./html/i18n";
 import { loadLocaleFile, localeTemplate } from "./locales";
+import { buildSourceIndex, testRoots } from "./testSources";
 import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
 
 interface CliArgs {
@@ -29,6 +30,7 @@ interface CliArgs {
   exclude: string[];
   localeFiles: string[];
   autolinks: AutolinkRule[];
+  tests: string[];
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -38,6 +40,7 @@ function parseArgs(argv: string[]): CliArgs {
   const exclude: string[] = [];
   const localeFiles: string[] = [];
   const autolinks: AutolinkRule[] = [];
+  const tests: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -66,6 +69,13 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       autolinks.push(...parseAutolinkRules([{ pattern, url }], `--autolink "${pattern}"`));
+    } else if (argv[i] === "--tests") {
+      const pattern = argv[++i];
+      if (!pattern) {
+        console.error("Error: --tests requires a directory or glob");
+        process.exit(1);
+      }
+      tests.push(pattern);
     } else if (argv[i] === "--print-locale") {
       // Starting point for a translation: every key, in English, as a locale file
       process.stdout.write(localeTemplate(argv[++i] || "xx"));
@@ -87,6 +97,8 @@ Options:
                          Link text matching the regular expression to the URL template, where
                          {0} is the match and {1}… are its capture groups. Applies to every suite,
                          after each suite's own metadata.autolinks; repeatable.
+  --tests <dir|glob>     Search these files (relative to the working directory) for each automated
+                         case's ID and show the test method around it in the case. Repeatable.
   --print-locale [code]  Print a locale file with every UI string in English, to translate
 
 Examples:
@@ -101,7 +113,7 @@ Examples:
     }
   }
 
-  return { rootDir, port, outFile, exclude, localeFiles, autolinks };
+  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests };
 }
 
 async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
@@ -114,15 +126,36 @@ async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
   return locales;
 }
 
-async function generateStatic(rootDir: string, outFile: string, exclude: string[], locales: LocaleDefinition[], autolinks: AutolinkRule[]) {
-  const suites = await loadAllTestSuites(rootDir, exclude);
-  const html = await generateHtml(suites, { liveReload: false, locales, autolinks });
+interface RenderConfig {
+  rootDir: string;
+  exclude: string[];
+  locales: LocaleDefinition[];
+  autolinks: AutolinkRule[];
+  tests: string[];
+}
+
+/** Test code is searched afresh on every render, so a saved test file shows up on the next reload */
+async function render(config: RenderConfig, liveReload: boolean): Promise<{ html: string }> {
+  const suites = await loadAllTestSuites(config.rootDir, config.exclude);
+  const ids = suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean);
+  const sources = config.tests.length > 0 ? await buildSourceIndex(config.tests, ids) : undefined;
+  const html = await generateHtml(suites, { liveReload, locales: config.locales, autolinks: config.autolinks, sources });
+  return { html };
+}
+
+async function generateStatic(config: RenderConfig, outFile: string) {
+  const { html } = await render(config, false);
   await Bun.write(outFile, html);
   console.log(`Generated: ${outFile}`);
 }
 
-function serve(rootDir: string, port: number, exclude: string[], locales: LocaleDefinition[], autolinks: AutolinkRule[]) {
+function serve(config: RenderConfig, port: number) {
+  const { rootDir, exclude } = config;
   const sockets = new Set<import("bun").ServerWebSocket<unknown>>();
+
+  const notify = () => {
+    for (const ws of sockets) ws.send("reload");
+  };
 
   const server = Bun.serve({
     port,
@@ -138,8 +171,7 @@ function serve(rootDir: string, port: number, exclude: string[], locales: Locale
 
       if (url.pathname === "/" || url.pathname === "/index.html") {
         try {
-          const suites = await loadAllTestSuites(rootDir, exclude);
-          const html = await generateHtml(suites, { liveReload: true, locales, autolinks });
+          const { html } = await render(config, true);
           return new Response(html, {
             headers: { "Content-Type": "text/html; charset=utf-8" },
           });
@@ -177,13 +209,17 @@ function serve(rootDir: string, port: number, exclude: string[], locales: Locale
   // Watching the whole directory tree (rather than individual files) means new
   // testcases.yaml files and guide changes are picked up automatically.
   try {
-    watch(rootDir, { recursive: true }, () => {
-      for (const ws of sockets) {
-        ws.send("reload");
-      }
-    });
+    watch(rootDir, { recursive: true }, notify);
   } catch (err) {
     console.error(`Warning: could not watch directory: ${rootDir}`, err);
+  }
+  // The test code lies outside the scan root, so its directories are watched on their own
+  for (const dir of testRoots(config.tests)) {
+    try {
+      watch(dir, { recursive: true }, notify);
+    } catch (err) {
+      console.error(`Warning: could not watch directory: ${dir}`, err);
+    }
   }
 
   const open = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
@@ -191,15 +227,15 @@ function serve(rootDir: string, port: number, exclude: string[], locales: Locale
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude, localeFiles, autolinks } = parseArgs(process.argv.slice(2));
-  const locales = await loadLocales(localeFiles);
+  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests } = parseArgs(process.argv.slice(2));
+  const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests };
 
   if (outFile) {
-    await generateStatic(rootDir, outFile, exclude, locales, autolinks);
+    await generateStatic(config, outFile);
     return;
   }
 
-  serve(rootDir, port, exclude, locales, autolinks);
+  serve(config, port);
 }
 
 main().catch((err) => {

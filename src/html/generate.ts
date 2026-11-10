@@ -9,6 +9,7 @@ import { STYLES } from "./styles";
 import { createCaseMarkdown } from "./caseMarkdown";
 import { formatTestData } from "./caseFormat";
 import type { LocaleDefinition } from "./i18n";
+import type { SourceIndex, SourceSnippet } from "../testSources";
 import { autolinkExtension, caseReferenceRule, type AutolinkRule } from "../autolinks";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -138,10 +139,28 @@ async function renderTestData(testData: unknown, marked: Marked): Promise<string
     .replace(new RegExp(`${VALUE_CLOSE}(\\d+)${VALUE_END}`, "g"), (_, index: string) => `<button class="td-copy" type="button" data-copy="${encodeURIComponent(copied[Number(index)])}"></button></span>`);
 }
 
-async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { notes: notesMarked, step: stepMarked }: CaseRenderers) {
+/**
+ * What searching the test code found for a case. Only a case declared automated or semi carries its
+ * code; a manual one that has some is flagged, since the declaration is probably stale. `sources` is
+ * absent when no code was searched, so the page does not call every case's code missing.
+ */
+function sourceFields(tc: TestSuiteTestCases["testCases"][number], index: SourceIndex | undefined): { sources?: SourceSnippet[]; unexpectedSources?: string[] } {
+  if (!index) return {};
+  const found = index.snippetsFor(tc._tcId ?? "");
+  const where = (snippet: SourceSnippet) => `${snippet.file}:${snippet.startLine}`;
+  if (!tc.automation || tc.automation === "manual") {
+    if (found.length > 0) console.error(`Warning: ${tc._tcId} is manual but test code mentions it (${found.map(where).join(", ")}); is automation out of date?`);
+    return found.length > 0 ? { unexpectedSources: found.map(where) } : {};
+  }
+  if (found.length === 0) console.error(`Warning: ${tc._tcId} is ${tc.automation} but no test code mentions it`);
+  return { sources: found };
+}
+
+async function renderTestCase(tc: TestSuiteTestCases["testCases"][number], { notes: notesMarked, step: stepMarked }: CaseRenderers, sources: SourceIndex | undefined) {
   const testDataHtml = await renderTestData(tc.test_data, notesMarked);
   return {
     ...tc,
+    ...sourceFields(tc, sources),
     steps: await Promise.all(
       (tc.steps ?? []).map(async (step) => ({
         ...step,
@@ -161,6 +180,8 @@ export interface GenerateHtmlOptions {
   locales?: LocaleDefinition[];
   /** Autolink rules for every suite, after each suite's own (`metadata.autolinks`) */
   autolinks?: AutolinkRule[];
+  /** Test code to search for each automated case's ID; see src/testSources.ts */
+  sources?: SourceIndex;
 }
 
 /** JSON inside a <script> block ends at the first "</script>", whatever string it sits in */
@@ -169,7 +190,7 @@ function jsonForScript(value: unknown): string {
 }
 
 export async function generateHtml(suites: TestSuiteTestCases[], options: GenerateHtmlOptions = {}): Promise<string> {
-  const { liveReload = false, locales = [], autolinks: globalAutolinks = [] } = options;
+  const { liveReload = false, locales = [], autolinks: globalAutolinks = [], sources } = options;
   const bundledJs = await bundleApp();
   // Across every suite, since a case may point at one in another suite
   const caseReferences = caseReferenceRule(suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean));
@@ -201,7 +222,7 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
         folded,
         typeName: suite.metadata.type_name,
         idPrefix,
-        testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase(tc, renderers))),
+        testCases: await Promise.all(suite.testCases.map((tc) => renderTestCase(tc, renderers, sources))),
         guideHtml,
         guideHeadings,
         /** Raw Markdown, carried alongside the rendered HTML purely so search can match it */

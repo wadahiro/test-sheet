@@ -187,7 +187,10 @@ export const en = {
   "status.active": "active",
   "picker.status": "Status",
   "picker.method": "Method",
-  "case.scenario": "Automation: {path}",
+  "case.source": "Automated test",
+  "case.sourceMissing": "No test code mentions this case, although it is marked as automated.",
+  "case.sourceTruncated": "start only",
+  "case.sourceUnexpected": "Marked manual, but test code mentions it: {where}",
 
   // Steps and results
   "step.action": "Action",

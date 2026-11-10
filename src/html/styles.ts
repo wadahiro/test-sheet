@@ -1743,13 +1743,13 @@ a.link-btn { text-decoration: none; }
   padding: 14px 16px 16px;
 }
 
-.scenario-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: var(--bg-chip);
-  border-radius: 4px;
-  padding: 1px 6px;
-  overflow-wrap: anywhere;
-}
+.case-sources { min-width: 0; margin-top: 12px; }
+.source-snippet { margin: 8px 0 0; min-width: 0; }
+.source-snippet figcaption { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-bottom: 4px; font-size: 0.8rem; color: var(--fg-muted); }
+.source-path { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.source-snippet pre { overflow-x: auto; margin: 0; padding: 8px; background: var(--bg-chip); border-radius: 4px; font-size: 0.85em; }
+.source-snippet pre code { background: none; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.source-missing { margin: 4px 0 0; font-size: 0.85rem; color: var(--fg-muted); }
 
 .test-case-meta {
   display: flex;
@@ -2275,7 +2275,6 @@ a.link-btn { text-decoration: none; }
   background: var(--accent-bg);
   color: var(--accent);
   border-color: transparent;
-  cursor: help;
 }
 
 /* Flex with a gap, not a margin on the next chip: when the chips wrap onto a second line a margin would leave no space between the lines */
