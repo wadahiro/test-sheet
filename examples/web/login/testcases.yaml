@@ -24,6 +24,8 @@ test_cases:
         expected: Redirected to the dashboard
   - name: A session is issued after login
     category: Basic flow
+    automation: automated
+    scenario: e2e/login/session.spec.ts
     preconditions:
       - A valid user account exists
     steps:

@@ -987,7 +987,7 @@ function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
 function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null; tags?: boolean }) {
   const note = inactiveNote(tc);
   const shownTags = tags ? (tc.tags ?? []) : [];
-  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note;
+  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note || !!tc.scenario;
   const hasPreconditions = !!tc.preconditions && tc.preconditions.length > 0;
   return html`
     <div class="test-case-body">
@@ -996,6 +996,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
             ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
             ${note ? html`<span class="inactive-note">${note}</span>` : null}
             ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
+            ${tc.scenario ? html`<span class="scenario-path">${t("case.scenario", { path: tc.scenario })}</span>` : null}
           </div>`
         : null}
       ${hasPreconditions || tc.testDataHtml
@@ -1045,7 +1046,7 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
           ${tc.status === "superseded" ? html`<span class="badge">${statusLabel(tc)}</span>` : null}
           ${tc.skip ? html`<span class="badge badge-skip">${statusLabel(tc)}</span>` : null}
           ${tc.automation && tc.automation !== "manual"
-            ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${tc.automation}</span>`
+            ? html`<span class="badge badge-automation" title=${tc.scenario ?? ""}>${testMethod(tc)}</span>`
             : null}
         </span>
         ${run && outcome !== "none"
@@ -1091,7 +1092,21 @@ function statusLabel(tc: TestCase): string | null {
 
 /** How the case is run; an unset `automation` means a person runs it by hand */
 function testMethod(tc: TestCase): string {
-  return !tc.automation || tc.automation === "manual" ? t("method.manual") : tc.automation;
+  return t(METHOD_LABEL_KEY[caseMethodKey(tc)]);
+}
+
+type CaseMethod = NonNullable<TestCase["automation"]>;
+type CaseStatus = "active" | "obsolete" | "superseded" | "skip";
+
+const METHOD_LABEL_KEY: Record<CaseMethod, MessageKey> = { manual: "method.manual", automated: "method.automated", semi: "method.semi" };
+const STATUS_LABEL_KEY: Record<CaseStatus, MessageKey> = { active: "status.active", obsolete: "badge.obsolete", superseded: "badge.superseded", skip: "badge.skip" };
+
+const caseMethodKey = (tc: TestCase): CaseMethod => tc.automation ?? "manual";
+
+/** Mirrors `isInactive`: a permanent status wins over a temporary skip */
+function caseStatusKey(tc: TestCase): CaseStatus {
+  if (tc.status === "obsolete" || tc.status === "superseded") return tc.status;
+  return tc.skip ? "skip" : "active";
 }
 
 interface IndexRowData {
@@ -1420,6 +1435,8 @@ interface OverviewRow {
   status: string | null;
   statusTitle: string;
   method: string;
+  statusKey: CaseStatus;
+  methodKey: CaseMethod;
   inactive: boolean;
   tags: string[];
   /** Suite this case belongs to, for linking to its sections */
@@ -1475,6 +1492,8 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
               status: statusLabel(tc),
               statusTitle: tc.reason ?? tc.skip?.reason ?? "",
               method: testMethod(tc),
+              statusKey: caseStatusKey(tc),
+              methodKey: caseMethodKey(tc),
               inactive: isInactive(tc),
               tags: tc.tags ?? [],
               idPrefix: suite.idPrefix,
@@ -1663,6 +1682,27 @@ function tagItemsOf(rows: OverviewRow[]): PickerItem[] {
 
 /** Cases carrying any of the tags (as a plan's range does); every case when none is chosen */
 const filterByTags = (rows: OverviewRow[], tags: string[]): OverviewRow[] => (tags.length === 0 ? rows : rows.filter((row) => row.tags.some((tag) => tags.includes(tag))));
+
+/** Cases whose value (status or method) is any of the chosen ones; every case when none is chosen */
+const filterByValue = <K extends string>(rows: OverviewRow[], chosen: string[], pick: (row: OverviewRow) => K): OverviewRow[] =>
+  chosen.length === 0 ? rows : rows.filter((row) => chosen.includes(pick(row)));
+
+/** The values present in these rows, in the order `labels` lists them, with how many cases hold each */
+function valueItemsOf<K extends string>(rows: OverviewRow[], labels: Record<K, MessageKey>, pick: (row: OverviewRow) => K): PickerItem[] {
+  const counts = new Map<K, number>();
+  for (const row of rows) counts.set(pick(row), (counts.get(pick(row)) ?? 0) + 1);
+  return (Object.keys(labels) as K[]).filter((key) => counts.has(key)).map((key) => ({ key, label: t(labels[key]), count: counts.get(key) }));
+}
+
+/** Chosen statuses or methods as removable chips */
+const valueChips = (keys: string[], items: PickerItem[], onRemove: (key: string) => void) =>
+  keys.map((key) => {
+    const label = items.find((item) => item.key === key)?.label ?? key;
+    return html`<span class="tag-chip plan-range-chip" key=${key}>
+      ${label}
+      <button class="plan-chip-x" aria-label=${t("plan.removePart", { name: label })} title=${t("plan.removePart", { name: label })} onClick=${() => onRemove(key)}>×</button>
+    </span>`;
+  });
 
 const toggled = (list: string[], key: string): string[] => (list.includes(key) ? list.filter((other) => other !== key) : [...list, key]);
 
@@ -2038,6 +2078,8 @@ function ScopePage({
   const pendingJump = useRef<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [partFilter, setPartFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [methodFilter, setMethodFilter] = useState<string[]>([]);
   const scopeHash = scopeHashFor(route.scope);
   // The parts on offer belong to the page, so a choice made on another one would only hide everything here
   useEffect(() => setPartFilter([]), [scopeHash]);
@@ -2078,14 +2120,25 @@ function ScopePage({
   const scopeRows = scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
   const shownIds = new Set(scopeRows.map((row) => row.tcId));
   const trimmedQuery = query.trim();
-  const visibleRows = filterByTags(filterByParts(filterOverviewRows(scopeRows, trimmedQuery), partFilter), tagFilter);
+  const visibleRows = filterByValue(
+    filterByValue(filterByTags(filterByParts(filterOverviewRows(scopeRows, trimmedQuery), partFilter), tagFilter), statusFilter, (row) => row.statusKey),
+    methodFilter,
+    (row) => row.methodKey
+  );
+  const statusItems = valueItemsOf(scopeRows, STATUS_LABEL_KEY, (row) => row.statusKey);
+  const methodItems = valueItemsOf(scopeRows, METHOD_LABEL_KEY, (row) => row.methodKey);
   const partItems = scopePartsOf(scopeRows);
   const tagItems = tagItemsOf(scopeRows);
   const partChipList = partChips(partFilter, partItems, (key) => setPartFilter((current) => current.filter((other) => other !== key)));
   const tagChipList = tagChips(tagFilter, (tag) => setTagFilter((current) => current.filter((other) => other !== tag)));
-  // Any of the parts, and any of the tags; no frame around each group, which only added another outline to every chip
-  const both = partChipList.length > 0 && tagChipList.length > 0;
-  const filterChips = html`${partChipList.length > 0 ? html`<span class="chip-group">${joinChips(partChipList, t("chips.or"))}</span>` : null}${both ? html`<span class="chip-join">${t("chips.and")}</span>` : null}${tagChipList.length > 0 ? html`<span class="chip-group">${joinChips(tagChipList, t("chips.or"))}</span>` : null}`;
+  const statusChipList = valueChips(statusFilter, statusItems, (key) => setStatusFilter((current) => current.filter((other) => other !== key)));
+  const methodChipList = valueChips(methodFilter, methodItems, (key) => setMethodFilter((current) => current.filter((other) => other !== key)));
+  // Any of the chosen within a group, every group at once; no frame around each group, which only added another outline to every chip
+  const chipGroups = [partChipList, tagChipList, statusChipList, methodChipList].filter((chips) => chips.length > 0);
+  const filterChips = html`${chipGroups.flatMap((chips, i) => [
+    ...(i > 0 ? [html`<span class="chip-join" key=${`and-${i}`}>${t("chips.and")}</span>`] : []),
+    html`<span class="chip-group" key=${`group-${i}`}>${joinChips(chips, t("chips.or"))}</span>`,
+  ])}`;
   const allOpen = visibleRows.length > 0 && visibleRows.every((row) => isOpen(row.tcId));
   const setAll = (open: boolean) => setOpened(new Map(visibleRows.map((row) => [row.tcId, open])));
   const nav: CaseNav = {
@@ -2108,6 +2161,8 @@ function ScopePage({
                 onToggle=${(key: string) => setPartFilter((current) => toggled(current, key))}
               />
               <${MultiPicker} label=${t("picker.tags")} items=${tagItems} selected=${tagFilter} onToggle=${(tag: string) => setTagFilter((current) => toggled(current, tag))} />
+              <${MultiPicker} label=${t("picker.status")} items=${statusItems} selected=${statusFilter} onToggle=${(key: string) => setStatusFilter((current) => toggled(current, key))} searchable=${false} />
+              <${MultiPicker} label=${t("picker.method")} items=${methodItems} selected=${methodFilter} onToggle=${(key: string) => setMethodFilter((current) => toggled(current, key))} searchable=${false} />
               ${filterChips}
             </div>`}
         <div class="filter-bar">
@@ -2121,7 +2176,7 @@ function ScopePage({
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
             <${RunProgress} rows=${visibleRows} />
-            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== "" || tagFilter.length > 0 || partFilter.length > 0} />
+            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== "" || tagFilter.length > 0 || partFilter.length > 0 || statusFilter.length > 0 || methodFilter.length > 0} />
             ${visibleRows.length > 0
               ? html`<button class="copy-btn" title=${allOpen ? t("scope.collapseAll") : t("scope.expandAll")} onClick=${() => setAll(!allOpen)}>
                   <span aria-hidden="true">${allOpen ? "▾" : "▸"}</span>

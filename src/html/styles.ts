@@ -1743,6 +1743,14 @@ a.link-btn { text-decoration: none; }
   padding: 14px 16px 16px;
 }
 
+.scenario-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-chip);
+  border-radius: 4px;
+  padding: 1px 6px;
+  overflow-wrap: anywhere;
+}
+
 .test-case-meta {
   display: flex;
   flex-wrap: wrap;

@@ -69,7 +69,7 @@ export const en = {
   "picker.parts": "Domain / feature / suite",
   "chips.or": "or",
   "chips.and": "and",
-  "filter.byHelp": "Within the chosen domains, features or suites, and carrying one of the chosen tags",
+  "filter.byHelp": "Within the chosen domains, features or suites, carrying one of the chosen tags, and having one of the chosen statuses and methods",
   "plan.rangeHelp": "Cases carrying any of these tags, or under any of these domains, features or suites",
   "plan.inRange": "{count} in range",
   "picker.tags": "Tags",
@@ -182,6 +182,12 @@ export const en = {
   "inactive.skipped": "Skipped: {reason}",
   "inactive.skippedUntil": "Skipped until {until}: {reason}",
   "method.manual": "manual",
+  "method.automated": "automated",
+  "method.semi": "semi-automated",
+  "status.active": "active",
+  "picker.status": "Status",
+  "picker.method": "Method",
+  "case.scenario": "Automation: {path}",
 
   // Steps and results
   "step.action": "Action",
