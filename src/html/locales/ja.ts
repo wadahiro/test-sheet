@@ -1,6 +1,8 @@
 import type { MessageKey } from "./en";
 
 export const ja: Record<MessageKey, string> = {
+  "case.typeDefinition": "型の定義を見る: {name}",
+  "case.dataDefinition": "データの宣言を見る: {name}",
   "layer.summary": "層ごとの件数",
   "layer.label": "層",
   "layer.unspecified": "未指定",

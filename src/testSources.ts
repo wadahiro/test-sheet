@@ -19,6 +19,18 @@ export interface SourceSnippet {
   /** The method was longer than `MAX_SNIPPET_LINES`, so only its start is kept */
   truncated: boolean;
   containers?: string[];
+  definitions?: SourceDefinition[];
+}
+
+export interface SourceDefinition {
+  kind: "type" | "data";
+  name: string;
+  file: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  code: string;
+  truncated: boolean;
 }
 
 interface SourceFile {
@@ -305,7 +317,49 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>): void {
+function fileShape(text: string): FileShape {
+  const all = bracketPairs(text);
+  return { lines: text.split("\n"), starts: lineStarts(text), all, braces: all.filter((pair) => pair.kind === "{") };
+}
+
+function definition(file: SourceFile, shape: FileShape, kind: SourceDefinition["kind"], name: string, range: LineRange): SourceDefinition {
+  const end = Math.min(range.end, range.start + MAX_SNIPPET_LINES - 1);
+  const shown = relative(file.base, file.path).replaceAll("\\", "/");
+  return { kind, name, file: shown, path: posix.join(file.shownBase, shown), startLine: range.start + 1, endLine: end + 1, code: shape.lines.slice(range.start, end + 1).join("\n"), truncated: end < range.end };
+}
+
+function dataDefinitions(file: SourceFile, shape: FileShape, offset: number, files: SourceFile[], shapes: Map<SourceFile, FileShape>): SourceDefinition[] {
+  const data = enclosingData(shape, offset);
+  if (!data) return [];
+  const result: SourceDefinition[] = [];
+  const declarationLine = lineOf(shape.starts, data.open);
+  const variable = declaredName(file.text.slice(shape.starts[declarationLine], data.open));
+  if (variable) result.push(definition(file, shape, "data", variable, withLeadIn(shape.lines, { start: declarationLine, end: declarationLine })));
+  const row = shape.all.filter((pair) => pair.kind === "(" && contains(pair, offset)).reverse().find((pair) => {
+    return /\b[A-Z][\w]*\s*$/.test(file.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open));
+  });
+  if (!row) return result;
+  const typeName = file.text.slice(shape.starts[lineOf(shape.starts, row.open)], row.open).match(/\b([A-Z][\w]*)\s*$/)?.[1];
+  if (!typeName) return result;
+  for (const candidate of [file, ...files.filter((other) => other !== file)]) {
+    let candidateShape = shapes.get(candidate);
+    if (!candidateShape) { candidateShape = fileShape(candidate.text); shapes.set(candidate, candidateShape); }
+    const pattern = new RegExp(`\\b(?:class|record)\\s+${escapeRegExp(typeName)}\\s*(?:<[^>]+>\\s*)?\\(`, "g");
+    for (const match of candidate.text.matchAll(pattern)) {
+      const open = match.index! + match[0].length - 1;
+      const parameters = candidateShape.all.find((pair) => pair.open === open && pair.kind === "(");
+      if (!parameters) continue;
+      const line = lineOf(candidateShape.starts, match.index!);
+      const header = candidateShape.lines[line].slice(0, match.index! - candidateShape.starts[line]);
+      if (!/^\s*(?:(?:private|public|protected|internal|data|static|final|sealed|open|abstract)\s+)*$/.test(header)) continue;
+      result.push(definition(candidate, candidateShape, "type", typeName, withLeadIn(candidateShape.lines, { start: line, end: lineOf(candidateShape.starts, parameters.close) })));
+      return result;
+    }
+  }
+  return result;
+}
+
+function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
   let shape: FileShape | null = null;
   const taken = new Map<string, LineRange[]>();
 
@@ -313,9 +367,10 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
     const id = match[1];
     if (!ids.has(id)) continue;
     if (!shape) {
-      const all = bracketPairs(file.text);
-      shape = { lines: file.text.split("\n"), starts: lineStarts(file.text), all, braces: all.filter((pair) => pair.kind === "{") };
+      shape = shapes.get(file) ?? fileShape(file.text);
+      shapes.set(file, shape);
     }
+    const definitions = dataDefinitions(file, shape, match.index!, files, shapes);
     for (const range of snippetRanges(shape, file.text, match.index!)) {
       // Two hits in one method (annotation and name) are one snippet
       const seen = taken.get(id) ?? [];
@@ -327,6 +382,7 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
       const shown = relative(file.base, file.path).replaceAll("\\", "/");
       const snippet: SourceSnippet = {
+        definitions,
         containers: shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair) => {
           const line = lineOf(shape!.starts, pair.open);
           const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
@@ -362,7 +418,17 @@ export async function buildSourceIndex(patterns: string[], ids: string[]): Promi
     const alternatives = [...ids].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
     const pattern = new RegExp(`(?<![\\w-])(${alternatives})(?![\\w-])`, "g");
     const idSet = new Set(ids);
-    for (const file of files) snippetsInFile(file, idSet, pattern, found);
+    const shapes = new Map<SourceFile, FileShape>();
+    for (const file of files) snippetsInFile(file, idSet, pattern, found, files, shapes);
+    for (const snippets of found.values()) {
+      const seen = new Set<string>();
+      for (const snippet of snippets) snippet.definitions = snippet.definitions?.filter((item) => {
+        const key = `${item.path}:${item.startLine}:${item.kind}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
   }
   return { snippetsFor: (id) => found.get(id) ?? [] };
 }

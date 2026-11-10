@@ -120,3 +120,83 @@ test("dynamic contexts show their call instead of inventing a runtime name", asy
     "withData(ROWS)",
   ]);
 });
+
+test("variable data includes documented declaration headers and row types once per case", async () => {
+  const [found] = await snippets(`/** Rows before renewal. */
+private val BEFORE_RENEWAL = listOf(
+    Row(32, "LOGIN-001"),
+)
+/**
+ * One decision-table row.
+ * Multiple ID columns represent end-date variants.
+ */
+private data class Row(
+    /** Remaining days. */
+    val daysLeft: Long?,
+    /** The case ID. */
+    val plain: String,
+)
+class Spec {
+    withTests(BEFORE_RENEWAL) { row ->
+        checkRow(row)
+    }
+    withContexts(BEFORE_RENEWAL) { row ->
+        checkAgain(row)
+    }
+}`);
+  const definitions = found.flatMap((source) => source.definitions ?? []);
+  expect(definitions).toHaveLength(2);
+  expect(definitions[0].name).toBe("BEFORE_RENEWAL");
+  expect(definitions[0].code).toBe("/** Rows before renewal. */\nprivate val BEFORE_RENEWAL = listOf(");
+  expect(definitions[1].name).toBe("Row");
+  expect(definitions[1].code).toContain("One decision-table row.");
+  expect(definitions[1].code).toContain("/** Remaining days. */");
+  expect(definitions[1].code).toContain("val plain: String");
+  expect(definitions[1].code).not.toContain("class Spec");
+});
+
+test("inline data finds a documented row type in another scanned file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sheet-source-types-"));
+  try {
+    writeFileSync(join(dir, "Spec.kt"), `withData(Row("LOGIN-001")) {
+    checkRow(it)
+}`);
+    writeFileSync(join(dir, "Row.java"), `/** A decision row. */
+public record Row(
+    /** Stable case ID. */
+    String id
+) {}`);
+    const index = await buildSourceIndex([dir], ["LOGIN-001"]);
+    const definitions = index.snippetsFor("LOGIN-001").flatMap((source) => source.definitions ?? []);
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0].file).toBe("Row.java");
+    expect(definitions[0].code).toContain("/** A decision row. */");
+    expect(definitions[0].code).toContain("/** Stable case ID. */");
+    expect(definitions[0].path).not.toContain(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("local row declarations take priority over types in other scanned files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sheet-source-local-"));
+  try {
+    writeFileSync(join(dir, "Other.kt"), "data class Row(val elsewhere: String)");
+    writeFileSync(join(dir, "Spec.kt"), `data class Row(val local: String)
+withData(Row("LOGIN-001")) {
+    checkRow(it)
+}`);
+    const index = await buildSourceIndex([dir], ["LOGIN-001"]);
+    expect(index.snippetsFor("LOGIN-001")[0].definitions?.[0].code).toContain("val local");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unknown constructors and generic lowercase row helpers add no type definitions", async () => {
+  const [found] = await snippets(`class row(val id: String)
+withData(row("LOGIN-001")) {
+    checkRow(it)
+}`);
+  expect(found.flatMap((source) => source.definitions ?? [])).toEqual([]);
+});

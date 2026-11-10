@@ -32,6 +32,9 @@ const DARK_THEME_VARS = `
 `;
 
 export const STYLES = `
+.source-definition { margin: .5rem; border: 1px solid var(--border); padding: .5rem; }
+.source-definition > summary { cursor: pointer; color: var(--fg-muted); }
+
 .premise-heading { padding-block: .5rem; font-weight: 600; background: var(--bg-subtle); }
 .layer-summary { padding: .75rem; border-bottom: 1px solid var(--border); }
 .source-containers { padding: .5rem; color: var(--fg-muted); }

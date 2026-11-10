@@ -526,3 +526,20 @@ After migration, remove `--layers-scope declared` or use `--layers-scope all` to
 check every suite against the project definitions. `all` is the default, preserving
 the existing behavior. Without project definitions, suites with no layer declaration
 have no layer policy to check in either mode.
+
+### Definitions beside data-driven test snippets
+
+Data-row snippets include collapsed **View type definition** and **View data declaration**
+sections when matching source is available. The data declaration shows the variable's
+opening line and its immediately preceding documentation comments. A constructor row
+such as `Row(32, …, "LOGIN-001")` also links to a matching `class Row(...)`,
+`data class Row(...)` or `record Row(...)` declaration, including its KDoc/Javadoc and
+comments on constructor properties. This also applies to inline `withData(Row(...))` data.
+
+Types are looked up in the same file first, then in other files selected by `--tests`.
+Only those scanned files are searched; missing types and lowercase helpers such as
+`row(...)` add no type definition. This is source matching, not compiler name resolution.
+Each declaration is attached once per case, even when the row feeds several loops.
+Definitions show relative file paths and line numbers and, like test bodies, are
+limited to 80 lines with a truncation indicator. They start collapsed so the data row
+and test body remain easy to read.

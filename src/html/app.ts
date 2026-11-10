@@ -1096,6 +1096,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
             </figcaption>
             ${source.containers?.length ? html`<div class="source-containers">${source.containers.join(" › ")}</div>` : null}
             <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
+            ${source.definitions?.map((item) => html`<details class="source-definition"><summary>${t(item.kind === "type" ? "case.typeDefinition" : "case.dataDefinition", { name: item.name })}</summary><div class="source-path" title=${item.path}>${item.file}:${item.startLine}–${item.endLine}</div>${item.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}<pre><${HighlightedCode} code=${item.code} file=${item.file} /></pre></details>`)}
           </figure>`
         )}
   </section>`;
