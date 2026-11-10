@@ -16,7 +16,7 @@
 
 import { watch } from "fs";
 import { dirname, resolve } from "path";
-import { loadAllTestSuites, loadLayers } from "./testCases";
+import { loadAllTestSuites, loadLayers, type LayersScope } from "./testCases";
 import { generateHtml } from "./html/generate";
 import type { LocaleDefinition } from "./html/i18n";
 import { loadLocaleFile, localeTemplate } from "./locales";
@@ -33,6 +33,7 @@ interface CliArgs {
   autolinks: AutolinkRule[];
   tests: string[];
   layersFile?: string;
+  layersScope: LayersScope;
   strict: boolean;
 }
 
@@ -46,6 +47,7 @@ function parseArgs(argv: string[]): CliArgs {
   const tests: string[] = [];
   let strict = false;
   let layersFile: string | undefined;
+  let layersScope: LayersScope = "all";
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--port" || argv[i] === "-p") {
@@ -81,6 +83,10 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       tests.push(pattern);
+    } else if (argv[i] === "--layers-scope") {
+      const scope = argv[++i];
+      if (scope !== "all" && scope !== "declared") throw new Error("--layers-scope requires all or declared");
+      layersScope = scope;
     } else if (argv[i] === "--layers") {
       const file = argv[++i];
       if (!file || file.startsWith("--")) throw new Error("--layers requires a YAML file");
@@ -110,6 +116,8 @@ Options:
                          after each suite's own metadata.autolinks; repeatable.
   --tests <dir|glob>     Search these files (relative to the working directory) for each automated
                          case's ID and show the test method around it in the case. Repeatable.
+  --layers-scope <all|declared>
+                         Check all suites (default), or only suites with metadata.layers.
   --layers <file>        Declare project layers in a YAML mapping; suite declarations override fields.
   --strict               With --out: write the file, then exit with status 1 if anything was warned
                          about (a suite that failed to load, automation that disagrees with the test
@@ -134,7 +142,7 @@ Examples:
     process.exit(1);
   }
 
-  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile };
+  return { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile, layersScope };
 }
 
 async function loadLocales(files: string[]): Promise<LocaleDefinition[]> {
@@ -154,11 +162,12 @@ interface RenderConfig {
   autolinks: AutolinkRule[];
   tests: string[];
   layersFile?: string;
+  layersScope: LayersScope;
 }
 
 /** Test code is searched afresh on every render, so a saved test file shows up on the next reload */
 async function render(config: RenderConfig, liveReload: boolean): Promise<{ html: string }> {
-  const suites = await loadAllTestSuites(config.rootDir, config.exclude, config.layersFile ? loadLayers(config.layersFile) : undefined);
+  const suites = await loadAllTestSuites(config.rootDir, config.exclude, config.layersFile ? loadLayers(config.layersFile) : undefined, config.layersScope);
   const ids = suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean);
   const sources = config.tests.length > 0 ? await buildSourceIndex(config.tests, ids) : undefined;
   const html = await generateHtml(suites, { liveReload, locales: config.locales, autolinks: config.autolinks, sources });
@@ -265,8 +274,8 @@ function serve(config: RenderConfig, port: number) {
 }
 
 async function main() {
-  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile } = parseArgs(process.argv.slice(2));
-  const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests, layersFile };
+  const { rootDir, port, outFile, exclude, localeFiles, autolinks, tests, strict, layersFile, layersScope } = parseArgs(process.argv.slice(2));
+  const config: RenderConfig = { rootDir, exclude, locales: await loadLocales(localeFiles), autolinks, tests, layersFile, layersScope };
 
   if (outFile) {
     await generateStatic(config, outFile, strict);

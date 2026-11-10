@@ -21,6 +21,32 @@ describe("layer declarations", () => {
     expect(parseLayers({ component: { automation: null } }, "fixture")).toEqual({ component: { automation: null } });
   });
 
+  test("declared scope opts suites into policy checks while retaining shared display definitions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sheet-layer-scope-"));
+    try {
+      const suite = join(dir, "testcases.yaml");
+      const layers = parseLayers({ component: { label: "Internal", description: "Subject only", automation: "expected" } }, "project");
+      const data = "metadata:\n  type_name: Fixture\n  id_prefix: FIX\ntest_cases:\n  - {name: Missing, steps: []}\n  - {name: Unknown, layer: typo, steps: []}\n  - {name: Manual, layer: component, steps: []}\n";
+      writeFileSync(suite, data);
+      const before = warningCount();
+      const loaded = loadTestCases(suite, layers, "declared");
+      expect(warningCount()).toBe(before);
+      expect(loaded.metadata.layers).toEqual(layers);
+      loadTestCases(suite, layers);
+      expect(warningCount()).toBe(before + 3);
+      writeFileSync(suite, data.replace("  id_prefix: FIX", "  id_prefix: FIX\n  layers: {}"));
+      loadTestCases(suite, layers, "declared");
+      expect(warningCount()).toBe(before + 6);
+      writeFileSync(suite, data.replace("  id_prefix: FIX", "  id_prefix: FIX\n  layers:\n    component: {automation: null}"));
+      loadTestCases(suite, layers, "declared");
+      expect(warningCount()).toBe(before + 8);
+      writeFileSync(suite, data.replace("layer: typo", "layer: []"));
+      expect(() => loadTestCases(suite, layers, "declared")).toThrow("Invalid layer");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("loads a project mapping and checks policy after suite overrides", () => {
     const dir = mkdtempSync(join(tmpdir(), "sheet-layers-"));
     try {

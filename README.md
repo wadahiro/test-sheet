@@ -485,3 +485,34 @@ appear after declared layers. Summaries include declared layers with zero cases;
 filters offer layers present in their scope. Across suites, choices use the first
 applicable suite's label and declaration order; suite pages and summaries use each
 suite's own overrides.
+
+### Adopting layers one suite at a time
+
+During migration, share display definitions across the project but validate only
+suites that explicitly opt in:
+
+```bash
+bun run src/cli.ts examples --layers examples/layers.yaml --layers-scope declared --out sheet.html --strict
+```
+
+With `--layers-scope declared`, a suite participates when its source YAML contains
+`metadata.layers`, including an empty mapping:
+
+```yaml
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+  layers: {}
+```
+
+Participating suites are checked for missing layers, undeclared values and manual
+cases without an exception reason in automation-expected layers. Field overrides
+continue to work, including `automation: null`. Suites without `metadata.layers`
+still inherit labels, descriptions and declaration order for display, but do not
+receive those three policy warnings. Invalid field types and malformed declarations
+remain errors, and other warnings still affect `--strict`.
+
+After migration, remove `--layers-scope declared` or use `--layers-scope all` to
+check every suite against the project definitions. `all` is the default, preserving
+the existing behavior. Without project definitions, suites with no layer declaration
+have no layer policy to check in either mode.

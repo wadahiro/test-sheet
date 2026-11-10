@@ -62,6 +62,7 @@ export interface LayerDefinition {
   description?: string;
   automation?: "expected" | null;
 }
+export type LayersScope = "all" | "declared";
 export type Layers = Record<string, LayerDefinition>;
 
 export function parseLayers(value: unknown, source: string): Layers {
@@ -418,7 +419,7 @@ export interface LoadedTestCases {
 /**
  * Loads testcases.yaml, expanding parameterized tests, assigning IDs, and sorting by section order.
  */
-export function loadTestCases(yamlFile: string, projectLayers?: Layers): LoadedTestCases {
+export function loadTestCases(yamlFile: string, projectLayers?: Layers, layersScope: LayersScope = "all"): LoadedTestCases {
   const content = readFileSync(yamlFile, "utf-8");
   const yamlData = parse(content) as TestCasesFileData;
 
@@ -454,7 +455,7 @@ export function loadTestCases(yamlFile: string, projectLayers?: Layers): LoadedT
   for (const tc of testCases) {
     if (tc.layer !== undefined && (typeof tc.layer !== "string" || !tc.layer.trim())) throw new Error(`Invalid layer on ${tc._tcId} in ${yamlFile}: expected non-empty text.`);
     if (tc.automation_reason !== undefined && typeof tc.automation_reason !== "string") throw new Error(`Invalid automation_reason on ${tc._tcId} in ${yamlFile}.`);
-    if (!layers) continue;
+    if (!layers || (layersScope === "declared" && ownLayers === undefined)) continue;
     if (!tc.layer || !Object.hasOwn(layers, tc.layer)) warn(`${tc._tcId} has ${tc.layer ? `undeclared layer "${tc.layer}"` : "no layer"} (${yamlFile})`);
     else if (layers[tc.layer].automation === "expected" && (!tc.status || tc.status === "active") && (tc.automation ?? "manual") === "manual" && !tc.automation_reason?.trim()) warn(`${tc._tcId} is manual in layer "${tc.layer}" where automation is expected; set automation_reason for an exception (${yamlFile})`);
   }
@@ -520,14 +521,14 @@ function readReadmeTitle(dir: string): string | null {
  * Loads every testcases.yaml under rootDir. A failure in one file is logged and skipped so it
  * doesn't prevent the other test suites from rendering.
  */
-export async function loadAllTestSuites(rootDir: string, exclude: string[] = [], projectLayers?: Layers): Promise<TestSuiteTestCases[]> {
+export async function loadAllTestSuites(rootDir: string, exclude: string[] = [], projectLayers?: Layers, layersScope: LayersScope = "all"): Promise<TestSuiteTestCases[]> {
   const files = await findAllTestCaseFiles(rootDir, exclude);
   const results: TestSuiteTestCases[] = [];
   // Anchors and routes carry only the test case id, so it must be unique across the whole scan root
   const idOwners = new Map<string, string>();
   for (const file of files) {
     try {
-      const loaded = loadTestCases(file, projectLayers);
+      const loaded = loadTestCases(file, projectLayers, layersScope);
       for (const tc of loaded.testCases) {
         const owner = idOwners.get(tc._tcId!);
         if (owner !== undefined) {
