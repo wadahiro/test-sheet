@@ -18,6 +18,7 @@ export interface SourceSnippet {
   code: string;
   /** The method was longer than `MAX_SNIPPET_LINES`, so only its start is kept */
   truncated: boolean;
+  containers?: string[];
 }
 
 interface SourceFile {
@@ -318,6 +319,18 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
       const shown = relative(file.base, file.path).replaceAll("\\", "/");
       const snippet: SourceSnippet = {
+        containers: shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair) => {
+          const line = lineOf(shape!.starts, pair.open);
+          const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
+          const kotest = header.match(/^\s*"((?:\\.|[^"\\])*)"\s*-\s*$/) ?? header.match(/^\s*(?:context|describe|given|when|and)\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)\s*$/);
+          if (kotest) return [kotest[1]];
+          if (!/\bclass\s+\w+/.test(header)) return [];
+          const lead = withLeadIn(shape!.lines, { start: line, end: line });
+          const annotations = shape!.lines.slice(lead.start, line + 1).join("\n");
+          if (!/@Nested\b/.test(annotations)) return [];
+          const display = annotations.match(/@DisplayName\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)/);
+          return display ? [display[1]] : [];
+        }),
         file: shown,
         path: posix.join(file.shownBase, shown),
         startLine: range.start + 1,

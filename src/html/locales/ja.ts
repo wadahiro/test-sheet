@@ -1,6 +1,10 @@
 import type { MessageKey } from "./en";
 
 export const ja: Record<MessageKey, string> = {
+  "layer.summary": "層ごとの件数",
+  "layer.label": "層",
+  "layer.unspecified": "未指定",
+  "layer.reason": "自動化の例外理由",
   "app.title": "テストケース",
 
   "header.search": "検索",
@@ -61,7 +65,7 @@ export const ja: Record<MessageKey, string> = {
   "chips.or": "または",
   "chips.and": "かつ",
   "filter.byHelp": "選んだドメイン・機能・スイートの中で、選んだタグのいずれかを持ち、選んだ状態と方法のいずれかに当てはまるケース",
-  "plan.rangeHelp": "選んだタグのいずれかを持つか、選んだドメイン・機能・スイートのいずれかに属するケース",
+  "plan.rangeHelp": "選択したタグまたは対象範囲に一致するケースを、選択した層で絞り込みます",
   "plan.inRange": "範囲内 {count}",
   "picker.tags": "タグ",
   "picker.search": "検索",

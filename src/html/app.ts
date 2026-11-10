@@ -48,6 +48,8 @@ interface TestCase {
   automation?: "manual" | "automated" | "semi";
   /** semi: what a person still checks by hand */
   automation_note?: string;
+  layer?: string;
+  automation_reason?: string;
   /** `automation_note` rendered as Markdown at generation time */
   automationNoteHtml?: string;
   /** Test code that mentions the case; only for an automated or semi case, and absent when no code was searched */
@@ -140,6 +142,8 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
     lines.push(`**${t("md.tags")}:** ${tc.tags.join(", ")}`, "");
   }
 
+  if (tc.layer) lines.push(`**${t("layer.label")}:** ${tc.layer}`, "");
+  if (tc.automation_reason) lines.push(`**${t("layer.reason")}:** ${tc.automation_reason}`, "");
   if (tc.automation && tc.automation !== "manual") lines.push(`**${t("md.method")}:** ${testMethod(tc)}`, "");
   if (tc.automation_note) {
     const noteLines = tc.automation_note.trim().split("\n");
@@ -174,12 +178,33 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
   return lines.join("\n");
 }
 
+function premiseHeadings(tc: TestCase, previous?: TestCase): { text: string; depth: number }[] {
+  const values = tc.preconditions ?? [];
+  const before = previous?.preconditions ?? [];
+  let shared = 0;
+  while (shared < values.length && shared < before.length && JSON.stringify(values[shared]) === JSON.stringify(before[shared])) shared++;
+  if (values.length < before.length && shared === values.length) shared = Math.max(0, shared - 1);
+  return values.slice(shared).map((value, i) => ({ text: preconditionText(value), depth: shared + i }));
+}
+
+function layerSummary(cases: TestCase[]): string {
+  const groups = new Map<string, Record<CaseMethod, number>>();
+  for (const tc of cases) {
+    const key = tc.layer ?? t("layer.unspecified");
+    const counts = groups.get(key) ?? { automated: 0, semi: 0, manual: 0 };
+    counts[caseMethodKey(tc)]++;
+    groups.set(key, counts);
+  }
+  return [...groups].map(([key, c]) => `${key}: ${c.automated + c.semi + c.manual} (${t("method.automated")} ${c.automated} / ${t("method.semi")} ${c.semi} / ${t("method.manual")} ${c.manual})`).join(" · ");
+}
+
 /** Renders every test case in a section as a single Markdown document */
 function categoryToMarkdown(category: string, testCases: TestCase[], headingLevel = 2): string {
   const lines = [`${"#".repeat(headingLevel)} ${t("md.section", { name: category })}`, ""];
-  for (const tc of testCases) {
-    lines.push(testCaseToMarkdown(tc, headingLevel + 1), "---", "");
-  }
+  testCases.forEach((tc, i) => {
+    for (const premise of premiseHeadings(tc, testCases[i - 1])) lines.push(`${"#".repeat(Math.min(6, headingLevel + 1 + premise.depth))} ${premise.text}`, "");
+    lines.push(testCaseToMarkdown({ ...tc, preconditions: [] }, Math.min(6, headingLevel + 1 + (tc.preconditions?.length ?? 0))), "---", "");
+  });
   return lines.join("\n");
 }
 
@@ -1030,6 +1055,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
               : null}
           </div>`
         : null}
+      ${tc.automation_reason ? html`<aside class="automation-note"><h5 class="eyebrow">${t("layer.reason")}</h5><p>${tc.automation_reason}</p></aside>` : null}
       ${tc.automationNoteHtml
         ? html`<aside class="automation-note">
             <h5 class="eyebrow">${t("case.automationNote")}</h5>
@@ -1065,6 +1091,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
               <span class="source-path" title=${source.path}>${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
             </figcaption>
+            ${source.containers?.length ? html`<div class="source-containers">${source.containers.join(" › ")}</div>` : null}
             <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
           </figure>`
         )}
@@ -1155,6 +1182,7 @@ function caseStatusKey(tc: TestCase): CaseStatus {
 }
 
 interface IndexRowData {
+  layer?: string;
   tcId: string;
   name: string;
   status: string | null;
@@ -1168,6 +1196,7 @@ interface IndexRowData {
 
 function indexRowData(tc: TestCase): IndexRowData {
   return {
+    layer: tc.layer,
     tcId: tc._tcId,
     name: tc.name,
     status: statusLabel(tc),
@@ -1323,6 +1352,7 @@ function IndexRow({
       <td class="overview-tags">
         <div class="tags-cell">
           <div class="tag-list">
+            ${row.layer ? html`<span class="tag-chip" title=${t("layer.label")}>${row.layer}</span>` : null}
             ${row.tags.map((tag) =>
               onTag
                 ? html`<button class="tag-chip" key=${tag} title=${t("filter.byTag")} onClick=${(e: Event) => { e.stopPropagation(); onTag(tag); }}><${Highlight} text=${tag} query=${query} /></button>`
@@ -1395,7 +1425,7 @@ function CategorySection({
         </div>
       </div>
       ${showIndex ? html`<${SectionIndex} testCases=${testCases} />` : null}
-      ${testCases.map((tc) => html`<${TestCaseCard} key=${tc._tcId} tc=${tc} level=${level + 1} />`)}
+      ${testCases.map((tc, i) => html`${premiseHeadings(tc, testCases[i - 1]).map((premise) => html`<div class="premise-heading" role="heading" aria-level=${Math.min(6, premise.depth + 4)} style=${`padding-inline-start: ${premise.depth + 1}rem`}>${premise.text}</div>`)}<${TestCaseCard} key=${tc._tcId} tc=${tc} level=${level + 1} />`)}
     </section>
   `;
 }
@@ -1478,6 +1508,7 @@ const OVERVIEW_LEVELS = ["domain", "feature", "suite", "category"] as const;
 type OverviewLevel = (typeof OVERVIEW_LEVELS)[number];
 
 interface OverviewRow {
+  layer?: string;
   tcId: string;
   name: string;
   status: string | null;
@@ -1536,7 +1567,8 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
 
           for (const tc of cases) {
             rows.push({
-              tcId: tc._tcId,
+              layer: tc.layer,
+    tcId: tc._tcId,
               name: tc.name,
               status: statusLabel(tc),
               statusTitle: tc.reason ?? tc.skip?.reason ?? "",
@@ -1562,7 +1594,7 @@ function buildOverviewRows(suites: SuitePageData[]): OverviewRow[] {
 
 /** Everything shown in the row, so the filter matches exactly what the reader can see */
 function overviewRowSearchText(row: OverviewRow): string {
-  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, ...row.tags].join(" ");
+  return [row.tcId, ...OVERVIEW_LEVELS.map((level) => row.labels[level]), row.name, row.status ?? "", row.method, row.tc.layer ?? "", ...row.tags].join(" ");
 }
 
 /** One choice in a `MultiPicker` */
@@ -1724,6 +1756,12 @@ function scopePartsOf(rows: OverviewRow[]): RangePart[] {
 }
 
 /** The tags of these rows with how many cases carry each, in name order */
+function layerItemsOf(rows: OverviewRow[]): PickerItem[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) { const key = row.tc.layer ?? ""; counts.set(key, (counts.get(key) ?? 0) + 1); }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([key, count]) => ({ key, label: key || t("layer.unspecified"), count }));
+}
+
 function tagItemsOf(rows: OverviewRow[]): PickerItem[] {
   const counts = new Map<string, number>();
   for (const row of rows) for (const tag of row.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -1772,27 +1810,10 @@ function escapeMarkdownCell(value: string): string {
 /** Renders the overview as a Markdown table. Repeated values are written out in full, since
  *  the dimming that stands in for them on screen has no Markdown equivalent. */
 function overviewToMarkdown(rows: OverviewRow[], title: string): string {
-  const columns = overviewColumns();
-  const lines = [
-    `# ${title}`,
-    "",
-    `> ${t("md.caseCount", { count: rows.length })}`,
-    "",
-    `| ${columns.join(" | ")} |`,
-    `|${columns.map(() => "---").join("|")}|`,
-  ];
-  for (const row of rows) {
-    const cells = [
-      row.tcId,
-      ...OVERVIEW_LEVELS.map((level) => row.labels[level]),
-      row.name,
-      row.status ?? "",
-      row.method,
-      row.tags.join(", "),
-    ];
-    lines.push(`| ${cells.map(escapeMarkdownCell).join(" | ")} |`);
-  }
-  return lines.join("\n");
+  const groups = new Map<string, OverviewRow[]>();
+  for (const row of rows) { const key = row.keys.category; groups.set(key, [...(groups.get(key) ?? []), row]); }
+  return [`# ${title}`, "", ...[...groups.values()].map((group) => categoryToMarkdown(labelPath(group[0], 0), group.map((row) => row.tc), 2))].join("\n");
+
 }
 
 /** One step of the path shown in the app header; the last is the page itself and has no link */
@@ -1988,6 +2009,7 @@ function ScopeTable({
                   </tr>
                 </tbody>`
               : null}
+            ${premiseHeadings(row.tc, i > 0 && rows[i - 1].keys.category === row.keys.category ? rows[i - 1].tc : undefined).map((premise) => html`<tbody><tr class="scope-group"><th colspan=${span}><div class="premise-heading" role="heading" aria-level=${Math.min(6, premise.depth + 4)} style=${`padding-inline-start: ${premise.depth + 1}rem`}>${premise.text}</div></th></tr></tbody>`)}
             ${plan
               ? html`<tbody key=${row.tcId} class=${"case" + (open ? " case-open" : "")}>
                   <${IndexRow} ...${rowProps} result=${undefined} />
@@ -2126,6 +2148,7 @@ function ScopePage({
   // What the reader opened or closed by hand; a case with no entry is open only if the route points at it
   const [opened, setOpened] = useState<Map<string, boolean>>(new Map());
   const pendingJump = useRef<string | null>(null);
+  const [layerFilter, setLayerFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [partFilter, setPartFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
@@ -2170,11 +2193,12 @@ function ScopePage({
   const scopeRows = scopeIds ? pageRows.filter((row) => scopeIds.has(row.tcId) || testCaseAnchorId(row.tcId) === route.target) : pageRows;
   const shownIds = new Set(scopeRows.map((row) => row.tcId));
   const trimmedQuery = query.trim();
-  const visibleRows = filterByValue(
+  const methodRows = filterByValue(
     filterByValue(filterByTags(filterByParts(filterOverviewRows(scopeRows, trimmedQuery), partFilter), tagFilter), statusFilter, (row) => row.statusKey),
     methodFilter,
     (row) => row.methodKey
   );
+  const visibleRows = methodRows.filter((row) => !layerFilter.length || layerFilter.includes(row.tc.layer ?? ""));
   const statusItems = valueItemsOf(scopeRows, STATUS_LABEL_KEY, (row) => row.statusKey);
   const methodItems = valueItemsOf(scopeRows, METHOD_LABEL_KEY, (row) => row.methodKey);
   const partItems = scopePartsOf(scopeRows);
@@ -2201,6 +2225,7 @@ function ScopePage({
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId}>
+      <details class="layer-summary"><summary>${t("layer.summary")}</summary><table><thead><tr><th>${t("col.suite")}</th><th>${t("layer.summary")}</th></tr></thead><tbody>${resolved.suites.map((suite) => html`<tr><th>${suite.typeName}</th><td>${layerSummary(scopeRows.filter((row) => row.idPrefix === suite.idPrefix).map((row) => row.tc))}</td></tr>`)}</tbody></table></details>
       <div class="scope-table-wrap">
         ${html`<div class="plan-range filter-chips">
               <span class="plan-label" title=${t("filter.byHelp")}>${t("filter.by")}</span>
@@ -2210,6 +2235,7 @@ function ScopePage({
                 selected=${partFilter}
                 onToggle=${(key: string) => setPartFilter((current) => toggled(current, key))}
               />
+              <${MultiPicker} label=${t("layer.label")} items=${layerItemsOf(scopeRows)} selected=${layerFilter} onToggle=${(key: string) => setLayerFilter((current) => toggled(current, key))} />
               <${MultiPicker} label=${t("picker.tags")} items=${tagItems} selected=${tagFilter} onToggle=${(tag: string) => setTagFilter((current) => toggled(current, tag))} />
               <${MultiPicker} label=${t("picker.status")} items=${statusItems} selected=${statusFilter} onToggle=${(key: string) => setStatusFilter((current) => toggled(current, key))} searchable=${false} />
               <${MultiPicker} label=${t("picker.method")} items=${methodItems} selected=${methodFilter} onToggle=${(key: string) => setMethodFilter((current) => toggled(current, key))} searchable=${false} />
@@ -2226,7 +2252,7 @@ function ScopePage({
           <div class="filter-actions">
             ${route.scope.kind === "all" ? html`<a class="scope-link" href=${ALL_HASH}>${t("scope.readAsOne")}</a>` : null}
             <${RunProgress} rows=${visibleRows} />
-            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${trimmedQuery !== "" || tagFilter.length > 0 || partFilter.length > 0 || statusFilter.length > 0 || methodFilter.length > 0} />
+            <${CaseCountLabel} shown=${visibleRows.length} total=${scopeRows.length} filtered=${layerFilter.length > 0 || trimmedQuery !== "" || tagFilter.length > 0 || partFilter.length > 0 || statusFilter.length > 0 || methodFilter.length > 0} />
             ${visibleRows.length > 0
               ? html`<button class="copy-btn" title=${allOpen ? t("scope.collapseAll") : t("scope.expandAll")} onClick=${() => setAll(!allOpen)}>
                   <span aria-hidden="true">${allOpen ? "▾" : "▸"}</span>
@@ -2250,14 +2276,15 @@ function ScopePage({
   `;
 }
 
-const planHasRange = (plan: Plan): boolean => plan.tags.length > 0 || plan.parts.length > 0;
+const planHasRange = (plan: Plan): boolean => plan.layers.length > 0 || plan.tags.length > 0 || plan.parts.length > 0;
 
 /**
  * The cases a run's plan covers: those carrying one of its tags or sitting under one of its domains,
  * features or suites (any of them, as with tags), or all of them when it names none
  */
 function planRange(rows: OverviewRow[], plan: Plan): OverviewRow[] {
-  if (!planHasRange(plan)) return rows;
+  rows = rows.filter((row) => !plan.layers.length || plan.layers.includes(row.tc.layer ?? ""));
+  if (!plan.tags.length && !plan.parts.length) return rows;
   const parts = new Set(plan.parts);
   return rows.filter((row) => row.tags.some((tag) => plan.tags.includes(tag)) || OVERVIEW_LEVELS.some((level) => parts.has(rangeKeyOf(level, row.keys[level]))));
 }
@@ -2374,7 +2401,10 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
     `> ${t("plan.review.summary", {
       range: !planHasRange(plan)
         ? t("plan.review.allTags")
-        : [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(` ${t("chips.or")} `),
+        : [
+            [...plan.parts.map((key) => rangePartLabel(rangePartsOf(rows), key)), ...plan.tags.map((tag) => `\`${tag}\``)].join(` ${t("chips.or")} `),
+            plan.layers.length ? `${t("layer.label")}: ${plan.layers.map((layer) => layer || t("layer.unspecified")).join(` ${t("chips.or")} `)}` : "",
+          ].filter(Boolean).map((part) => `(${part})`).join(` ${t("chips.and")} `),
       total: inRange.length,
       run: tally.run,
       skip: tally.skip,
@@ -2547,6 +2577,7 @@ function PlanPage({
               selected=${plan.tags}
               onToggle=${(tag: string) => onPlan((current) => ({ ...current, tags: toggled(current.tags, tag) }))}
             />
+            <${MultiPicker} label=${t("layer.label")} items=${layerItemsOf(rows)} selected=${plan.layers} onToggle=${(key: string) => onPlan((current) => ({ ...current, layers: toggled(current.layers, key) }))} />
             ${joinChips(
               [
                 ...partChips(plan.parts, allParts, (key) => onPlan((current) => ({ ...current, parts: current.parts.filter((other) => other !== key) }))),
@@ -2623,6 +2654,7 @@ function PlanPage({
             </div>`
           : null}
       </div>
+
       <div class="scope-table-wrap">
         ${listed.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
@@ -2891,6 +2923,8 @@ function testCaseSearchText(tc: TestCase): string {
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
   if (tc.automation_note) parts.push(tc.automation_note);
+  if (tc.layer) parts.push(tc.layer);
+  if (tc.automation_reason) parts.push(tc.automation_reason);
   if (tc.tags) parts.push(...tc.tags);
   for (const source of tc.sources ?? []) parts.push(source.file, source.code);
   return parts.join(" ");
@@ -4406,7 +4440,7 @@ function App() {
   const cancelPlanning = useCallback(async () => {
     const snapshot = planSnapshot.current;
     if (!snapshot) return;
-    const decisions = (value: Plan) => JSON.stringify([value.tags, value.parts, value.d, value.why]);
+    const decisions = (value: Plan) => JSON.stringify([value.layers, value.tags, value.parts, value.d, value.why]);
     const edited = decisions(snapshot.plan) !== decisions(planRef.current);
     if (edited && !confirm(t(snapshot.fresh ? "plan.cancelConfirmNew" : "plan.cancelConfirm"))) return;
     if (snapshot.fresh) {

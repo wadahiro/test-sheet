@@ -5,6 +5,10 @@
 // `.other` variants, picked by the language's own plural rules.
 
 export const en = {
+  "layer.summary": "Cases by layer",
+  "layer.label": "Layer",
+  "layer.unspecified": "Unspecified",
+  "layer.reason": "Automation exception",
   "app.title": "Test Cases",
 
   // Header
@@ -70,7 +74,7 @@ export const en = {
   "chips.or": "or",
   "chips.and": "and",
   "filter.byHelp": "Within the chosen domains, features or suites, carrying one of the chosen tags, and having one of the chosen statuses and methods",
-  "plan.rangeHelp": "Cases carrying any of these tags, or under any of these domains, features or suites",
+  "plan.rangeHelp": "Cases matching any selected tag or part, narrowed to the selected layers",
   "plan.inRange": "{count} in range",
   "picker.tags": "Tags",
   "picker.search": "Search",

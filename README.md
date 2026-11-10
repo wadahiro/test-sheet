@@ -399,3 +399,39 @@ When a placeholder value is an object, `format` controls how it renders:
 ## License
 
 MIT
+
+### Test layers and shared preconditions
+
+A case can have one `layer`. Declare the allowed layers per suite:
+
+```yaml
+shared_preconditions:
+  logged_in: &logged_in Logged in
+metadata:
+  type_name: Login
+  id_prefix: LOGIN
+  layers:
+    config: { automation: expected }
+    connector: {}
+    e2e: {}
+test_cases:
+  - id: LOGIN-001
+    name: Invalid configuration
+    layer: config
+    automation: manual
+    automation_reason: Automation is tracked in TEST-42
+    preconditions: [*logged_in]
+    steps:
+      - action: Submit invalid configuration
+        expected: A validation error is shown
+```
+
+Unknown top-level keys such as `shared_preconditions` are ignored by the loader and can hold YAML anchor definitions. Anchors are local to one YAML file. Keep each case in one layer; split cases whose expected results require different layers.
+
+Without `metadata.layers`, no layer policy is enforced. With a declaration, missing or undeclared layers warn. Active manual cases in a layer declaring `automation: expected` also warn unless `automation_reason` contains text. `semi` is permitted. `--strict --out sheet.html` writes the HTML and exits unsuccessfully when warnings occur. Invalid field types are rejected. Layer names are case sensitive.
+
+Parameterized cases inherit `layer` and `automation_reason` in pattern > template > entry order. Layer filters combine with the other table filters using AND. Plan layers narrow the existing tag/part range using AND; no selected layers means every layer, including unspecified. Older saved plans retain their previous range.
+
+The layer summary lists each suite's totals and automated / semi / manual counts. Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
+
+With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. Unrecognized containers are omitted; names are not automatically compared with preconditions.

@@ -52,10 +52,13 @@ export interface TestCase {
   automation?: "manual" | "automated" | "semi";
   /** semi: what a person still checks by hand, since the automated part covers only some of the case */
   automation_note?: string;
+  layer?: string;
+  automation_reason?: string;
   _tcId?: string;
 }
 
 export interface Metadata {
+  layers?: Record<string, { automation?: "expected" }>;
   type_name: string;
   id_prefix: string;
   guides?: string[];
@@ -213,6 +216,8 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
       const note = firstDefined(automationNote, template.automation_note, entryAutomationNote);
       expandedCases.push({
         name,
+        layer: firstDefined(pattern.layer, template.layer, pt.layer) as string | undefined,
+        automation_reason: firstDefined(pattern.automation_reason, template.automation_reason, pt.automation_reason) as string | undefined,
         category,
         preconditions: preconditions || [],
         steps,
@@ -413,6 +418,21 @@ export function loadTestCases(yamlFile: string): LoadedTestCases {
   const taggedCases = suiteTags ? sortedCases.map((tc) => ({ ...tc, tags: mergeTags(suiteTags, tc.tags) })) : sortedCases;
   const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
   validateAutomation(testCases.map((tc) => ({ ...tc, id: tc._tcId })), yamlFile);
+
+  const layers = yamlData.metadata.layers;
+  if (layers !== undefined) {
+    if (!layers || typeof layers !== "object" || Array.isArray(layers)) throw new Error(`Invalid metadata.layers in ${yamlFile}: expected a mapping.`);
+    for (const [name, rule] of Object.entries(layers)) {
+      if (!name.trim() || !rule || typeof rule !== "object" || Array.isArray(rule) || (rule.automation !== undefined && rule.automation !== "expected")) throw new Error(`Invalid layer declaration "${name}" in ${yamlFile}.`);
+    }
+  }
+  for (const tc of testCases) {
+    if (tc.layer !== undefined && (typeof tc.layer !== "string" || !tc.layer.trim())) throw new Error(`Invalid layer on ${tc._tcId} in ${yamlFile}: expected non-empty text.`);
+    if (tc.automation_reason !== undefined && typeof tc.automation_reason !== "string") throw new Error(`Invalid automation_reason on ${tc._tcId} in ${yamlFile}.`);
+    if (!layers) continue;
+    if (!tc.layer || !Object.hasOwn(layers, tc.layer)) warn(`${tc._tcId} has ${tc.layer ? `undeclared layer "${tc.layer}"` : "no layer"} (${yamlFile})`);
+    else if (layers[tc.layer].automation === "expected" && (!tc.status || tc.status === "active") && (tc.automation ?? "manual") === "manual" && !tc.automation_reason?.trim()) warn(`${tc._tcId} is manual in layer "${tc.layer}" where automation is expected; set automation_reason for an exception (${yamlFile})`);
+  }
 
   const autolinks = parseAutolinkRules(yamlData.metadata.autolinks, `${yamlFile} (metadata)`);
 

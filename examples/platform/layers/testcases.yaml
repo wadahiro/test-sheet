@@ -1,0 +1,47 @@
+shared_preconditions:
+  logged_in: &logged_in Logged in
+metadata:
+  type_name: Layered login checks
+  id_prefix: PYRAMID
+  layers:
+    config: { automation: expected }
+    connector: {}
+    e2e: {}
+test_cases:
+  - id: PYRAMID-001
+    name: Reject invalid timeout
+    layer: config
+    automation: automated
+    preconditions: [*logged_in, Configuration editor is open]
+    steps:
+      - action: Set a negative timeout
+        expected: Validation rejects the value
+  - id: PYRAMID-002
+    name: Accept a valid timeout
+    layer: config
+    automation: manual
+    automation_reason: Automated coverage is being added
+    preconditions: [*logged_in, Configuration editor is open]
+    steps:
+      - action: Set a positive timeout
+        expected: Validation accepts the value
+  - id: PYRAMID-003
+    name: Connect to the external service
+    layer: e2e
+    preconditions: [*logged_in, External service is available]
+    steps:
+      - action: Connect using the saved configuration
+        expected: The real service accepts the connection
+parameterized_tests:
+  - id_prefix: PYRAMID-
+    layer: connector
+    automation: automated
+    preconditions: [*logged_in]
+    template:
+      name: 'Map response {{status}}'
+      steps:
+        - action: 'Receive status {{status}} from the stub'
+          expected: 'Return {{result}}'
+    patterns:
+      - { id: '004', status: 200, result: success }
+      - { id: '005', status: 503, result: retry }
