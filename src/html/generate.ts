@@ -23,6 +23,8 @@ async function bundleApp(): Promise<string> {
     entrypoints: [resolve(__dirname, "app.ts")],
     target: "browser",
     format: "esm",
+    // highlight.js is inlined into every page, so it goes in minified
+    minify: true,
   });
 
   if (!result.success) {

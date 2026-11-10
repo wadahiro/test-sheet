@@ -11,10 +11,11 @@
     "build": "bun run src/cli.ts --out test-cases.html"
   },
   "dependencies": {
-    "preact": "^10.29.2",
+    "highlight.js": "11.12.0",
     "htm": "^3.1.1",
-    "yaml": "^2.8.2",
-    "marked": "^14.1.4"
+    "marked": "^14.1.4",
+    "preact": "^10.29.2",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -2,11 +2,13 @@
 // case's ID, and the test method around each hit is cut out so the page can show it.
 
 import { readFileSync, statSync } from "fs";
-import { isAbsolute, relative, resolve } from "path";
+import { relative, resolve } from "path";
 
 export interface SourceSnippet {
-  /** Path as shown to the reader: relative to the working directory unless the file lies outside it */
+  /** Path as shown to the reader: relative to the directory `--tests` named, so a deep checkout does not put its own location in front */
   file: string;
+  /** Where the file really is, for a tooltip */
+  path: string;
   startLine: number;
   endLine: number;
   code: string;
@@ -16,6 +18,8 @@ export interface SourceSnippet {
 
 interface SourceFile {
   path: string;
+  /** The directory the pattern that found the file starts from */
+  base: string;
   text: string;
 }
 
@@ -62,7 +66,7 @@ async function readSourceFiles(patterns: string[]): Promise<{ files: SourceFile[
         const text = readFileSync(path, "utf8");
         // A NUL byte means a binary file, which has no method to show
         if (text.includes("\u0000")) continue;
-        files.set(path, { path, text });
+        files.set(path, { path, base, text });
       } catch {
         // Unreadable files are as good as absent
       }
@@ -169,11 +173,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const displayPath = (path: string): string => {
-  const rel = relative(process.cwd(), path);
-  return rel.startsWith("..") || isAbsolute(rel) ? path : rel;
-};
-
 function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>): void {
   const lines = file.text.split("\n");
   const starts = lineStarts(file.text);
@@ -194,7 +193,8 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
     const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
     const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
     const snippet: SourceSnippet = {
-      file: displayPath(file.path),
+      file: relative(file.base, file.path),
+      path: file.path,
       startLine: range.start + 1,
       endLine: end + 1,
       code: lines.slice(range.start, end + 1).join("\n"),

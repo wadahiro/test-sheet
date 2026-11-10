@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "p
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
+import { highlightHtml } from "./highlight";
 import type { SourceSnippet } from "../testSources";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
@@ -1031,6 +1032,11 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
   `;
 }
 
+function HighlightedCode({ code, file }: { code: string; file: string }) {
+  const colored = highlightHtml(code, file);
+  return colored === null ? html`<code>${code}</code>` : html`<code dangerouslySetInnerHTML=${{ __html: colored }} />`;
+}
+
 /** The test code behind an automated case, or a note that none was found where it was searched */
 function CaseSources({ sources }: { sources: SourceSnippet[] }) {
   return html`<section class="case-sources">
@@ -1040,10 +1046,10 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
       : sources.map(
           (source) => html`<figure class="source-snippet" key=${`${source.file}:${source.startLine}`}>
             <figcaption>
-              <span class="source-path">${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
+              <span class="source-path" title=${source.path}>${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
             </figcaption>
-            <pre><code>${source.code}</code></pre>
+            <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
           </figure>`
         )}
   </section>`;

@@ -25,6 +25,10 @@ const DARK_THEME_VARS = `
   --success-bg: #0f3326;
   --danger: #ff6a62;
   --danger-bg: #3a1a1c;
+  --syn-keyword: #d2a8ff;
+  --syn-string: #7ee787;
+  --syn-number: #ffa657;
+  --syn-annotation: #58a6ff;
 `;
 
 export const STYLES = `
@@ -58,6 +62,11 @@ export const STYLES = `
   --success-bg: #dff5e6;
   --danger: #c9252f;
   --danger-bg: #ffebe9;
+  /* Test code colours, each 4.5:1 or better on --bg-chip, where code sits. Comments reuse --fg-muted */
+  --syn-keyword: #7a1fa2;
+  --syn-string: #0a6b3a;
+  --syn-number: #9a4a00;
+  --syn-annotation: #0b5cc7;
   --inactive-fill: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 7px), var(--bg);
   --header-h: 48px;
   /* Breathing room between the app header and the first sticky header; sticky tops start below it */
@@ -1749,6 +1758,12 @@ a.link-btn { text-decoration: none; }
 .source-path { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .source-snippet pre { overflow-x: auto; margin: 0; padding: 8px; background: var(--bg-chip); border-radius: 4px; font-size: 0.85em; }
 .source-snippet pre code { background: none; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hljs-keyword, .hljs-built_in, .hljs-type, .hljs-literal, .hljs-selector-tag { color: var(--syn-keyword); }
+.hljs-string, .hljs-regexp, .hljs-char { color: var(--syn-string); }
+.hljs-number, .hljs-symbol { color: var(--syn-number); }
+.hljs-meta, .hljs-attr, .hljs-attribute, .hljs-tag, .hljs-name { color: var(--syn-annotation); }
+.hljs-meta .hljs-string { color: var(--syn-string); }
+.hljs-comment, .hljs-quote, .hljs-doctag { color: var(--fg-muted); font-style: italic; }
 .source-missing { margin: 4px 0 0; font-size: 0.85rem; color: var(--fg-muted); }
 
 .test-case-meta {
