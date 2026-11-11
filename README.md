@@ -231,6 +231,45 @@ test code, a `semi` case without `automation_note`, a missing guide file or a ba
 bun run src/cli.ts ./tests --tests ../app/src/test --out test-cases.html --strict
 ```
 
+### Checks a case no longer makes (`covered_by`, `dropped`)
+
+When a case is cut down in a refactor, say where each check you removed is made now, or why it is
+not, so a reader can tell a deliberate cut from a gap:
+
+```yaml
+- id: LOGIN-003
+  name: Logout ends the session
+  covered_by:
+    - case: E2E-002
+      what: The session is revoked at the real server
+    - test: DeleteBasicTest.testDeleteExpired
+      what: An expired certificate does not call the revoke API
+    - elsewhere: Download page tests (another repository)
+      what: Days left are shown
+  dropped:
+    - what: Cookie lifetime in the browser
+      reason: Browser behaviour, not something this product decides
+```
+
+Each `covered_by` item names exactly one of `case` (an ID in the sheet), `test` (`method`,
+`Class.method` or a Kotest name as written) or `elsewhere` (free text), and `what` is required. Each
+`dropped` item needs `what` and `reason`. Anything else, such as a `step` number, stops the file from
+loading: a number into another case's steps goes stale silently, so name the step in `what` instead.
+`{{key}}` placeholders work, and in `parameterized_tests` the most specific level that sets either
+wins, as with `automation_note`.
+
+Both appear above the steps as one block, and the case that takes a check over lists what it carries
+("Also covers checks cut from other cases"), so changing it shows what rides on it. Warned about when
+the sheet is generated:
+
+- a `case` that does not exist, is skipped or obsolete, or is the case itself; a loop between cases
+- a `test` that is not in the code `--tests` read (name matching, not compiler resolution; skipped when
+  `--tests` is not given)
+
+A `case` that is `manual` is not warned about: a real external environment is run on purpose, not every
+time. Instead the plan page and the copied review list the checks that a plan leaves out: cases decided
+Run whose `case` target is not in the run. A `test` or `elsewhere` does not depend on the plan.
+
 ### Linking ticket numbers (`autolinks`)
 
 Write a ticket number as plain text and let the configuration say where it leads, as GitHub and GitLab

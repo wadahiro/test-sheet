@@ -38,7 +38,17 @@ test_cases:
       - Already logged in
     steps:
       - action: Click the logout button
-        expected: Returns to the login screen and invalidates the session
+        expected: Returns to the login screen
+    covered_by:
+      - case: LOGIN-002
+        what: The session issued at login is gone after logout
+      - test: LoginTest.sessionIsIssuedAfterLogin
+        what: The session cookie is set and cleared
+      - elsewhere: Download page tests (another repository)
+        what: The logout link is shown on every page
+    dropped:
+      - what: Cookie lifetime in the browser
+        reason: Browser behaviour, not something this product decides
   - name: Visiting the top page while logged in redirects to the dashboard
     category: Basic flow
     preconditions:

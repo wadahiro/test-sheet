@@ -200,3 +200,19 @@ withData(row("LOGIN-001")) {
 }`);
   expect(found.flatMap((source) => source.definitions ?? [])).toEqual([]);
 });
+
+test("hasTest finds a test by method, by class and method, or by a Kotest name", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sheet-sources-"));
+  try {
+    writeFileSync(join(dir, "DeleteBasicTest.kt"), `class DeleteBasicTest : FunSpec({\n    test("expired certificates are revoked") { }\n})\nfun testDeleteExpired() {}\n`);
+    const index = await buildSourceIndex([dir], []);
+    expect(index.hasTest("testDeleteExpired")).toBe(true);
+    expect(index.hasTest("DeleteBasicTest.testDeleteExpired")).toBe(true);
+    expect(index.hasTest("DeleteBasicTest#testDeleteExpired")).toBe(true);
+    expect(index.hasTest("OtherTest.testDeleteExpired")).toBe(false);
+    expect(index.hasTest("DeleteBasicTest.testDeleteExp")).toBe(false);
+    expect(index.hasTest("expired certificates are revoked")).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

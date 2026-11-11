@@ -12,6 +12,7 @@ import type { LocaleDefinition } from "./i18n";
 import type { SourceIndex, SourceSnippet } from "../testSources";
 import { autolinkExtension, caseReferenceRule, type AutolinkRule } from "../autolinks";
 import { warn } from "../warnings";
+import { checkCoverage } from "../coverage";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -197,6 +198,7 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
   const { liveReload = false, locales = [], autolinks: globalAutolinks = [], sources } = options;
   const bundledJs = await bundleApp();
   // Across every suite, since a case may point at one in another suite
+  checkCoverage(suites.flatMap((suite) => suite.testCases), sources);
   const caseReferences = caseReferenceRule(suites.flatMap((suite) => suite.testCases.map((tc) => tc._tcId ?? "")).filter(Boolean));
 
   // A feature holding one suite would show the same thing twice (feature, then suite), so the two fold into one node

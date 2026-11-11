@@ -44,6 +44,12 @@ interface SourceFile {
 
 export interface SourceIndex {
   snippetsFor(id: string): SourceSnippet[];
+  /**
+   * Whether a test of this name is in the code that was read: `method`, `Class.method` or `Class#method`
+   * (the class is then in the same file), or a Kotest name with spaces as written. Names, not resolution:
+   * a renamed test is noticed, a same-named method somewhere else is not told apart.
+   */
+  hasTest(name: string): boolean;
 }
 
 const MAX_FILE_BYTES = 1_000_000;
@@ -409,6 +415,16 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
   }
 }
 
+function mentionsTest(files: SourceFile[], name: string): boolean {
+  const word = (text: string) => new RegExp(`(?<!\\w)${escapeRegExp(text)}(?!\\w)`);
+  if (/\s/.test(name)) return files.some((file) => file.text.includes(name));
+  const parts = name.split(/[.#]/).filter(Boolean);
+  const method = parts.at(-1);
+  if (!method) return false;
+  const owner = parts.length > 1 ? parts[parts.length - 2] : undefined;
+  return files.some((file) => word(method).test(file.text) && (owner === undefined || word(owner).test(file.text)));
+}
+
 /** Reads the files the patterns name and finds, for each ID, the test code that mentions it */
 export async function buildSourceIndex(patterns: string[], ids: string[]): Promise<SourceIndex> {
   const { files } = await readSourceFiles(patterns);
@@ -430,5 +446,5 @@ export async function buildSourceIndex(patterns: string[], ids: string[]): Promi
       });
     }
   }
-  return { snippetsFor: (id) => found.get(id) ?? [] };
+  return { snippetsFor: (id) => found.get(id) ?? [], hasTest: (name) => mentionsTest(files, name) };
 }

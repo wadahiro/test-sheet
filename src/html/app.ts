@@ -9,6 +9,7 @@ import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, 
 import { highlightHtml } from "./highlight";
 import type { Layers } from "../testCases";
 import type { SourceSnippet } from "../testSources";
+import type { CoveredBy, Dropped } from "../coverage";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
 
@@ -53,6 +54,8 @@ interface TestCase {
   layerLabel?: string;
   layerDescription?: string;
   automation_reason?: string;
+  covered_by?: CoveredBy[];
+  dropped?: Dropped[];
   /** `automation_note` rendered as Markdown at generation time */
   automationNoteHtml?: string;
   /** Test code that mentions the case; only for an automated or semi case, and absent when no code was searched */
@@ -153,6 +156,12 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
     const noteLines = tc.automation_note.trim().split("\n");
     lines.push(`**${t("md.automationNote")}:** ${noteLines[0]}`, ...noteLines.slice(1), "");
   }
+
+  const handoffLines = [
+    ...(tc.covered_by ?? []).map((item) => t("md.handoffMoved", { what: item.what, kind: handoffKindLabel(handoffKind(item)), target: handoffTarget(item) })),
+    ...(tc.dropped ?? []).map((item) => t("md.handoffDropped", { what: item.what, reason: item.reason })),
+  ];
+  if (handoffLines.length > 0) lines.push(`**${t("md.handoff")}:**`, "", ...handoffLines.map((line) => `- ${line}`), "");
 
   if (recorded) {
     const outcome = caseOutcome(recorded.results);
@@ -1027,6 +1036,84 @@ function CaseActions({ tc, run }: { tc: TestCase; run: CaseRun | null }) {
  * Everything of a case below its heading. A row that already shows the tags passes `tags=${false}`
  * so they are not said twice.
  */
+type HandoffKind = "case" | "test" | "elsewhere";
+const HANDOFF_KINDS: readonly HandoffKind[] = ["case", "test", "elsewhere"];
+const handoffKind = (item: CoveredBy): HandoffKind => HANDOFF_KINDS.find((kind) => kind in item)!;
+const handoffTarget = (item: CoveredBy): string => (item as Record<string, string>)[handoffKind(item)];
+const handoffKindLabel = (kind: HandoffKind): string => t(`handoff.kind.${kind}` as MessageKey);
+
+interface CoverageIndex {
+  byId: Map<string, TestCase>;
+  /** Cases a case covers, which the covering case cannot see in its own YAML */
+  covering: Map<string, { from: TestCase; what: string }[]>;
+}
+
+let coverageIndexCache: { suites: SuitePageData[]; index: CoverageIndex } | null = null;
+
+function coverageIndex(): CoverageIndex {
+  const suites = window.__SUITES__;
+  if (coverageIndexCache?.suites === suites) return coverageIndexCache.index;
+  const all = suites.flatMap((suite) => suite.testCases);
+  const covering = new Map<string, { from: TestCase; what: string }[]>();
+  for (const tc of all) {
+    for (const item of tc.covered_by ?? []) {
+      if (!("case" in item)) continue;
+      covering.set(item.case, [...(covering.get(item.case) ?? []), { from: tc, what: item.what }]);
+    }
+  }
+  const index = { byId: new Map(all.map((tc) => [tc._tcId, tc])), covering };
+  coverageIndexCache = { suites, index };
+  return index;
+}
+
+function HandoffTarget({ tcId, tc }: { tcId: string; tc: TestCase | undefined }) {
+  if (!tc) return html`<span class="handoff-target"><code>${tcId}</code> <span class="handoff-missing">${t("handoff.noSuchCase")}</span></span>`;
+  const note = inactiveNote(tc);
+  return html`<span class="handoff-target"><a href=${testCaseHash(tcId)}>${tcId}</a> ${tc.name}${note ? html` <span class="handoff-missing">${note}</span>` : null}</span>`;
+}
+
+/** What this case no longer checks and where that went, and the checks of other cases it carries */
+function Handoff({ tc }: { tc: TestCase }) {
+  const { byId, covering } = coverageIndex();
+  const moved = tc.covered_by ?? [];
+  const dropped = tc.dropped ?? [];
+  const carried = covering.get(tc._tcId) ?? [];
+  return html`
+    ${moved.length + dropped.length > 0
+      ? html`<aside class="handoff">
+          <h5 class="eyebrow">${t("handoff.title")}</h5>
+          <ul>
+            ${moved.map((item, i) => {
+              const kind = handoffKind(item);
+              const target = handoffTarget(item);
+              return html`<li key=${`m${i}`}>
+                <span class="handoff-what">${item.what}</span>
+                <span class="handoff-kind">${handoffKindLabel(kind)}</span>
+                ${kind === "case" ? html`<${HandoffTarget} tcId=${target} tc=${byId.get(target)} />` : html`<span class="handoff-target"><code>${target}</code></span>`}
+              </li>`;
+            })}
+            ${dropped.map((item, i) => html`<li key=${`d${i}`}>
+              <span class="handoff-what">${item.what}</span>
+              <span class="handoff-kind">${t("handoff.kind.dropped")}</span>
+              <span class="handoff-target">${item.reason}</span>
+            </li>`)}
+          </ul>
+        </aside>`
+      : null}
+    ${carried.length > 0
+      ? html`<aside class="handoff">
+          <h5 class="eyebrow">${t("handoff.covers")}</h5>
+          <ul>
+            ${carried.map((entry, i) => html`<li key=${i}>
+              <span class="handoff-what">${entry.what}</span>
+              <${HandoffTarget} tcId=${entry.from._tcId} tc=${entry.from} />
+            </li>`)}
+          </ul>
+        </aside>`
+      : null}
+  `;
+}
+
 function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null; tags?: boolean }) {
   const note = inactiveNote(tc);
   const shownTags = tags ? (tc.tags ?? []) : [];
@@ -1065,6 +1152,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
             <div class="notes-body" dangerouslySetInnerHTML=${{ __html: tc.automationNoteHtml }} />
           </aside>`
         : null}
+      <${Handoff} tc=${tc} />
       <${StepsTable} tcId=${tc._tcId} steps=${tc.steps} run=${run} />
       ${tc.sources ? html`<${CaseSources} sources=${tc.sources} />` : null}
       ${tc.notesHtml
@@ -2318,6 +2406,34 @@ function planScopeIds(rows: OverviewRow[], plan: Plan): Set<string> | null {
   return covered.length === 0 ? null : new Set(covered.map((row) => row.tcId));
 }
 
+interface PlanGap {
+  row: OverviewRow;
+  targetId: string;
+  what: string;
+  why: MessageKey;
+}
+
+/**
+ * Checks a case in the run leaves to another case that is not in it. Only case targets count: a test in
+ * the code or a check elsewhere does not depend on what this plan runs. Empty while the plan has made no
+ * Run decision, since the run then covers the whole sheet.
+ */
+function planGaps(rows: OverviewRow[], plan: Plan): PlanGap[] {
+  const scope = planScopeIds(rows, plan);
+  if (!scope) return [];
+  const byId = new Map(rows.map((row) => [row.tcId, row]));
+  return rows
+    .filter((row) => scope.has(row.tcId))
+    .flatMap((row) =>
+      (row.tc.covered_by ?? []).flatMap((item): PlanGap[] => {
+        if (!("case" in item) || scope.has(item.case)) return [];
+        const target = byId.get(item.case);
+        const why: MessageKey = !target ? "plan.gaps.why.missing" : target.inactive ? "plan.gaps.why.inactive" : "plan.gaps.why.notRun";
+        return [{ row, targetId: item.case, what: item.what, why }];
+      })
+    );
+}
+
 /** What starting testing would mark Run: the range's active cases nobody has decided yet */
 function undecidedCandidates(rows: OverviewRow[], plan: Plan): OverviewRow[] {
   return planRange(rows, plan).filter((row) => !row.inactive && !plan.d[row.tcId]);
@@ -2438,6 +2554,18 @@ function planReviewToMarkdown(runName: string, plan: Plan, rows: OverviewRow[], 
     if (undecided.length > 0) lines.push(`- ${t("plan.review.undecidedList", { n: undecided.length, ids: undecided.join(", ") })}`);
     if (skippedBare.length > 0) lines.push(`- ${t("plan.review.skipNoReason", { n: skippedBare.length, ids: skippedBare.join(", ") })}`);
   }
+  const gaps = planGaps(rows, plan);
+  if (gaps.length > 0) {
+    const gapColumns = [t("col.id"), t("col.check"), t("col.coveredBy"), t("col.reason")];
+    lines.push(
+      "",
+      `## ${t("plan.review.gaps", { n: gaps.length })}`,
+      "",
+      `| ${gapColumns.join(" | ")} |`,
+      `|${gapColumns.map(() => "---").join("|")}|`,
+      ...gaps.map((gap) => `| ${[gap.row.tcId, gap.what, gap.targetId, t(gap.why)].map(escapeMarkdownCell).join(" | ")} |`)
+    );
+  }
   if (outside.length > 0) {
     lines.push("", `## ${t("plan.review.outside", { n: outside.length })}`, "", ...header, ...tableRows(outside));
   }
@@ -2516,6 +2644,7 @@ function PlanPage({
   const listed = filterOverviewRows(partRows, trimmedQuery).filter((row) => decisionFilter === "" || (decisionFilter === "decided" ? decisionOf(row) === "r" || decisionOf(row) === "s" : decisionOf(row) === decisionFilter));
   const listedIds = listed.filter((row) => !row.inactive).map((row) => row.tcId);
   const tally = tallyPlan(rangeRows, plan);
+  const gaps = planGaps(rows, plan);
 
   const tick = (ids: string[], on: boolean) =>
     setSelected((current) => {
@@ -2673,6 +2802,15 @@ function PlanPage({
           : null}
       </div>
 
+      ${gaps.length > 0
+        ? html`<details class="plan-gaps">
+            <summary>${t("plan.gaps.title", { n: gaps.length })}</summary>
+            <p class="plan-gaps-help">${t("plan.gaps.help")}</p>
+            <ul>
+              ${gaps.map((gap, i) => html`<li key=${i}>${t("plan.gaps.line", { what: gap.what, from: gap.row.tcId, to: gap.targetId, why: t(gap.why) })}</li>`)}
+            </ul>
+          </details>`
+        : null}
       <div class="scope-table-wrap">
         ${listed.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
@@ -2941,6 +3079,8 @@ function testCaseSearchText(tc: TestCase): string {
   for (const step of tc.steps ?? []) parts.push(step.action, step.expected);
   if (tc.notes) parts.push(tc.notes);
   if (tc.automation_note) parts.push(tc.automation_note);
+  for (const item of tc.covered_by ?? []) parts.push(item.what, handoffTarget(item));
+  for (const item of tc.dropped ?? []) parts.push(item.what, item.reason);
   if (tc.layer) parts.push(tc.layer, tc.layerLabel ?? "", tc.layerDescription ?? "");
   if (tc.automation_reason) parts.push(tc.automation_reason);
   if (tc.tags) parts.push(...tc.tags);

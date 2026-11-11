@@ -2269,6 +2269,28 @@ a.link-btn { text-decoration: none; }
 }
 
 .automation-note .eyebrow { margin-bottom: 2px; }
+
+/* What a refactored case no longer checks, and where that went: same weight as the note above the steps, since it explains the steps' absence */
+.handoff {
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-subtle);
+  font-size: 0.875rem;
+}
+.handoff .eyebrow { margin-bottom: 2px; }
+.handoff ul { margin: 0; padding: 0; list-style: none; }
+.handoff li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; }
+.handoff-what { min-width: 0; overflow-wrap: anywhere; }
+.handoff-kind { padding: 0 6px; border-radius: 3px; background: var(--bg-chip); color: var(--fg-muted); font-size: 0.75rem; white-space: nowrap; }
+.handoff-target { min-width: 0; overflow-wrap: anywhere; }
+.handoff-missing { color: var(--fg-muted); font-style: italic; }
+
+.plan-gaps { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 0.875rem; }
+.plan-gaps summary { cursor: pointer; font-weight: 600; }
+.plan-gaps-help { margin: 6px 0; color: var(--fg-muted); }
+.plan-gaps ul { margin: 0; padding-left: 20px; }
+
 .notes-body { min-width: 0; }
 .notes-body > :first-child { margin-top: 0; }
 .notes-body > :last-child { margin-bottom: 0; }

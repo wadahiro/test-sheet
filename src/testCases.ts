@@ -4,6 +4,7 @@ import { parseAutolinkRules, type AutolinkRule } from "./autolinks";
 import { readFileSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { parse } from "yaml";
+import { parseCoverage, type CoveredBy, type Dropped } from "./coverage";
 import { warn } from "./warnings";
 
 export interface Step {
@@ -54,6 +55,10 @@ export interface TestCase {
   automation_note?: string;
   layer?: string;
   automation_reason?: string;
+  /** Where checks this case no longer makes are made instead: another case, a test in the code, or somewhere outside the sheet */
+  covered_by?: CoveredBy[];
+  /** Checks let go for good, with why; shown beside `covered_by` since both say what the case no longer checks */
+  dropped?: Dropped[];
   _tcId?: string;
 }
 
@@ -187,6 +192,16 @@ function mergeTags(...lists: unknown[]): string[] | undefined {
 
 const firstDefined = (...values: unknown[]): unknown => values.find((value) => value !== undefined && value !== null);
 
+/** `{{key}}` in the text of each item of covered_by / dropped; anything else is left for parseCoverage to reject */
+function expandTexts(items: unknown, params: Record<string, unknown>, formatConfig: FormatConfig): unknown {
+  if (!Array.isArray(items)) return items;
+  return items.map((item: unknown) =>
+    typeof item === "object" && item !== null && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).map(([key, value]) => [key, typeof value === "string" ? expandPlaceholders(value, params, formatConfig) : value]))
+      : item
+  );
+}
+
 function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
   if (!parameterizedTests || parameterizedTests.length === 0) {
     return [];
@@ -207,7 +222,7 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
     const formatConfig = (pt.format as FormatConfig) || {};
 
     for (const pattern of patterns) {
-      const { id, notes, tags: patternTags, automation, automation_note: automationNote, ...params } = pattern;
+      const { id, notes, tags: patternTags, automation, automation_note: automationNote, covered_by: patternCoveredBy, dropped: patternDropped, ...params } = pattern;
       const hasId = id !== undefined && id !== null;
       const tcId = hasId ? `${idPrefix}${id}` : idPrefix;
       const allParams = { ...params, ...(hasId ? { id } : {}), tc_id: tcId };
@@ -244,6 +259,8 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
       }
 
       const note = firstDefined(automationNote, template.automation_note, entryAutomationNote);
+      const coveredBy = firstDefined(patternCoveredBy, template.covered_by, pt.covered_by);
+      const dropped = firstDefined(patternDropped, template.dropped, pt.dropped);
       expandedCases.push({
         name,
         layer: firstDefined(pattern.layer, template.layer, pt.layer) as string | undefined,
@@ -257,6 +274,8 @@ function expandParameterizedTests(parameterizedTests: unknown[]): TestCase[] {
         // Unlike tags these are one value each, so the most specific level that sets one wins
         automation: firstDefined(automation, template.automation, entryAutomation) as TestCase["automation"],
         automation_note: typeof note === "string" ? expandPlaceholders(note, allParams, formatConfig) : (note as undefined),
+        covered_by: expandTexts(coveredBy, allParams, formatConfig) as TestCase["covered_by"],
+        dropped: expandTexts(dropped, allParams, formatConfig) as TestCase["dropped"],
       });
     }
   }
@@ -446,7 +465,11 @@ export function loadTestCases(yamlFile: string, projectLayers?: Layers, layersSc
   validateTags(sortedCases, yamlData.metadata.tags, yamlFile);
   const suiteTags = yamlData.metadata.tags;
   const taggedCases = suiteTags ? sortedCases.map((tc) => ({ ...tc, tags: mergeTags(suiteTags, tc.tags) })) : sortedCases;
-  const testCases = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
+  const identified = assignTestCaseIds(taggedCases, idPrefix, yamlFile);
+  const testCases = identified.map((tc) => {
+    const { covered_by, dropped } = parseCoverage(tc, tc._tcId ?? tc.name, yamlFile);
+    return { ...tc, covered_by, dropped };
+  });
   validateAutomation(testCases.map((tc) => ({ ...tc, id: tc._tcId })), yamlFile);
 
   const ownLayers = yamlData.metadata.layers === undefined ? undefined : parseLayers(yamlData.metadata.layers, yamlFile);
