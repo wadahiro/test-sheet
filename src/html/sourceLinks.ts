@@ -17,7 +17,7 @@ const escapeAttribute = (value: string): string => value.replaceAll("&", "&amp;"
  * The markup with each name `linked` accepts wrapped in a span carrying `data-ref`. A span and not an
  * anchor: an `a[href^="#/"]` would be taken for a route, and following it here does not leave the page.
  */
-export function linkifyHtml(markup: string, linked: (name: string) => boolean, title = ""): string {
+export function linkifyHtml(markup: string, linked: (name: string, member: boolean) => boolean, title = ""): string {
   const open: boolean[] = [];
   let hidden = 0;
   let before = "";
@@ -37,8 +37,11 @@ export function linkifyHtml(markup: string, linked: (name: string) => boolean, t
     before = (before + text).slice(-80);
     if (hidden > 0) return piece;
     return text.replace(WORD, (word: string, entity: string | undefined, name: string | undefined, at: number) => {
-      if (name === undefined || !linked(name)) return word;
-      if (DECLARED_AFTER.test(seen + text.slice(0, at)) || DECLARED_BEFORE.test(text.slice(at + name.length))) return word;
+      if (name === undefined) return word;
+      const lead = seen + text.slice(0, at);
+      // After a dot it is a member of something else, so a local of the same name is not what it means
+      if (!linked(name, /\.\s*$/.test(lead))) return word;
+      if (DECLARED_AFTER.test(lead) || DECLARED_BEFORE.test(text.slice(at + name.length))) return word;
       return `<span class="src-ref" data-ref="${name}" role="link" tabindex="0" title="${escapeAttribute(title)}">${name}</span>`;
     });
   });

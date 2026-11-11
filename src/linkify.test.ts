@@ -37,3 +37,9 @@ test("the name a line declares is not a link, but the same name used on the righ
   const go = highlightLines("certificates := load(Mail)", "main.go")!.map((l) => linkifyHtml(l, (name) => declared.has(name)))[0];
   expect(refs(go)).toEqual(["Mail"]);
 });
+
+test("a member after a dot is judged apart from a local of the same name", () => {
+  const seen: [string, boolean][] = [];
+  linkifyHtml("certificates shouldHaveSize t.certificates()", (name, member) => (seen.push([name, member]), false));
+  expect(seen.filter(([name]) => name === "certificates")).toEqual([["certificates", false], ["certificates", true]]);
+});

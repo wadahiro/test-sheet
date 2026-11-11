@@ -1179,10 +1179,36 @@ function definitionsOf(name: string, fromPath: string): SourceSymbol[] {
   return [...(window.__SOURCE_SYMBOLS__?.[name] ?? [])].sort((a, b) => Number(b.path === fromPath) - Number(a.path === fromPath) || a.path.localeCompare(b.path) || a.start - b.start);
 }
 
+const LOCAL_DECLARATION = /\b(?:val|var|let|const)\s+(\w+)|\b(\w+)\s*:=/g;
+
+/**
+ * Names the code declares as locals, with the index of the line that does it first. A name the index also
+ * has at that very line is a member or top-level one, so it stays a link; a local is not in the index, and a
+ * member of the same name elsewhere is a different thing, so using the local must not lead to it.
+ */
+function localDeclarations(lines: string[], path: string, firstLine: number): Map<string, number> {
+  const found = new Map<string, number>();
+  lines.forEach((text, i) => {
+    for (const match of text.matchAll(LOCAL_DECLARATION)) {
+      const name = match[1] ?? match[2];
+      const indexed = window.__SOURCE_SYMBOLS__?.[name]?.some((place) => place.path === path && place.line === firstLine + i);
+      if (!indexed && !found.has(name)) found.set(name, i);
+    }
+  });
+  return found;
+}
+
+const snippetLocals = new WeakMap<object, Map<string, number>>();
+const localNames = (source: { code: string; path: string; startLine: number }): Map<string, number> => {
+  let found = snippetLocals.get(source);
+  if (!found) snippetLocals.set(source, (found = localDeclarations(source.code.split("\n"), source.path, source.startLine)));
+  return found;
+};
+
 /** A name can be followed where its file is in the page and the browser can unpack it */
 const canFollow = (): boolean => typeof DecompressionStream !== "undefined" && window.__SOURCE_SYMBOLS__ !== undefined;
 
-function HighlightedCode({ code, file, linked }: { code: string; file: string; linked?: (name: string) => boolean }) {
+function HighlightedCode({ code, file, linked }: { code: string; file: string; linked?: (name: string, member: boolean) => boolean }) {
   const colored = highlightHtml(code, file);
   if (colored === null) return html`<code>${code}</code>`;
   return html`<code dangerouslySetInnerHTML=${{ __html: linked ? linkifyHtml(colored, linked, t("source.goToDefinition")) : colored }} />`;
@@ -1252,7 +1278,8 @@ function SourceViewer({ initial, onClose }: { initial: SourceView; onClose: () =
     const plain = text.split("\n");
     // A final newline ends the last line rather than starting an empty one
     if (plain.length > 1 && plain[plain.length - 1] === "") plain.pop();
-    return plain.map((line, i) => ({ plain: line, colored: colored?.[i] === undefined ? undefined : linkifyHtml(colored[i], (name) => followable(name, view.path, i + 1), t("source.goToDefinition")) }));
+    const locals = localDeclarations(plain, view.path, 1);
+    return plain.map((line, i) => ({ plain: line, colored: colored?.[i] === undefined ? undefined : linkifyHtml(colored[i], (name, member) => (member || (locals.get(name) ?? Infinity) > i) && followable(name, view.path, i + 1), t("source.goToDefinition")) }));
   }, [text, view.path]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState<number | null>(null);
@@ -1434,7 +1461,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
                   followFrom(name, source.path);
                 }
               }}
-            ><${HighlightedCode} code=${source.code} file=${source.file} linked=${(name: string) => followable(name, source.path, -1)} /></pre>
+            ><${HighlightedCode} code=${source.code} file=${source.file} linked=${(name: string, member: boolean) => (member || !localNames(source).has(name)) && followable(name, source.path, -1)} /></pre>
           </figure>`
         )}
   </section>`;
