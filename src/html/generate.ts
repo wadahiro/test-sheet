@@ -239,17 +239,13 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
     })
   );
 
-  // Each file once, however many cases show a piece of it, and only those a case shows. gzip, then base64:
-  // the page is UTF-8 text, which cannot carry the bytes as they are, and base85-style codes save too little to be worth their own decoder
-  const sourceFiles: Record<string, string> = {};
-  for (const suite of pageSuites) {
-    for (const tc of suite.testCases) {
-      for (const snippet of tc.sources ?? []) {
-        const text = sources?.fileText(snippet.path);
-        if (text !== undefined) sourceFiles[snippet.path] = gzipSync(text, { level: 9 }).toString("base64");
-      }
-    }
-  }
+  // Each file once, however many cases show a piece of it: those a case shows, and those a reader can reach
+  // by following a name out of them (see SourceIndex.reachable). gzip, then base64: the page is UTF-8 text,
+  // which cannot carry the bytes as they are, and base85-style codes save too little to be worth their own decoder
+  const shown = [...new Set(pageSuites.flatMap((suite) => suite.testCases.flatMap((tc) => (tc.sources ?? []).map((snippet) => snippet.path))))];
+  const reached = sources?.reachable(shown) ?? { files: {}, symbols: {} };
+  const sourceFiles = Object.fromEntries(Object.entries(reached.files).map(([path, text]) => [path, gzipSync(text, { level: 9 }).toString("base64")]));
+  const sourceSymbols = reached.symbols;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -274,10 +270,12 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
 <script type="application/json" id="test-case-data">${jsonForScript(pageSuites)}</script>
 <script type="application/json" id="locale-data">${jsonForScript(locales)}</script>
 <script type="application/json" id="source-files">${jsonForScript(sourceFiles)}</script>
+<script type="application/json" id="source-symbols">${jsonForScript(sourceSymbols)}</script>
 <script type="module">
 window.__SUITES__ = JSON.parse(document.getElementById("test-case-data").textContent);
 window.__LOCALES__ = JSON.parse(document.getElementById("locale-data").textContent);
 window.__SOURCE_FILES__ = JSON.parse(document.getElementById("source-files").textContent);
+window.__SOURCE_SYMBOLS__ = JSON.parse(document.getElementById("source-symbols").textContent);
 window.__LIVE_RELOAD__ = ${liveReload};
 ${bundledJs}
 </script>

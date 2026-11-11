@@ -7,8 +7,9 @@ import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
 import { highlightHtml, highlightLines } from "./highlight";
+import { linkifyHtml } from "./sourceLinks";
 import type { Layers } from "../testCases";
-import type { SourceContainer, SourceSnippet } from "../testSources";
+import type { SourceContainer, SourceSnippet, SourceSymbol } from "../testSources";
 import type { CoveredBy, Dropped } from "../coverage";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
@@ -106,6 +107,8 @@ declare global {
     __LOCALES__?: LocaleDefinition[];
     /** Each test file a case shows a piece of, gzipped and base64-encoded, by the path the snippet carries */
     __SOURCE_FILES__?: Record<string, string>;
+    /** Where each name the code uses is declared, for the names that can be followed to a file in the page */
+    __SOURCE_SYMBOLS__?: Record<string, SourceSymbol[]>;
   }
 }
 
@@ -1171,9 +1174,18 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
   `;
 }
 
-function HighlightedCode({ code, file }: { code: string; file: string }) {
+/** The places a name is declared, the one in the same file first: that is the one a reader almost always means */
+function definitionsOf(name: string, fromPath: string): SourceSymbol[] {
+  return [...(window.__SOURCE_SYMBOLS__?.[name] ?? [])].sort((a, b) => Number(b.path === fromPath) - Number(a.path === fromPath) || a.path.localeCompare(b.path) || a.start - b.start);
+}
+
+/** A name can be followed where its file is in the page and the browser can unpack it */
+const canFollow = (): boolean => typeof DecompressionStream !== "undefined" && window.__SOURCE_SYMBOLS__ !== undefined;
+
+function HighlightedCode({ code, file, linked }: { code: string; file: string; linked?: (name: string) => boolean }) {
   const colored = highlightHtml(code, file);
-  return colored === null ? html`<code>${code}</code>` : html`<code dangerouslySetInnerHTML=${{ __html: colored }} />`;
+  if (colored === null) return html`<code>${code}</code>`;
+  return html`<code dangerouslySetInnerHTML=${{ __html: linked ? linkifyHtml(colored, linked, t("source.goToDefinition")) : colored }} />`;
 }
 
 const sourceTexts = new Map<string, Promise<string>>();
@@ -1197,13 +1209,30 @@ interface SourceView {
   /** The lines the case's snippet covers, which the viewer marks and opens on */
   start: number;
   end: number;
+  /** The name that led here and every place it is declared, when the view was opened by following a name */
+  name?: string;
+  candidates?: SourceSymbol[];
 }
+
+const viewOf = (place: SourceSymbol, name: string, candidates: SourceSymbol[]): SourceView => ({ path: place.path, file: place.path, start: place.start, end: place.end, name, candidates });
+
+/** The name a click or key press landed on, if it is one of the linked names in code */
+function refAt(e: Event): string | null {
+  const target = e.target;
+  return (target instanceof Element ? target.closest<HTMLElement>("[data-ref]")?.dataset.ref : undefined) ?? null;
+}
+
+/** A name worth linking: declared somewhere in the page, and not on the very line it is declared on */
+const followable = (name: string, path: string, line: number): boolean => canFollow() && !!window.__SOURCE_SYMBOLS__?.[name]?.some((place) => !(place.path === path && place.line === line));
 
 /**
  * A test file in full, with the part the case showed marked. Finding the code that belongs to a case
  * is matching, so it can miss helpers and what a test calls; this lets the reader follow them.
  */
-function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void }) {
+function SourceViewer({ initial, onClose }: { initial: SourceView; onClose: () => void }) {
+  // Following a name pushes the place it is declared; Back pops it. Held here, never in location.hash: the page behind must not move
+  const [stack, setStack] = useState<SourceView[]>([initial]);
+  const view = stack[stack.length - 1];
   // null while unpacking, undefined when the file cannot be shown
   const [text, setText] = useState<string | undefined | null>(null);
   useEffect(() => {
@@ -1218,12 +1247,12 @@ function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void
   }, [view.path]);
   const lines = useMemo(() => {
     if (text === undefined || text === null) return [];
-    const colored = highlightLines(text, view.file);
+    const colored = highlightLines(text, view.path);
     const plain = text.split("\n");
     // A final newline ends the last line rather than starting an empty one
     if (plain.length > 1 && plain[plain.length - 1] === "") plain.pop();
-    return plain.map((line, i) => ({ plain: line, colored: colored?.[i] }));
-  }, [text, view.file]);
+    return plain.map((line, i) => ({ plain: line, colored: colored?.[i] === undefined ? undefined : linkifyHtml(colored[i], (name) => followable(name, view.path, i + 1), t("source.goToDefinition")) }));
+  }, [text, view.path]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState<number | null>(null);
 
@@ -1233,7 +1262,14 @@ function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void
     // Not scrollIntoView: it would move the page behind as well
     if (body && row) body.scrollTop = row.offsetTop - body.clientHeight / 3;
   };
-  useEffect(() => goTo(view.start), [text, view.start]);
+  useEffect(() => goTo(view.start), [text, view.path, view.start]);
+
+  const follow = (name: string) => {
+    const candidates = definitionsOf(name, view.path);
+    if (candidates.length === 0) return;
+    setFocused(null);
+    setStack((current) => [...current, viewOf(candidates[0], name, candidates)]);
+  };
 
   const casesHere = useMemo(() => {
     const { byId } = coverageIndex();
@@ -1250,8 +1286,22 @@ function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void
   return html`<div class="source-viewer" role="dialog" aria-modal="true" aria-label=${view.path} onClick=${onClose}>
     <div class="source-viewer-frame" onClick=${(e: Event) => e.stopPropagation()}>
       <div class="source-viewer-bar">
+        ${stack.length > 1 ? html`<button class="source-viewer-back" type="button" title=${t("source.back")} aria-label=${t("source.back")} onClick=${() => setStack((current) => current.slice(0, -1))}>←</button>` : null}
         <span class="source-path" title=${view.path}>${view.path}</span>
         <span class="source-viewer-count">${t("source.lines", { count: lines.length })}</span>
+        ${view.name && view.candidates && view.candidates.length > 1
+          ? html`<select
+              class="source-viewer-jump"
+              aria-label=${t("source.otherDefinitions", { name: view.name })}
+              value=${String(view.candidates.findIndex((place) => place.path === view.path && place.start === view.start))}
+              onChange=${(e: Event) => {
+                const place = view.candidates![Number((e.target as HTMLSelectElement).value)];
+                if (place) setStack((current) => [...current.slice(0, -1), viewOf(place, view.name!, view.candidates!)]);
+              }}
+            >
+              ${view.candidates.map((place, i) => html`<option key=${i} value=${i}>${t("source.candidate", { path: place.path, line: place.line })}</option>`)}
+            </select>`
+          : null}
         ${casesHere.length > 0
           ? html`<select
               class="source-viewer-jump"
@@ -1273,7 +1323,21 @@ function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void
           : null}
         <button class="source-viewer-close" type="button" title=${t("source.close")} aria-label=${t("source.closeLabel")} onClick=${onClose}>✕</button>
       </div>
-      <div class="source-viewer-body" ref=${bodyRef}>
+      <div
+        class="source-viewer-body"
+        ref=${bodyRef}
+        onClick=${(e: Event) => {
+          const name = refAt(e);
+          if (name) follow(name);
+        }}
+        onKeyDown=${(e: KeyboardEvent) => {
+          const name = e.key === "Enter" || e.key === " " ? refAt(e) : null;
+          if (name) {
+            e.preventDefault();
+            follow(name);
+          }
+        }}
+      >
         ${text === null
           ? html`<p class="source-missing">${t("source.loading")}</p>`
           : text === undefined
@@ -1298,7 +1362,7 @@ function useSourceViewer(view: SourceView | null, onClose: () => void) {
     const opener = document.activeElement;
     const host = document.createElement("div");
     document.body.appendChild(host);
-    render(html`<${SourceViewer} view=${view} onClose=${onClose} />`, host);
+    render(html`<${SourceViewer} initial=${view} onClose=${onClose} />`, host);
     host.querySelector<HTMLElement>(".source-viewer-close")?.focus();
     // Capture phase: the page's own shortcuts (g for the guide, ⌘K for search) must not act behind the viewer
     const onKey = (e: KeyboardEvent) => {
@@ -1329,6 +1393,10 @@ function containerText(container: SourceContainer): string {
 function CaseSources({ sources }: { sources: SourceSnippet[] }) {
   const [viewing, setViewing] = useState<SourceView | null>(null);
   useSourceViewer(viewing, () => setViewing(null));
+  const followFrom = (name: string, fromPath: string) => {
+    const candidates = definitionsOf(name, fromPath);
+    if (candidates.length > 0) setViewing(viewOf(candidates[0], name, candidates));
+  };
   const viewButton = (path: string, file: string, start: number, end: number) =>
     window.__SOURCE_FILES__?.[path] === undefined || typeof DecompressionStream === "undefined"
       ? null
@@ -1346,7 +1414,19 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
               ${viewButton(source.path, source.file, source.startLine, source.endLine)}
             </figcaption>
             ${source.containers?.length ? html`<div class="source-containers">${source.containers.flatMap((container, i) => [i > 0 ? " › " : null, html`<span key=${i} title=${"call" in container ? container.call : undefined}>${containerText(container)}</span>`])}</div>` : null}
-            <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
+            <pre
+              onClick=${(e: Event) => {
+                const name = refAt(e);
+                if (name) followFrom(name, source.path);
+              }}
+              onKeyDown=${(e: KeyboardEvent) => {
+                const name = e.key === "Enter" || e.key === " " ? refAt(e) : null;
+                if (name) {
+                  e.preventDefault();
+                  followFrom(name, source.path);
+                }
+              }}
+            ><${HighlightedCode} code=${source.code} file=${source.file} linked=${(name: string) => followable(name, source.path, -1)} /></pre>
           </figure>`
         )}
   </section>`;

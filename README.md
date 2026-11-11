@@ -231,10 +231,20 @@ up for it. The Markdown copy of a case carries that sentence and the code, and n
 Finding the code behind a case is matching, so it can miss a helper or what a test calls. Each
 snippet has **View whole file**, which opens the file
 in full over the page, with the lines the case showed marked and the view opened on them. A menu
-in its header jumps to the other cases the file mentions, and Esc closes it. The file text is
-embedded once however many cases show a piece of it, and only for files a case shows, gzipped and
-base64-encoded and unpacked when opened, so the generated page grows by those files and nothing else. Only files `--tests` read can be opened; code
-elsewhere (another module, a page object) is not in the page.
+in its header jumps to the other cases the file mentions, and Esc closes it.
+
+Names in the code are links to where they are declared: functions, types, and values declared at the
+top level or in a class (not locals or parameters, so a name used all over a test is not a link
+everywhere). Clicking one opens the declaration, with its comment and body marked, in the same viewer,
+and the names in it can be followed in turn; ← goes back. A name is looked for by matching, not by
+the compiler's name resolution: the declaration in the same file wins, and when the name is declared
+in more than one file the others are offered in a menu in the header. A name declared in more than six
+places is not linked, since it would lead nowhere in particular.
+
+The page embeds the files a case shows and every file that declares a name those files use, and so on,
+each once, gzipped and base64-encoded and unpacked when opened. Files nothing links to are left out, so
+the page grows with what can be reached rather than with the whole test tree. Only files `--tests`
+read can be opened; code elsewhere (another module, a page object) is not in the page.
 
 For CI, `--strict` with `--out` writes the file and then exits with status 1 if anything was
 warned about, for example a suite that failed to load, a mismatch between `automation` and the

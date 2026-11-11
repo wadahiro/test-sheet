@@ -1807,6 +1807,12 @@ a.link-btn { text-decoration: none; }
 .src-line-hit { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
 .src-line-focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 .source-view { margin-left: auto; }
+/* A name in code that leads to its definition: marked without a colour of its own, which the syntax colours already use */
+.src-ref { cursor: pointer; text-decoration: underline dotted var(--fg-muted); text-underline-offset: 2px; }
+.src-ref:hover { text-decoration-style: solid; text-decoration-color: var(--accent); }
+.src-ref:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+.source-viewer-back { width: 28px; height: 28px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--bg); color: var(--fg); cursor: pointer; }
+.source-viewer-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .source-missing { margin: 4px 0 0; font-size: 0.85rem; color: var(--fg-muted); }
 

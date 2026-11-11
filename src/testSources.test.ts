@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { buildSourceIndex } from "./testSources";
@@ -204,4 +204,72 @@ class J {
 test("a data row has no name of its own, so no sentence is made up for it", async () => {
   const [found] = await snippets(`withData(Row("LOGIN-001", "expired")) { checkRow(it) }`);
   expect(found.every((snippet) => snippet.title === undefined)).toBe(true);
+});
+
+async function withTree(files: Record<string, string>, run: (index: Awaited<ReturnType<typeof buildSourceIndex>>) => void) {
+  const dir = mkdtempSync(join(tmpdir(), "sheet-symbols-"));
+  try {
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(join(dir, name, ".."), { recursive: true });
+      writeFileSync(join(dir, name), text);
+    }
+    run(await buildSourceIndex([dir], ["LOGIN-001"]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const SPEC = `class Spec : FunSpec({
+    test("LOGIN-001: mail body") {
+        val mail = fetchMail("demo")
+        assertMailBody(mail, EXPECTED_BODY)
+    }
+})`;
+const MAIL = `package support
+
+/** Compares a mail with the body the spec expects. */
+fun assertMailBody(mail: Mail, expected: String) {
+    val local = mail.body
+    helperOfHelper(local)
+}
+fun fetchMail(user: String): Mail = Mail(user)
+val EXPECTED_BODY = listOf(
+    "Hello",
+    "World",
+)
+data class Mail(val body: String)
+fun helperOfHelper(text: String) = Unit
+`;
+
+test("names in a test lead to the files that declare them, and on to the files those use", async () => {
+  await withTree({ "Spec.kt": SPEC, "support/Mail.kt": MAIL, "Unrelated.kt": "fun neverReached() { }" }, (index) => {
+    const reached = index.reachable(index.snippetsFor("LOGIN-001").map((snippet) => snippet.path));
+    expect(Object.keys(reached.files).sort()).toEqual(["Spec.kt", "support/Mail.kt"]);
+    expect(reached.symbols.neverReached).toBeUndefined();
+    // From the doc comment to the closing brace
+    expect(reached.symbols.assertMailBody).toEqual([{ path: "support/Mail.kt", start: 3, end: 7, line: 4 }]);
+    expect(reached.symbols.EXPECTED_BODY).toEqual([{ path: "support/Mail.kt", start: 9, end: 12, line: 9 }]);
+    expect(reached.symbols.fetchMail[0]).toMatchObject({ start: 8, end: 8 });
+  });
+});
+
+test("locals, parameters and constructor properties are not names to follow", async () => {
+  await withTree({ "Spec.kt": SPEC, "support/Mail.kt": MAIL }, (index) => {
+    const reached = index.reachable(["Spec.kt"]);
+    for (const name of ["local", "mail", "expected", "user", "body", "text"]) expect(reached.symbols[name]).toBeUndefined();
+  });
+});
+
+test("a name declared in several files lists them all, the reader's own file being the client's to prefer", async () => {
+  await withTree({ "Spec.kt": SPEC, "support/Mail.kt": MAIL, "support/Other.kt": "fun helperOfHelper() { println(1) }" }, (index) => {
+    const reached = index.reachable(["Spec.kt"]);
+    expect(reached.symbols.helperOfHelper.map((place) => place.path).sort()).toEqual(["support/Mail.kt", "support/Other.kt"]);
+  });
+});
+
+test("a name declared in too many places is dropped rather than linked everywhere", async () => {
+  const many = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`F${i}.kt`, "fun commonName() { }"]));
+  await withTree({ "Spec.kt": `${SPEC}\nval x = commonName()`, ...many }, (index) => {
+    expect(index.reachable(["Spec.kt"]).symbols.commonName).toBeUndefined();
+  });
 });

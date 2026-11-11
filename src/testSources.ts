@@ -54,8 +54,21 @@ export interface SourceIndex {
    * a renamed test is noticed, a same-named method somewhere else is not told apart.
    */
   hasTest(name: string): boolean;
-  /** A file's whole text by the `path` a snippet carries, for the page to show it in full */
-  fileText(path: string): string | undefined;
+  /**
+   * What the page needs to let a reader follow names out of the given files (by the `path` a snippet
+   * carries): those files, every file that declares a name they use, and so on, with where each name is
+   * declared. Files nothing links to are left out, so the page does not grow with the whole test tree.
+   */
+  reachable(paths: string[]): { files: Record<string, string>; symbols: Record<string, SourceSymbol[]> };
+}
+
+/** Where a name is declared: the lines (1-based, inclusive) to show, from its annotations or comment to the end of its body */
+export interface SourceSymbol {
+  path: string;
+  start: number;
+  end: number;
+  /** The line the name itself is on, so the declaration is not linked to itself */
+  line: number;
 }
 
 const MAX_FILE_BYTES = 1_000_000;
@@ -548,6 +561,64 @@ function testTitle(lines: string[], range: LineRange, id: string): string | unde
   return title === "" ? undefined : title;
 }
 
+const MAX_SYMBOL_CANDIDATES = 6;
+const MIN_SYMBOL_LENGTH = 3;
+const FUNCTION_HEADER = /\b(?:fun|func|function|def)\b/;
+const CLASS_HEADER = /\b(?:class|object|interface|enum|record|struct|trait|companion)\b/;
+const DECLARATION_START = /^\s*(?:@\w+|(?:public|private|protected|internal|static|final|abstract|open|override|data|sealed|enum|const|suspend|inline)\s|fun\s|func\s|function\s|def\s|class\s|object\s|interface\s|val\s|var\s|const\s|record\s)/;
+const DECLARATIONS: { kind: "fun" | "type" | "value"; pattern: RegExp }[] = [
+  { kind: "fun", pattern: /\b(?:fun|func|function|def)\s+(?:<[^>\n]*>\s*)?(?:[\w<>?,.]+\.)?(\w+)\s*\(/gd },
+  { kind: "fun", pattern: /^[ \t]*(?:(?:public|private|protected|static|final|abstract|synchronized|default)\s+)+[\w<>\[\],.? ]*?\b(\w+)\s*\(/gmd },
+  { kind: "type", pattern: /\b(?:class|interface|object|record|struct|trait|typealias)\s+(\w+)/gd },
+  { kind: "value", pattern: /\b(?:val|var|const)\s+(\w+)\s*(?::[^=\n]+)?=/gd },
+];
+
+/** The header of the block a `{` opens: the text before it on its line, which says whether it is a function, a class or a lambda */
+const blockHeader = (file: SourceFile, shape: FileShape, pair: BracketPair): string => file.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open);
+
+/** The last line a declaration covers: its block, a literal it is set to, or its own line; a following declaration is not part of it */
+function declarationEnd(file: SourceFile, shape: FileShape, kind: "fun" | "type" | "value", name: string, offset: number): number {
+  const line = lineOf(shape.starts, offset);
+  if (kind === "value") {
+    const literal = shape.all
+      .filter((pair) => pair.kind !== "{" && lineOf(shape.starts, pair.open) >= line && declaredName(file.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open)) === name)
+      .sort((a, b) => a.open - b.open)[0];
+    return literal && lineOf(shape.starts, literal.open) - line <= 1 ? lineOf(shape.starts, literal.close) : line;
+  }
+  const body = bodyBelow(shape, offset);
+  if (!body) return line;
+  const opens = lineOf(shape.starts, body.open);
+  return shape.lines.slice(line + 1, opens + 1).some((text) => DECLARATION_START.test(text)) ? line : lineOf(shape.starts, body.close);
+}
+
+/** Every function, type and top-level or member value the files declare, by name; locals and parameters are left out so a name used all over a test is not a link everywhere */
+function symbolIndex(files: SourceFile[], shapes: Map<SourceFile, FileShape>): Map<string, SourceSymbol[]> {
+  const byName = new Map<string, SourceSymbol[]>();
+  for (const file of files) {
+    const shape = shapeOf(file, shapes);
+    const path = posix.join(file.shownBase, relative(file.base, file.path).replaceAll("\\", "/"));
+    for (const { kind, pattern } of DECLARATIONS) {
+      for (const match of file.text.matchAll(pattern)) {
+        const name = match[1];
+        const at = (match as RegExpMatchArray & { indices: [number, number][] }).indices[1][0];
+        if (name.length < MIN_SYMBOL_LENGTH) continue;
+        const inside = shape.all.filter((pair) => contains(pair, at));
+        const blocks = inside.filter((pair) => pair.kind === "{");
+        if (blocks.some((pair) => FUNCTION_HEADER.test(blockHeader(file, shape, pair)))) continue;
+        if (kind === "value" && (inside.some((pair) => pair.kind === "(") || !blocks.every((pair) => CLASS_HEADER.test(blockHeader(file, shape, pair))))) continue;
+        const line = lineOf(shape.starts, at);
+        const end = Math.min(declarationEnd(file, shape, kind, name, at), line + MAX_SNIPPET_LINES - 1);
+        const start = withLeadIn(shape.lines, { start: line, end }).start;
+        const known = byName.get(name) ?? [];
+        if (known.some((other) => other.path === path && other.start === start + 1)) continue;
+        byName.set(name, [...known, { path, start: start + 1, end: end + 1, line: line + 1 }]);
+      }
+    }
+  }
+  for (const [name, places] of byName) if (places.length > MAX_SYMBOL_CANDIDATES) byName.delete(name);
+  return byName;
+}
+
 function mentionsTest(files: SourceFile[], name: string): boolean {
   const word = (text: string) => new RegExp(`(?<!\\w)${escapeRegExp(text)}(?!\\w)`);
   if (/\s/.test(name)) return files.some((file) => file.text.includes(name));
@@ -571,5 +642,27 @@ export async function buildSourceIndex(patterns: string[], ids: string[]): Promi
     for (const file of files) snippetsInFile(file, idSet, pattern, found, files, shapes);
   }
   const byPath = new Map(files.map((file) => [posix.join(file.shownBase, relative(file.base, file.path).replaceAll("\\", "/")), file.text]));
-  return { snippetsFor: (id) => found.get(id) ?? [], hasTest: (name) => mentionsTest(files, name), fileText: (path) => byPath.get(path) };
+  let symbols: Map<string, SourceSymbol[]> | undefined;
+  return {
+    snippetsFor: (id) => found.get(id) ?? [],
+    hasTest: (name) => mentionsTest(files, name),
+    reachable(paths) {
+      symbols ??= symbolIndex(files, new Map());
+      const included = new Set(paths.filter((path) => byPath.has(path)));
+      const queue = [...included];
+      for (let path = queue.pop(); path !== undefined; path = queue.pop()) {
+        for (const word of byPath.get(path)!.matchAll(/[A-Za-z_]\w*/g)) {
+          for (const place of symbols.get(word[0]) ?? []) {
+            if (included.has(place.path)) continue;
+            included.add(place.path);
+            queue.push(place.path);
+          }
+        }
+      }
+      return {
+        files: Object.fromEntries([...included].map((path) => [path, byPath.get(path)!])),
+        symbols: Object.fromEntries([...symbols].filter(([, places]) => places.every((place) => included.has(place.path)))),
+      };
+    },
+  };
 }
