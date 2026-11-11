@@ -36,8 +36,8 @@ class RotationSpec : FunSpec({
     expect(found).toHaveLength(3);
     expect(found[1].code).toContain("checkBefore(row)");
     expect(found[2].code).toContain("checkAfter(row)");
-    expect(found[1].containers).toEqual(["before"]);
-    expect(found[2].containers).toEqual(["after"]);
+    expect(found[1].containers).toEqual([{ name: "before" }]);
+    expect(found[2].containers).toEqual([{ name: "after" }]);
   }
   expect(first[0].code).toContain("LOGIN-001");
   expect(second[0].code).toContain("LOGIN-002");
@@ -115,9 +115,9 @@ test("dynamic contexts show their call instead of inventing a runtime name", asy
     }
 })`);
   expect(found[0].containers).toEqual([
-    "rotation",
-    "withContexts(nameFn = { it.id }, ts = END_DATES)",
-    "withData(ROWS)",
+    { name: "rotation" },
+    { call: "withContexts(nameFn = { it.id }, ts = END_DATES)", each: "END_DATES" },
+    { call: "withData(ROWS)", each: "ROWS" },
   ]);
 });
 
@@ -215,4 +215,52 @@ test("hasTest finds a test by method, by class and method, or by a Kotest name",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const PLANS_SPEC = `private data class Plan(val name: String, val seats: Int)
+private val PLANS = listOf(
+    Plan("無料プラン", 1),
+    Plan(name = "有料プラン", seats = 10),
+)
+private val ROWS = listOf(
+    Row("LOGIN-001"),
+)
+class ContractSpec : FunSpec({
+    "契約がある" - {
+        withContexts<Plan>(Plan::name, PLANS) { plan ->
+            withTests<Row>(::leafName, ROWS) { row ->
+                checkRow(plan, row)
+            }
+        }
+    }
+})`;
+
+test("a data-driven container says what it goes over, how it is named and what the names are", async () => {
+  const [all] = await snippets(PLANS_SPEC);
+  // The row and the loop that consumes it are separate snippets here; the container belongs to the loop
+  const found = all.filter((snippet) => snippet.containers?.length);
+  expect(found).toHaveLength(1);
+  expect(found[0].containers).toEqual([
+    { name: "契約がある" },
+    { call: "withContexts<Plan>(Plan::name, PLANS)", each: "PLANS", by: "Plan::name", names: ["無料プラン", "有料プラン"] },
+  ]);
+  const plans = found[0].definitions!.find((item) => item.name === "PLANS")!;
+  expect(plans.kind).toBe("data");
+  expect(plans.code).toContain('Plan("無料プラン", 1)');
+  expect(plans.code).toContain("有料プラン");
+  expect(found[0].definitions!.filter((item) => item.name === "PLANS")).toHaveLength(1);
+});
+
+test("a call spread over lines is read the same, and unreadable names are left out as a whole", async () => {
+  const [found] = await snippets(`private data class Plan(val name: String)
+private val PLANS = listOf(Plan("無料プラン"), Plan(planName()))
+class ContractSpec : FunSpec({
+    withContexts<Plan>(
+        Plan::name,
+        PLANS,
+    ) { plan ->
+        test("LOGIN-001") { check(plan) }
+    }
+})`);
+  expect(found[0].containers).toEqual([{ call: "withContexts<Plan>(Plan::name, PLANS)", each: "PLANS", by: "Plan::name" }]);
 });

@@ -18,9 +18,23 @@ export interface SourceSnippet {
   code: string;
   /** The method was longer than `MAX_SNIPPET_LINES`, so only its start is kept */
   truncated: boolean;
-  containers?: string[];
+  containers?: SourceContainer[];
   definitions?: SourceDefinition[];
 }
+
+/** What a test sits inside, outermost first: a named container, or a call that makes one container per element of some data */
+export type SourceContainer =
+  | { name: string }
+  | {
+      /** The call as written, which is all there is to show when nothing below could be worked out */
+      call: string;
+      /** The variable the call goes over (`PLANS`) */
+      each?: string;
+      /** How an element is named, when that is a reference such as `Plan::name`; a lambda is not shown */
+      by?: string;
+      /** Those names, when every element is a constructor call that writes the name as a string literal */
+      names?: string[];
+    };
 
 export interface SourceDefinition {
   kind: "type" | "data";
@@ -349,22 +363,151 @@ function dataDefinitions(file: SourceFile, shape: FileShape, offset: number, fil
   if (!row) return result;
   const typeName = file.text.slice(shape.starts[lineOf(shape.starts, row.open)], row.open).match(/\b([A-Z][\w]*)\s*$/)?.[1];
   if (!typeName) return result;
+  const declaration = typeDeclaration(typeName, file, files, shapes);
+  if (declaration) result.push(definition(declaration.file, declaration.shape, "type", typeName, withLeadIn(declaration.shape.lines, { start: declaration.line, end: lineOf(declaration.shape.starts, declaration.parameters.close) })));
+  return result;
+}
+
+function shapeOf(file: SourceFile, shapes: Map<SourceFile, FileShape>): FileShape {
+  let shape = shapes.get(file);
+  if (!shape) {
+    shape = fileShape(file.text);
+    shapes.set(file, shape);
+  }
+  return shape;
+}
+
+interface TypeDeclaration {
+  file: SourceFile;
+  shape: FileShape;
+  line: number;
+  parameters: BracketPair;
+}
+
+/** The `class` or `record` header that declares a row type, in this file first and then the others */
+function typeDeclaration(typeName: string, file: SourceFile, files: SourceFile[], shapes: Map<SourceFile, FileShape>): TypeDeclaration | undefined {
   for (const candidate of [file, ...files.filter((other) => other !== file)]) {
-    let candidateShape = shapes.get(candidate);
-    if (!candidateShape) { candidateShape = fileShape(candidate.text); shapes.set(candidate, candidateShape); }
+    const shape = shapeOf(candidate, shapes);
     const pattern = new RegExp(`\\b(?:class|record)\\s+${escapeRegExp(typeName)}\\s*(?:<[^>]+>\\s*)?\\(`, "g");
     for (const match of candidate.text.matchAll(pattern)) {
       const open = match.index! + match[0].length - 1;
-      const parameters = candidateShape.all.find((pair) => pair.open === open && pair.kind === "(");
+      const parameters = shape.all.find((pair) => pair.open === open && pair.kind === "(");
       if (!parameters) continue;
-      const line = lineOf(candidateShape.starts, match.index!);
-      const header = candidateShape.lines[line].slice(0, match.index! - candidateShape.starts[line]);
+      const line = lineOf(shape.starts, match.index!);
+      const header = shape.lines[line].slice(0, match.index! - shape.starts[line]);
       if (!/^\s*(?:(?:private|public|protected|internal|data|static|final|sealed|open|abstract)\s+)*$/.test(header)) continue;
-      result.push(definition(candidate, candidateShape, "type", typeName, withLeadIn(candidateShape.lines, { start: line, end: lineOf(candidateShape.starts, parameters.close) })));
-      return result;
+      return { file: candidate, shape, line, parameters };
     }
   }
-  return result;
+  return undefined;
+}
+
+interface DataDeclaration {
+  name: string;
+  file: SourceFile;
+  shape: FileShape;
+  /** The `listOf(…)` / `[…]` the variable is set to */
+  literal: BracketPair;
+}
+
+/** Where a variable is declared as a list or array literal, in this file first and then the others */
+function dataDeclaration(name: string, file: SourceFile, files: SourceFile[], shapes: Map<SourceFile, FileShape>): DataDeclaration | undefined {
+  for (const candidate of [file, ...files.filter((other) => other !== file)]) {
+    const shape = shapeOf(candidate, shapes);
+    const literal = shape.all
+      .filter((pair) => pair.kind !== "{" && declaredName(candidate.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open)) === name)
+      .sort((a, b) => a.open - b.open)[0];
+    if (literal) return { name, file: candidate, shape, literal };
+  }
+  return undefined;
+}
+
+/** Splits at the commas that are not inside brackets or a string */
+function splitArguments(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let current = "";
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quote) {
+      current += char;
+      if (char === "\\") current += text[++i] ?? "";
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if ("([{".includes(char)) depth++;
+    else if (")]}".includes(char)) depth--;
+    if (char === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+    } else current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+const MAX_SHOWN_NAMES = 6;
+const withoutComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+/**
+ * The names the elements of `declaration` give to their containers, when each element is a constructor
+ * call of `typeName` and the property that names it (`Plan::name`) is a string literal there. All or
+ * nothing: a list with one unreadable name would mislead more than no list.
+ */
+function elementNames(declaration: DataDeclaration, typeName: string, property: string, files: SourceFile[], shapes: Map<SourceFile, FileShape>): string[] | undefined {
+  const type = typeDeclaration(typeName, declaration.file, files, shapes);
+  if (!type) return undefined;
+  const parameters = splitArguments(withoutComments(type.file.text.slice(type.parameters.open + 1, type.parameters.close)));
+  const index = parameters.findIndex((parameter) => parameter.match(/(\w+)\s*:/)?.[1] === property);
+  if (index < 0) return undefined;
+  const { file, shape, literal } = declaration;
+  const elements = shape.all.filter(
+    (pair) =>
+      pair.kind === "(" &&
+      contains(literal, pair.open) &&
+      !shape.all.some((outer) => contains(outer, pair.open) && contains(literal, outer.open)) &&
+      new RegExp(`\\b${escapeRegExp(typeName)}\\s*$`).test(file.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open))
+  );
+  if (elements.length === 0 || elements.length > MAX_SHOWN_NAMES) return undefined;
+  const names: string[] = [];
+  for (const element of elements.sort((a, b) => a.open - b.open)) {
+    const given = splitArguments(withoutComments(file.text.slice(element.open + 1, element.close)));
+    const value = given.find((arg) => new RegExp(`^${escapeRegExp(property)}\\s*=(?!=)`).test(arg))?.replace(/^\w+\s*=\s*/, "") ?? given.filter((arg) => !/^\w+\s*=(?!=)/.test(arg))[index];
+    const literalText = value?.match(/^"((?:[^"\\$]|\\.)*)"$/)?.[1];
+    if (literalText === undefined) return undefined;
+    names.push(literalText);
+  }
+  return names;
+}
+
+/**
+ * `withContexts<Plan>(Plan::name, PLANS) { plan -> … }` as what it means: a container per element of
+ * PLANS, named by `Plan::name`. What its runtime names are is not known without running it, so those
+ * are read from the data only when they are written there.
+ */
+function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPair, files: SourceFile[], shapes: Map<SourceFile, FileShape>): { container: SourceContainer; declaration?: DataDeclaration; each?: string } | undefined {
+  const before = file.text.slice(0, lambda.open).trimEnd();
+  if (!before.endsWith(")")) return undefined;
+  const paren = shape.all.find((pair) => pair.kind === "(" && pair.close === before.length - 1);
+  const head = paren ? file.text.slice(0, paren.open).match(/\b(withContexts|withData|withTests)(<[^>]*>)?\s*$/) : null;
+  if (!paren || !head) return undefined;
+
+  const args = splitArguments(file.text.slice(paren.open + 1, paren.close));
+  const call = `${head[1]}${head[2] ?? ""}(${args.join(", ")})`.replace(/\s+/g, " ");
+  const isNamed = (arg: string) => /^\w+\s*=(?!=)/.test(arg);
+  const named = (...keys: string[]) => args.find((arg) => keys.some((key) => new RegExp(`^${key}\\s*=(?!=)`).test(arg)))?.replace(/^\w+\s*=\s*/, "");
+  const positional = args.filter((arg) => !isNamed(arg));
+  const namedData = named("ts", "tests", "data");
+  const data = namedData ?? positional.at(-1);
+  const nameFunction = named("nameFn") ?? (namedData !== undefined || positional.length > 1 ? positional[0] : undefined);
+
+  const each = data?.match(/^([A-Za-z_]\w*)(?:\s*\.|$)/)?.[1];
+  const reference = nameFunction?.match(/^([A-Za-z_]\w*)?::([A-Za-z_]\w*)$/);
+  const declaration = each ? dataDeclaration(each, file, files, shapes) : undefined;
+  const names = declaration && reference?.[1] ? elementNames(declaration, reference[1], reference[2], files, shapes) : undefined;
+  return { container: { call, ...(each ? { each } : {}), ...(reference ? { by: reference[0] } : {}), ...(names ? { names } : {}) }, declaration, each };
 }
 
 function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
@@ -389,22 +532,29 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
       const shown = relative(file.base, file.path).replaceAll("\\", "/");
+      const dataContainers: DataDeclaration[] = [];
+      const containers = shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair): SourceContainer[] => {
+        const line = lineOf(shape!.starts, pair.open);
+        const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
+        const kotest = header.match(/^\s*"((?:\\.|[^"\\])*)"\s*-\s*$/) ?? header.match(/^\s*(?:context|describe|given|when|and)\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)\s*$/);
+        if (kotest) return [{ name: kotest[1] }];
+        const dynamic = dynamicContainer(file, shape!, pair, files, shapes);
+        if (dynamic) {
+          if (dynamic.declaration) dataContainers.push(dynamic.declaration);
+          return [dynamic.container];
+        }
+        if (!/\bclass\s+\w+/.test(header)) return [];
+        const lead = withLeadIn(shape!.lines, { start: line, end: line });
+        const annotations = shape!.lines.slice(lead.start, line + 1).join("\n");
+        if (!/@Nested\b/.test(annotations)) return [];
+        const display = annotations.match(/@DisplayName\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)/);
+        return display ? [{ name: display[1] }] : [];
+      });
+      // The whole declaration of the data that names the containers goes first, so the header-only one of the same variable is dropped as a repeat
+      const containerData = dataContainers.map((declaration) => definition(declaration.file, declaration.shape, "data", declaration.name, withLeadIn(declaration.shape.lines, { start: lineOf(declaration.shape.starts, declaration.literal.open), end: lineOf(declaration.shape.starts, declaration.literal.close) })));
       const snippet: SourceSnippet = {
-        definitions,
-        containers: shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair) => {
-          const line = lineOf(shape!.starts, pair.open);
-          const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
-          const kotest = header.match(/^\s*"((?:\\.|[^"\\])*)"\s*-\s*$/) ?? header.match(/^\s*(?:context|describe|given|when|and)\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)\s*$/);
-          if (kotest) return [kotest[1]];
-          const dynamic = header.match(/^\s*((?:withContexts|withData)(?:<[^>]+>)?\s*\(.*\))\s*$/);
-          if (dynamic) return [dynamic[1]];
-          if (!/\bclass\s+\w+/.test(header)) return [];
-          const lead = withLeadIn(shape!.lines, { start: line, end: line });
-          const annotations = shape!.lines.slice(lead.start, line + 1).join("\n");
-          if (!/@Nested\b/.test(annotations)) return [];
-          const display = annotations.match(/@DisplayName\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)/);
-          return display ? [display[1]] : [];
-        }),
+        definitions: [...containerData, ...definitions],
+        containers,
         file: shown,
         path: posix.join(file.shownBase, shown),
         startLine: range.start + 1,

@@ -8,7 +8,7 @@ import { formatPreconditions, formatTestData, preconditionText } from "./caseFor
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
 import { highlightHtml, highlightLines } from "./highlight";
 import type { Layers } from "../testCases";
-import type { SourceSnippet } from "../testSources";
+import type { SourceContainer, SourceSnippet } from "../testSources";
 import type { CoveredBy, Dropped } from "../coverage";
 import { currentLocaleCode, formattingLocale, matchLocale, mergeLocales, setLocale, t, tn, type LocaleDefinition, type MessageKey } from "./i18n";
 import { countImagesWithPrefix, blobToPng, loadImages, removeCaseImages, removeImage, saveImage, shrinkImage } from "./runImages";
@@ -1313,6 +1313,14 @@ function useSourceViewer(view: SourceView | null, onClose: () => void) {
   }, [view]);
 }
 
+/** A container as its meaning; the call as written stays in the tooltip, since the code below shows it anyway */
+function containerText(container: SourceContainer): string {
+  if ("name" in container) return container.name;
+  if (!container.each) return container.call;
+  const named = container.names ? container.names.join(t("source.nameJoin")) : container.by;
+  return named ? t("source.eachOfNamed", { data: container.each, named }) : t("source.eachOf", { data: container.each });
+}
+
 /** The test code behind an automated case, or a note that none was found where it was searched */
 function CaseSources({ sources }: { sources: SourceSnippet[] }) {
   const [viewing, setViewing] = useState<SourceView | null>(null);
@@ -1332,7 +1340,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
               ${viewButton(source.path, source.file, source.startLine, source.endLine)}
             </figcaption>
-            ${source.containers?.length ? html`<div class="source-containers">${source.containers.join(" › ")}</div>` : null}
+            ${source.containers?.length ? html`<div class="source-containers">${source.containers.flatMap((container, i) => [i > 0 ? " › " : null, html`<span key=${i} title=${"call" in container ? container.call : undefined}>${containerText(container)}</span>`])}</div>` : null}
             <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
             ${source.definitions?.map((item) => html`<details class="source-definition"><summary>${t(item.kind === "type" ? "case.typeDefinition" : "case.dataDefinition", { name: item.name })}</summary><div class="source-path" title=${item.path}>${item.file}:${item.startLine}–${item.endLine}</div>${item.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}${viewButton(item.path, item.file, item.startLine, item.endLine)}<pre><${HighlightedCode} code=${item.code} file=${item.file} /></pre></details>`)}
           </figure>`

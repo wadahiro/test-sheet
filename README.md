@@ -488,9 +488,16 @@ Parameterized cases inherit `layer` and `automation_reason` in pattern > templat
 
 The layer summary lists each suite's totals and automated / semi / manual counts. Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
 
-With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. Dynamic `withContexts(…)` and
-`withData(…)` containers whose call is on one line are shown as their source call (for example,
-`withContexts(END_DATES)`), since their runtime names cannot be determined statically.
+With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. A dynamic
+`withContexts(…)`, `withData(…)` or `withTests(…)` container is shown as what it means, such as
+"Each of PLANS, named Plan::name" (the call as written is its tooltip), since its runtime names are not
+known without running the tests. When the data is a variable declared as a list or array literal, its whole declaration is
+attached to the snippet under the usual "data declaration" fold (up to 80 lines), so the element names
+written there can be read. When the name function is a reference like `Plan::name` and every element is a
+`Plan(…)` call that writes that property as a string literal (up to six elements), the names are listed in the
+heading itself ("Each of PLANS, named 無料プラン, 有料プラン"). Which container a row's case ID runs in
+depends on code that is not run here, so it is not filtered: the data declaration and the row type are what
+to follow. The call may span lines.
 Unrecognized containers are omitted; names are not automatically compared with preconditions.
 
 ### Project layer declarations and display names
