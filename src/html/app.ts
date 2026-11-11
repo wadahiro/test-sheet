@@ -1401,7 +1401,7 @@ function CountLabel({ testCases }: { testCases: TestCase[] }) {
 function goToTestCase(tcId: string) {
   const next = testCaseHash(tcId);
   if (location.hash === next) jumpToId(testCaseAnchorId(tcId));
-  else location.hash = next;
+  else followHash(next);
 }
 
 /** Why a case is out of active coverage, as a short label; null for an active case */
@@ -3716,6 +3716,25 @@ function scrollToRoute(route: Route) {
 }
 
 /**
+ * Where the page was scrolled on each hash. Back and forward land there instead of at the top (or at the
+ * route's target): the browser cannot do it, since the page is redrawn by script after the hash changes,
+ * so scroll restoration is switched to manual and kept here.
+ */
+const scrollMemory = new Map<string, number>();
+/** The hash the page on screen was drawn for; null from the moment the hash changes until its page is drawn, so the old page's position is not overwritten */
+let shownHash: string | null = null;
+/** The next route came from back/forward or the address bar, not from the reader choosing a link */
+let arrivedByHistory = false;
+let followedAt = -Infinity;
+const FOLLOW_WINDOW_MS = 1000;
+
+/** Moving to a page the reader chose, as opposed to going back to one: a chosen page starts at its own place */
+function followHash(hash: string) {
+  followedAt = performance.now();
+  location.hash = hash;
+}
+
+/**
  * Command palette opened with Cmd+K / Ctrl+K. Incremental search filters test
  * suites, sections, and test cases; arrow keys + Enter jump to the selected entry.
  */
@@ -4619,16 +4638,36 @@ function App() {
   const guideShownWidth = clampWidth(GUIDE_SIZE, guideWidth ?? Math.round(spaceBesideNav / 2), guideLimit);
 
   useEffect(() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     function onHashChange() {
+      shownHash = null;
+      arrivedByHistory = performance.now() - followedAt > FOLLOW_WINDOW_MS;
       setRoute(parseRoute(location.hash, suites));
     }
+    function onScroll() {
+      if (shownHash !== null) scrollMemory.set(shownHash, window.scrollY);
+    }
+    // A link in a case, a guide or a note is a plain anchor, so the choice is noticed where every click passes
+    function onClick(e: MouseEvent) {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.target instanceof Element && e.target.closest('a[href^="#/"]')) followedAt = performance.now();
+    }
     window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("click", onClick, true);
+    };
   }, [suites]);
 
   // Runs after the new page is in the DOM, so the scroll target exists
   const jumpAfterRender = useRef<Route | null>(null);
   useEffect(() => {
+    const remembered = arrivedByHistory ? scrollMemory.get(route.hash) : undefined;
+    arrivedByHistory = false;
+    shownHash = route.hash;
     if (routeTargetsGuide) {
       setGuideOpen(true);
       writeGuideOpen(true);
@@ -4643,7 +4682,8 @@ function App() {
       setQuery("");
       return;
     }
-    scrollToRoute(route);
+    if (remembered !== undefined) window.scrollTo(0, remembered);
+    else scrollToRoute(route);
   }, [route.hash]);
 
   useEffect(() => {
@@ -4663,7 +4703,7 @@ function App() {
         if (same.query) setQuery(same.query);
         scrollToRoute(same);
       } else {
-        location.hash = hash;
+        followHash(hash);
       }
     },
     [suites, setQuery, planning]
@@ -4729,7 +4769,7 @@ function App() {
       setRunMenuOpen(false);
       // A run begins with deciding what it covers; planning is a way out of this page, so it is not forced again from the plan page itself
       if (route.mode !== "plan") {
-        location.hash = planHashForScope(route.scope);
+        followHash(planHashForScope(route.scope));
         // hashchange arrives after the next paint: waiting for it would show the header once as if the plan were not open
         setRoute(parseRoute(location.hash, suites));
       }
@@ -4766,7 +4806,7 @@ function App() {
       writePlan(snapshot.runId, snapshot.plan, sheetIds);
       setPlanStore({ runId: snapshot.runId, plan: snapshot.plan });
     }
-    location.hash = scopeHashFor(route.scope);
+    followHash(scopeHashFor(route.scope));
     setRoute(parseRoute(location.hash, suites));
   }, [commitRunIndex, sheetIds, route.scope, suites]);
 
