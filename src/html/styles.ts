@@ -2316,11 +2316,11 @@ a.link-btn { text-decoration: none; }
   font-size: 0.875rem;
 }
 .handoff .eyebrow { margin-bottom: 2px; }
-.handoff ul { margin: 0; padding: 0; list-style: none; }
-.handoff li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; }
-.handoff-what { min-width: 0; overflow-wrap: anywhere; }
-.handoff-kind { padding: 0 6px; border-radius: 3px; background: var(--bg-chip); color: var(--fg-muted); font-size: 0.75rem; white-space: nowrap; }
-.handoff-target { min-width: 0; overflow-wrap: anywhere; }
+.handoff ul { margin: 0; padding-left: 1.25em; list-style: disc; }
+.handoff li { padding: 2px 0; overflow-wrap: anywhere; }
+.handoff li::marker { color: var(--fg-muted); }
+.handoff-after::before { content: "— "; margin-left: 4px; color: var(--fg-muted); }
+.handoff-kind { margin: 0 8px; padding: 0 6px; border-radius: 3px; background: var(--bg-chip); color: var(--fg-muted); font-size: 0.75rem; white-space: nowrap; }
 .handoff-missing { color: var(--fg-muted); font-style: italic; }
 
 .plan-gaps { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 4px; font-size: 0.875rem; }

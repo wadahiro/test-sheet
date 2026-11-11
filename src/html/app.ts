@@ -1107,8 +1107,8 @@ function Handoff({ tc }: { tc: TestCase }) {
           <h5 class="eyebrow">${t("handoff.covers")}</h5>
           <ul>
             ${carried.map((entry, i) => html`<li key=${i}>
-              <span class="handoff-what">${entry.what}</span>
               <${HandoffTarget} tcId=${entry.from._tcId} tc=${entry.from} />
+              <span class="handoff-what handoff-after">${entry.what}</span>
             </li>`)}
           </ul>
         </aside>`
