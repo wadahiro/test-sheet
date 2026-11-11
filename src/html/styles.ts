@@ -32,9 +32,6 @@ const DARK_THEME_VARS = `
 `;
 
 export const STYLES = `
-.source-definition { margin: .5rem; border: 1px solid var(--border); padding: .5rem; }
-.source-definition > summary { cursor: pointer; color: var(--fg-muted); }
-
 .premise-heading { padding-block: .5rem; font-weight: 600; background: var(--bg-subtle); }
 .layer-summary { padding: .75rem; border-bottom: 1px solid var(--border); }
 .source-containers { padding: .5rem; color: var(--fg-muted); }
@@ -1761,6 +1758,9 @@ a.link-btn { text-decoration: none; }
 
 .case-sources { min-width: 0; margin-top: 12px; }
 .source-snippet { margin: 8px 0 0; min-width: 0; }
+/* What the test checks, as a sentence: the reader who never opens the code stops here */
+.source-title { margin: 0 0 6px; font-size: 0.95rem; font-weight: 600; overflow-wrap: anywhere; }
+.source-title-label { display: block; margin-bottom: 1px; color: var(--fg-muted); font-size: 0.75rem; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; }
 .source-snippet figcaption { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-bottom: 4px; font-size: 0.8rem; color: var(--fg-muted); }
 .source-path { font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .source-snippet pre { overflow-x: auto; margin: 0; padding: 8px; background: var(--bg-chip); border-radius: 4px; font-size: 0.85em; }

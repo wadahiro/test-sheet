@@ -159,6 +159,10 @@ function testCaseToMarkdown(tc: TestCase, headingLevel = 3, run: (RunState & { i
     lines.push(`**${t("md.automationNote")}:** ${noteLines[0]}`, ...noteLines.slice(1), "");
   }
 
+  for (const source of tc.sources ?? []) {
+    lines.push(`**${t("md.source")}:**${source.title ? ` ${source.title}` : ""}`, "", `\`${source.file}:${source.startLine}–${source.endLine}\``, "", "```" + source.file.slice(source.file.lastIndexOf(".") + 1), source.code, "```", "");
+  }
+
   const handoffLines = [
     ...(tc.covered_by ?? []).map((item) => t("md.handoffMoved", { what: item.what, kind: handoffKindLabel(handoffKind(item)), target: handoffTarget(item) })),
     ...(tc.dropped ?? []).map((item) => t("md.handoffDropped", { what: item.what, reason: item.reason })),
@@ -1335,6 +1339,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
       ? html`<p class="source-missing">${t("case.sourceMissing")}</p>`
       : sources.map(
           (source) => html`<figure class="source-snippet" key=${`${source.file}:${source.startLine}`}>
+            ${source.title ? html`<p class="source-title"><span class="source-title-label">${t("source.checks")}</span>${source.title}</p>` : null}
             <figcaption>
               <span class="source-path" title=${source.path}>${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
@@ -1342,7 +1347,6 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
             </figcaption>
             ${source.containers?.length ? html`<div class="source-containers">${source.containers.flatMap((container, i) => [i > 0 ? " › " : null, html`<span key=${i} title=${"call" in container ? container.call : undefined}>${containerText(container)}</span>`])}</div>` : null}
             <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
-            ${source.definitions?.map((item) => html`<details class="source-definition"><summary>${t(item.kind === "type" ? "case.typeDefinition" : "case.dataDefinition", { name: item.name })}</summary><div class="source-path" title=${item.path}>${item.file}:${item.startLine}–${item.endLine}</div>${item.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}${viewButton(item.path, item.file, item.startLine, item.endLine)}<pre><${HighlightedCode} code=${item.code} file=${item.file} /></pre></details>`)}
           </figure>`
         )}
   </section>`;
@@ -3242,7 +3246,7 @@ function testCaseSearchText(tc: TestCase): string {
   if (tc.layer) parts.push(tc.layer, tc.layerLabel ?? "", tc.layerDescription ?? "");
   if (tc.automation_reason) parts.push(tc.automation_reason);
   if (tc.tags) parts.push(...tc.tags);
-  for (const source of tc.sources ?? []) parts.push(source.file, source.code);
+  for (const source of tc.sources ?? []) parts.push(source.file, source.title ?? "", source.code);
   return parts.join(" ");
 }
 

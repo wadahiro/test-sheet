@@ -5,8 +5,6 @@
 // `.other` variants, picked by the language's own plural rules.
 
 export const en = {
-  "case.typeDefinition": "View type definition: {name}",
-  "case.dataDefinition": "View data declaration: {name}",
   "layer.summary": "Cases by layer",
   "layer.label": "Layer",
   "layer.unspecified": "Unspecified",
@@ -193,6 +191,8 @@ export const en = {
   "status.active": "active",
   "picker.status": "Status",
   "picker.method": "Method",
+  "source.checks": "Checks",
+  "md.source": "Automated test",
   "source.viewFile": "View whole file",
   "source.lines": "{count} lines",
   "source.jumpCase": "Jump to a case in this file",

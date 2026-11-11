@@ -245,10 +245,8 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
   for (const suite of pageSuites) {
     for (const tc of suite.testCases) {
       for (const snippet of tc.sources ?? []) {
-        for (const path of [snippet.path, ...(snippet.definitions ?? []).map((item) => item.path)]) {
-          const text = sources?.fileText(path);
-          if (text !== undefined) sourceFiles[path] = gzipSync(text, { level: 9 }).toString("base64");
-        }
+        const text = sources?.fileText(snippet.path);
+        if (text !== undefined) sourceFiles[snippet.path] = gzipSync(text, { level: 9 }).toString("base64");
       }
     }
   }

@@ -223,8 +223,13 @@ ID built at run time (`"LOGIN-00$n"`), shows the lines around the ID, or nothing
 appears as written. A case marked `automated` or `semi` that no test code mentions is warned
 about, and so is a `manual` case that some test code does mention.
 
+Each snippet starts with what the test checks, as a sentence: the test's `@DisplayName`, or the name it
+is declared with (a Kotest string such as `test("LOGIN-001: …")`, a backticked Kotlin function), without
+the case ID it starts with. A row of data, or a name built at run time, has no name that can be read, so no sentence is made
+up for it. The Markdown copy of a case carries that sentence and the code, and nothing else of the snippet.
+
 Finding the code behind a case is matching, so it can miss a helper or what a test calls. Each
-snippet (and each type or data declaration under it) has **View whole file**, which opens the file
+snippet has **View whole file**, which opens the file
 in full over the page, with the lines the case showed marked and the view opened on them. A menu
 in its header jumps to the other cases the file mentions, and Esc closes it. The file text is
 embedded once however many cases show a piece of it, and only for files a case shows, gzipped and
@@ -491,13 +496,10 @@ The layer summary lists each suite's totals and automated / semi / manual counts
 With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. A dynamic
 `withContexts(…)`, `withData(…)` or `withTests(…)` container is shown as what it means, such as
 "Each of PLANS, named Plan::name" (the call as written is its tooltip), since its runtime names are not
-known without running the tests. When the data is a variable declared as a list or array literal, its whole declaration is
-attached to the snippet under the usual "data declaration" fold (up to 80 lines), so the element names
-written there can be read. When the name function is a reference like `Plan::name` and every element is a
+known without running the tests. When the name function is a reference like `Plan::name` and every element is a
 `Plan(…)` call that writes that property as a string literal (up to six elements), the names are listed in the
 heading itself ("Each of PLANS, named 無料プラン, 有料プラン"). Which container a row's case ID runs in
-depends on code that is not run here, so it is not filtered: the data declaration and the row type are what
-to follow. The call may span lines.
+depends on code that is not run here, so it is not filtered. The call may span lines.
 Unrecognized containers are omitted; names are not automatically compared with preconditions.
 
 ### Project layer declarations and display names

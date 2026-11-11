@@ -19,7 +19,8 @@ export interface SourceSnippet {
   /** The method was longer than `MAX_SNIPPET_LINES`, so only its start is kept */
   truncated: boolean;
   containers?: SourceContainer[];
-  definitions?: SourceDefinition[];
+  /** What the test checks, as its own name says it (its @DisplayName or Kotest name, without the case ID); absent when the name cannot be read */
+  title?: string;
 }
 
 /** What a test sits inside, outermost first: a named container, or a call that makes one container per element of some data */
@@ -35,17 +36,6 @@ export type SourceContainer =
       /** Those names, when every element is a constructor call that writes the name as a string literal */
       names?: string[];
     };
-
-export interface SourceDefinition {
-  kind: "type" | "data";
-  name: string;
-  file: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-  code: string;
-  truncated: boolean;
-}
 
 interface SourceFile {
   path: string;
@@ -344,30 +334,6 @@ function fileShape(text: string): FileShape {
   return { lines: text.split("\n"), starts: lineStarts(text), all, braces: all.filter((pair) => pair.kind === "{") };
 }
 
-function definition(file: SourceFile, shape: FileShape, kind: SourceDefinition["kind"], name: string, range: LineRange): SourceDefinition {
-  const end = Math.min(range.end, range.start + MAX_SNIPPET_LINES - 1);
-  const shown = relative(file.base, file.path).replaceAll("\\", "/");
-  return { kind, name, file: shown, path: posix.join(file.shownBase, shown), startLine: range.start + 1, endLine: end + 1, code: shape.lines.slice(range.start, end + 1).join("\n"), truncated: end < range.end };
-}
-
-function dataDefinitions(file: SourceFile, shape: FileShape, offset: number, files: SourceFile[], shapes: Map<SourceFile, FileShape>): SourceDefinition[] {
-  const data = enclosingData(shape, offset);
-  if (!data) return [];
-  const result: SourceDefinition[] = [];
-  const declarationLine = lineOf(shape.starts, data.open);
-  const variable = declaredName(file.text.slice(shape.starts[declarationLine], data.open));
-  if (variable) result.push(definition(file, shape, "data", variable, withLeadIn(shape.lines, { start: declarationLine, end: declarationLine })));
-  const row = shape.all.filter((pair) => pair.kind === "(" && contains(pair, offset)).reverse().find((pair) => {
-    return /\b[A-Z][\w]*\s*$/.test(file.text.slice(shape.starts[lineOf(shape.starts, pair.open)], pair.open));
-  });
-  if (!row) return result;
-  const typeName = file.text.slice(shape.starts[lineOf(shape.starts, row.open)], row.open).match(/\b([A-Z][\w]*)\s*$/)?.[1];
-  if (!typeName) return result;
-  const declaration = typeDeclaration(typeName, file, files, shapes);
-  if (declaration) result.push(definition(declaration.file, declaration.shape, "type", typeName, withLeadIn(declaration.shape.lines, { start: declaration.line, end: lineOf(declaration.shape.starts, declaration.parameters.close) })));
-  return result;
-}
-
 function shapeOf(file: SourceFile, shapes: Map<SourceFile, FileShape>): FileShape {
   let shape = shapes.get(file);
   if (!shape) {
@@ -487,7 +453,7 @@ function elementNames(declaration: DataDeclaration, typeName: string, property: 
  * PLANS, named by `Plan::name`. What its runtime names are is not known without running it, so those
  * are read from the data only when they are written there.
  */
-function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPair, files: SourceFile[], shapes: Map<SourceFile, FileShape>): { container: SourceContainer; declaration?: DataDeclaration; each?: string } | undefined {
+function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPair, files: SourceFile[], shapes: Map<SourceFile, FileShape>): SourceContainer | undefined {
   const before = file.text.slice(0, lambda.open).trimEnd();
   if (!before.endsWith(")")) return undefined;
   const paren = shape.all.find((pair) => pair.kind === "(" && pair.close === before.length - 1);
@@ -507,7 +473,7 @@ function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPai
   const reference = nameFunction?.match(/^([A-Za-z_]\w*)?::([A-Za-z_]\w*)$/);
   const declaration = each ? dataDeclaration(each, file, files, shapes) : undefined;
   const names = declaration && reference?.[1] ? elementNames(declaration, reference[1], reference[2], files, shapes) : undefined;
-  return { container: { call, ...(each ? { each } : {}), ...(reference ? { by: reference[0] } : {}), ...(names ? { names } : {}) }, declaration, each };
+  return { call, ...(each ? { each } : {}), ...(reference ? { by: reference[0] } : {}), ...(names ? { names } : {}) };
 }
 
 function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
@@ -521,7 +487,6 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       shape = shapes.get(file) ?? fileShape(file.text);
       shapes.set(file, shape);
     }
-    const definitions = dataDefinitions(file, shape, match.index!, files, shapes);
     for (const range of snippetRanges(shape, file.text, match.index!)) {
       // Two hits in one method (annotation and name) are one snippet
       const seen = taken.get(id) ?? [];
@@ -532,17 +497,13 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
       const shown = relative(file.base, file.path).replaceAll("\\", "/");
-      const dataContainers: DataDeclaration[] = [];
       const containers = shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair): SourceContainer[] => {
         const line = lineOf(shape!.starts, pair.open);
         const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
         const kotest = header.match(/^\s*"((?:\\.|[^"\\])*)"\s*-\s*$/) ?? header.match(/^\s*(?:context|describe|given|when|and)\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)\s*$/);
         if (kotest) return [{ name: kotest[1] }];
         const dynamic = dynamicContainer(file, shape!, pair, files, shapes);
-        if (dynamic) {
-          if (dynamic.declaration) dataContainers.push(dynamic.declaration);
-          return [dynamic.container];
-        }
+        if (dynamic) return [dynamic];
         if (!/\bclass\s+\w+/.test(header)) return [];
         const lead = withLeadIn(shape!.lines, { start: line, end: line });
         const annotations = shape!.lines.slice(lead.start, line + 1).join("\n");
@@ -550,11 +511,9 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
         const display = annotations.match(/@DisplayName\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)/);
         return display ? [{ name: display[1] }] : [];
       });
-      // The whole declaration of the data that names the containers goes first, so the header-only one of the same variable is dropped as a repeat
-      const containerData = dataContainers.map((declaration) => definition(declaration.file, declaration.shape, "data", declaration.name, withLeadIn(declaration.shape.lines, { start: lineOf(declaration.shape.starts, declaration.literal.open), end: lineOf(declaration.shape.starts, declaration.literal.close) })));
       const snippet: SourceSnippet = {
-        definitions: [...containerData, ...definitions],
         containers,
+        title: testTitle(shape.lines, range, id),
         file: shown,
         path: posix.join(file.shownBase, shown),
         startLine: range.start + 1,
@@ -565,6 +524,28 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       into.set(id, [...(into.get(id) ?? []), snippet]);
     }
   }
+}
+
+const STRING = '"((?:\\\\.|[^"\\\\])*)"';
+const NAME_FORMS = [
+  new RegExp(`@DisplayName\\s*\\(\\s*${STRING}\\s*\\)`),
+  new RegExp(`^\\s*(?:x?test|it|should|then)\\s*\\(\\s*${STRING}`, "m"),
+  new RegExp(`^\\s*${STRING}\\s*(?:-\\s*)?\\{`, "m"),
+  /\bfun\s+`([^`]+)`/,
+];
+
+/**
+ * What the test is called: its @DisplayName, or the name it is declared with (a Kotest string, a backticked
+ * Kotlin function). Only a name that mentions the case ID counts unless it is a @DisplayName, so a string
+ * that merely sits nearby is not taken for it. A row of data has no name of its own here, so it gets none.
+ */
+function testTitle(lines: string[], range: LineRange, id: string): string | undefined {
+  const text = lines.slice(range.start, Math.min(range.end, range.start + HEADER_LOOKAHEAD_LINES) + 1).join("\n");
+  const idPattern = new RegExp(`(?<![\\w-])${escapeRegExp(id)}(?![\\w-])`);
+  const named = NAME_FORMS.map((form, i) => ({ name: text.match(form)?.[1], display: i === 0 })).find((found) => found.name !== undefined && (found.display || idPattern.test(found.name)));
+  if (!named?.name) return undefined;
+  const title = named.name.replace(/\\(.)/g, "$1").replace(new RegExp(`^\\s*\\[?${escapeRegExp(id)}\\]?\\s*[:：,\\-–—.]?\\s*`), "").trim();
+  return title === "" ? undefined : title;
 }
 
 function mentionsTest(files: SourceFile[], name: string): boolean {
@@ -588,15 +569,6 @@ export async function buildSourceIndex(patterns: string[], ids: string[]): Promi
     const idSet = new Set(ids);
     const shapes = new Map<SourceFile, FileShape>();
     for (const file of files) snippetsInFile(file, idSet, pattern, found, files, shapes);
-    for (const snippets of found.values()) {
-      const seen = new Set<string>();
-      for (const snippet of snippets) snippet.definitions = snippet.definitions?.filter((item) => {
-        const key = `${item.path}:${item.startLine}:${item.kind}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    }
   }
   const byPath = new Map(files.map((file) => [posix.join(file.shownBase, relative(file.base, file.path).replaceAll("\\", "/")), file.text]));
   return { snippetsFor: (id) => found.get(id) ?? [], hasTest: (name) => mentionsTest(files, name), fileText: (path) => byPath.get(path) };
