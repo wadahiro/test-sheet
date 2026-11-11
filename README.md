@@ -508,7 +508,7 @@ Without `metadata.layers`, no layer policy is enforced. With a declaration, miss
 
 Parameterized cases inherit `layer` and `automation_reason` in pattern > template > entry order. Layer filters combine with the other table filters using AND. Plan layers narrow the existing tag/part range using AND; no selected layers means every layer, including unspecified. Older saved plans retain their previous range.
 
-The layer summary lists each suite's totals and automated / semi / manual counts. Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
+The **Stats** button in the header opens the counts for the part of the sheet shown (`#/stats`, or `#/stats/s/<id>` for one suite): by method, layer, suite, tag and status, and the results of the run in use. Every number links to the list narrowed to what it counts (`?layer=`, `?method=`, `?status=` and `?tag=` on a list's address). Cases remain in their original order: within each section, consecutive shared precondition prefixes appear as nested headings, including in Markdown copies. Single-case copies include all preconditions. YAML and execution records stay flat.
 
 With `--tests`, recognized Kotest string containers (`"context" - { ... }`, `context("context") { ... }`, and describe/given/when/and) and JUnit `@Nested` classes with `@DisplayName` appear above source snippets, from outermost to innermost. A dynamic
 `withContexts(…)`, `withData(…)` or `withTests(…)` container is shown as what it means, such as

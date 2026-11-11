@@ -5,7 +5,19 @@
 // `.other` variants, picked by the language's own plural rules.
 
 export const en = {
-  "layer.summary": "Cases by layer",
+  "stats.title": "Statistics",
+  "stats.button": "Stats",
+  "stats.buttonTitle": "Counts for this part of the sheet",
+  "stats.total": "Total",
+  "stats.scope": "Scope",
+  "stats.byMethod": "By method",
+  "stats.byLayer": "By layer",
+  "stats.bySuite": "By test suite",
+  "stats.byTag": "By tag",
+  "stats.byStatus": "By status",
+  "stats.run": "Results of the run: {name}",
+  "stats.openList": "Show these cases",
+  "stats.empty": "There are no cases here.",
   "layer.label": "Layer",
   "layer.unspecified": "Unspecified",
   "layer.reason": "Automation exception",

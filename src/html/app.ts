@@ -209,16 +209,6 @@ function premiseHeadings(tc: TestCase, previous?: TestCase): { text: string; dep
   return values.slice(shared).map((value, i) => ({ text: preconditionText(value), depth: shared + i }));
 }
 
-function layerSummary(cases: TestCase[], declarations: Layers = {}): ComponentChildren {
-  const keys = [...new Set([...Object.keys(declarations), ...cases.map((tc) => tc.layer ?? "")])];
-  return keys.map((key) => {
-    const matching = cases.filter((tc) => (tc.layer ?? "") === key);
-    const counts = { automated: 0, semi: 0, manual: 0 };
-    for (const tc of matching) counts[caseMethodKey(tc)]++;
-    return html`<div title=${declarations[key]?.description}><strong>${declarations[key]?.label ?? (key || t("layer.unspecified"))}</strong>: ${matching.length} (${t("method.automated")} ${counts.automated} / ${t("method.semi")} ${counts.semi} / ${t("method.manual")} ${counts.manual})</div>`;
-  });
-}
-
 /** Renders every test case in a section as a single Markdown document */
 function categoryToMarkdown(category: string, testCases: TestCase[], headingLevel = 2): string {
   const lines = [`${"#".repeat(headingLevel)} ${t("md.section", { name: category })}`, ""];
@@ -1503,6 +1493,10 @@ function TestCaseCard({ tc, level }: { tc: TestCase; level: number }) {
   `;
 }
 
+function StatsIcon() {
+  return html`<svg class="guide-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>`;
+}
+
 function GuideIcon() {
   return html`<svg class="guide-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>`;
 }
@@ -2554,7 +2548,12 @@ function ScopePage({
   useEffect(() => setPartFilter([]), [scopeHash]);
   // A link naming tags (a tag chip, the palette) opens the page filtered by them
   useEffect(() => {
-    if (route.tags.length > 0) setTagFilter(route.tags);
+    if (route.tags.length + route.layers.length + route.methods.length + route.statuses.length === 0) return;
+    // All four, so what the reader had chosen before does not narrow a link that named its own
+    setTagFilter(route.tags);
+    setLayerFilter(route.layers);
+    setMethodFilter(route.methods);
+    setStatusFilter(route.statuses);
   }, [route.hash]);
   const target = route.target;
   const isOpen = (tcId: string) => opened.get(tcId) ?? (target !== null && testCaseAnchorId(tcId) === target);
@@ -2601,10 +2600,11 @@ function ScopePage({
   const tagItems = tagItemsOf(scopeRows);
   const partChipList = partChips(partFilter, partItems, (key) => setPartFilter((current) => current.filter((other) => other !== key)));
   const tagChipList = tagChips(tagFilter, (tag) => setTagFilter((current) => current.filter((other) => other !== tag)));
+  const layerChipList = valueChips(layerFilter, layerItemsOf(scopeRows, resolved.suites.map((suite) => suite.layers ?? {})), (key) => setLayerFilter((current) => current.filter((other) => other !== key)));
   const statusChipList = valueChips(statusFilter, statusItems, (key) => setStatusFilter((current) => current.filter((other) => other !== key)));
   const methodChipList = valueChips(methodFilter, methodItems, (key) => setMethodFilter((current) => current.filter((other) => other !== key)));
   // Any of the chosen within a group, every group at once; no frame around each group, which only added another outline to every chip
-  const chipGroups = [partChipList, tagChipList, statusChipList, methodChipList].filter((chips) => chips.length > 0);
+  const chipGroups = [partChipList, layerChipList, tagChipList, statusChipList, methodChipList].filter((chips) => chips.length > 0);
   const filterChips = html`${chipGroups.flatMap((chips, i) => [
     ...(i > 0 ? [html`<span class="chip-join" key=${`and-${i}`}>${t("chips.and")}</span>`] : []),
     html`<span class="chip-group" key=${`group-${i}`}>${joinChips(chips, t("chips.or"))}</span>`,
@@ -2621,7 +2621,6 @@ function ScopePage({
 
   return html`
     <section class="overview scope-page" id=${resolved.anchorId} style=${{ "--filter-h": barHeight > 0 ? `${barHeight}px` : undefined }}>
-      <details class="layer-summary"><summary>${t("layer.summary")}</summary><table><thead><tr><th>${t("col.suite")}</th><th>${t("layer.summary")}</th></tr></thead><tbody>${resolved.suites.map((suite) => html`<tr><th>${suite.typeName}</th><td>${layerSummary(scopeRows.filter((row) => row.idPrefix === suite.idPrefix).map((row) => row.tc), suite.layers)}</td></tr>`)}</tbody></table></details>
       <div class="scope-table-wrap">
         <div class="scope-bar" ref=${barRef}>
         ${html`<div class="plan-range filter-chips">
@@ -2672,6 +2671,95 @@ function ScopePage({
       ${scopeIds ? html`<${ScopeNote} hiddenRows=${pageRows.filter((row) => !shownIds.has(row.tcId))} plan=${plan} editHref=${planHashForScope(route.scope)} />` : null}
     </section>
   `;
+}
+
+interface StatsGroup {
+  key: string;
+  label: string;
+  title?: string;
+  rows: OverviewRow[];
+  /** Where its numbers lead: this part of the sheet, narrowed by the group's own filter */
+  scope: Scope;
+  filter: ListFilter;
+}
+
+const STATS_METHODS: CaseMethod[] = ["automated", "semi", "manual"];
+
+/** Counts as a table, every number a link to the list narrowed to what it counts */
+function StatsTable({ heading, first, groups }: { heading: string; first: string; groups: StatsGroup[] }) {
+  const cell = (group: StatsGroup, count: number, methods?: CaseMethod[]) =>
+    count === 0 ? html`<td class="stats-zero">0</td>` : html`<td><a href=${listHash(group.scope, { ...group.filter, methods })} title=${t("stats.openList")}>${count}</a></td>`;
+  return html`<section class="stats-block">
+    <h3>${heading}</h3>
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>${first}</th>
+          <th>${t("stats.total")}</th>
+          ${STATS_METHODS.map((method) => html`<th key=${method}>${t(METHOD_LABEL_KEY[method])}</th>`)}
+        </tr>
+      </thead>
+      <tbody>
+        ${groups.map(
+          (group) => html`<tr key=${group.key}>
+            <th scope="row" title=${group.title}>${group.label}</th>
+            ${cell(group, group.rows.length)}
+            ${STATS_METHODS.map((method) => cell(group, group.rows.filter((row) => row.methodKey === method).length, [method]))}
+          </tr>`
+        )}
+      </tbody>
+    </table>
+  </section>`;
+}
+
+/**
+ * How many cases a part of the sheet holds, by layer, suite, tag and status, and by method across them.
+ * Counts are of the whole part (a run's plan does not narrow them); the run's results, when one is in
+ * use, are added since they are the other number a reviewer asks for.
+ */
+function StatsPage({ route, resolved, rows }: { route: Route; resolved: ResolvedScope | null; rows: OverviewRow[] }) {
+  const run = useContext(RunContext);
+  const scopeRows = resolved?.rowKey ? rows.filter((row) => row.keys[resolved.rowKey!.level] === resolved.rowKey!.value) : rows;
+  const progress = useRunProgress(scopeRows, true);
+  if (!resolved) return html`<p class="empty">${t("scope.notFound")} <a href=${STATS_HASH}>${t("scope.backToAll")}</a></p>`;
+  if (scopeRows.length === 0) return html`<p class="empty">${t("stats.empty")}</p>`;
+
+  const scope = route.scope;
+  const layers = layerItemsOf(scopeRows, resolved.suites.map((suite) => suite.layers ?? {}));
+  const layerGroups: StatsGroup[] = layers.map((item) => ({ key: item.key, label: item.label, title: item.description, rows: scopeRows.filter((row) => (row.tc.layer ?? "") === item.key), scope, filter: { layers: [item.key] } }));
+  const suiteGroups: StatsGroup[] = resolved.suites.map((suite) => ({
+    key: suite.idPrefix,
+    label: suite.typeName,
+    title: suite.idPrefix,
+    rows: scopeRows.filter((row) => row.idPrefix === suite.idPrefix),
+    scope: { kind: "suite", idPrefix: suite.idPrefix },
+    filter: {},
+  }));
+  const tagGroups: StatsGroup[] = tagItemsOf(scopeRows).map((item) => ({ key: item.key, label: item.label, rows: scopeRows.filter((row) => row.tags.includes(item.key)), scope, filter: { tags: [item.key] } }));
+  const statusGroups: StatsGroup[] = valueItemsOf(scopeRows, STATUS_LABEL_KEY, (row) => row.statusKey).map((item) => ({ key: item.key, label: item.label, rows: scopeRows.filter((row) => row.statusKey === item.key), scope, filter: { statuses: [item.key] } }));
+
+  const live = scopeRows.filter((row) => !row.inactive);
+  const outcomes = { pass: 0, fail: 0, running: 0, none: 0 };
+  for (const row of live) outcomes[progress?.get(row.tcId)?.outcome ?? "none"]++;
+
+  return html`<section class="stats-page" id="stats">
+    ${run && progress
+      ? html`<section class="stats-block">
+          <h3>${t("stats.run", { name: run.name })}</h3>
+          <ul class="stats-run">
+            <li><strong>${outcomes.pass}</strong> ${t("result.pass")}</li>
+            <li><strong>${outcomes.fail}</strong> ${t("result.fail")}</li>
+            <li><strong>${outcomes.running}</strong> ${t("result.inProgress")}</li>
+            <li><strong>${outcomes.none}</strong> ${t("result.notRun")}</li>
+          </ul>
+        </section>`
+      : null}
+    <${StatsTable} heading=${t("stats.byMethod")} first=${t("stats.scope")} groups=${[{ key: "all", label: resolved.title, rows: scopeRows, scope, filter: {} }]} />
+    ${layers.length > 1 || layers[0]?.key !== "" ? html`<${StatsTable} heading=${t("stats.byLayer")} first=${t("layer.label")} groups=${layerGroups} />` : null}
+    ${suiteGroups.length > 1 ? html`<${StatsTable} heading=${t("stats.bySuite")} first=${t("col.suite")} groups=${suiteGroups} />` : null}
+    ${tagGroups.length > 0 ? html`<${StatsTable} heading=${t("stats.byTag")} first=${t("picker.tags")} groups=${tagGroups} />` : null}
+    <${StatsTable} heading=${t("stats.byStatus")} first=${t("col.status")} groups=${statusGroups} />
+  </section>`;
 }
 
 const planHasRange = (plan: Plan): boolean => plan.layers.length > 0 || plan.tags.length > 0 || plan.parts.length > 0;
@@ -3294,6 +3382,7 @@ function DomainSection({ group }: { group: DomainGroup }) {
 const OVERVIEW_HASH = "#/overview";
 const ALL_HASH = "#/all";
 const PLAN_HASH = "#/plan";
+const STATS_HASH = "#/stats";
 
 function domainHash(domain: string): string {
   return `#/d/${encodeURIComponent(domain)}`;
@@ -3557,6 +3646,29 @@ function planHashFor(entry: NavEntry, suites: SuitePageData[]): string {
   return planHashForScope(target.scope);
 }
 
+/** The statistics of a scope */
+function statsHashForScope(scope: Scope): string {
+  return STATS_HASH + (scope.kind === "all" ? "" : scopeHashFor(scope).replace(/^#/, ""));
+}
+
+/** What a page of the list opens narrowed to; each group is any of, the groups together all of */
+interface ListFilter {
+  layers?: string[];
+  tags?: string[];
+  statuses?: string[];
+  methods?: string[];
+}
+
+function listHash(scope: Scope, filter: ListFilter): string {
+  const params = [
+    ...(filter.layers ?? []).map((value) => `layer=${encodeURIComponent(value)}`),
+    ...(filter.tags ?? []).map((value) => `tag=${encodeURIComponent(value)}`),
+    ...(filter.statuses ?? []).map((value) => `status=${encodeURIComponent(value)}`),
+    ...(filter.methods ?? []).map((value) => `method=${encodeURIComponent(value)}`),
+  ];
+  return scopeHashFor(scope) + (params.length > 0 ? `?${params.join("&")}` : "");
+}
+
 /** The browsing page of a scope: where planning ends up, and the inverse of planHashForScope */
 function scopeHashFor(scope: Scope): string {
   return scope.kind === "domain" ? domainHash(scope.domain) : scope.kind === "feature" ? featureHash(scope.domain, scope.feature) : scope.kind === "suite" ? suiteHash(scope.idPrefix) : OVERVIEW_HASH;
@@ -3712,13 +3824,17 @@ type Scope =
 interface Route {
   scope: Scope;
   /** `table` lists the scope's cases; `full` is the single long page of everything (`#/all`); `plan` is where a run's cases are chosen */
-  mode: "table" | "full" | "plan";
+  mode: "table" | "full" | "plan" | "stats";
   /** Element to scroll to once the page has rendered; null scrolls to the top */
   target: string | null;
   /** Filter seeded from `?q=<query>`; empty when unfiltered */
   query: string;
   /** Tags the page opens filtered by, from `?tag=<tag>` (repeatable); exact tags, unlike `query` */
   tags: string[];
+  /** Layers, methods and statuses the page opens filtered by, from `?layer=`, `?method=` and `?status=` (repeatable); a layer may be empty, which is the cases with none */
+  layers: string[];
+  methods: string[];
+  statuses: string[];
   /** The hash this route was parsed from, so a changed hash can be told from a re-render */
   hash: string;
 }
@@ -3733,6 +3849,8 @@ const ALL_SCOPE: Scope = { kind: "all" };
  *
  *   #/overview[?q=][&tag=]             all test cases, table only (the landing page)
  *   #/all  (and #/)                    everything on one page
+ *   #/overview?layer=&method=&status=&tag=   (and the same on #/d, #/f, #/s) the list opened narrowed to those, as the statistics link to it
+ *   #/stats[/d/…|/f/…|/s/…]            counts for all of the sheet or one part of it
  *   #/plan[/d/…|/f/…|/s/…[/section/<name>]|/tc/<id>]
  *                                      choose which cases the active run covers, for all or one part of the sheet
  *   #/d/<domain>   #/f/<domain>/<feature>   #/s/<idPrefix>
@@ -3757,15 +3875,28 @@ function parseRoute(hash: string, suites: SuitePageData[]): Route {
     .filter((pair) => pair.startsWith("tag="))
     .map((pair) => safeDecode(pair.slice(4)))
     .filter(Boolean);
-  const landing: Route = { scope: ALL_SCOPE, mode: "table", target: null, query, tags, hash };
+  const listed = (key: string, keepEmpty = false): string[] =>
+    queryString
+      .split("&")
+      .filter((pair) => pair.startsWith(`${key}=`))
+      .map((pair) => safeDecode(pair.slice(key.length + 1)))
+      .filter((value) => keepEmpty || value !== "");
+  const layers = listed("layer", true);
+  const methods = listed("method");
+  const statuses = listed("status");
+  const landing: Route = { scope: ALL_SCOPE, mode: "table", target: null, query, tags, layers, methods, statuses, hash };
   const segments = path.split("/").slice(1).map(safeDecode);
 
-  if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "", tags: [] };
+  if (path === "/" || segments[0] === "all") return { ...landing, mode: "full", query: "", tags: [], layers: [], methods: [], statuses: [] };
+  if (segments[0] === "stats") {
+    const inner = segments.length > 1 ? parseRoute(`#/${segments.slice(1).map(encodeURIComponent).join("/")}`, suites) : null;
+    return { ...landing, mode: "stats", scope: inner?.mode === "table" ? inner.scope : ALL_SCOPE, query: "", tags: [], layers: [], methods: [], statuses: [] };
+  }
   if (segments[0] === "plan") {
     // What follows is the part of the sheet being planned, in the same grammar as the pages it narrows
     const inner = segments.length > 1 ? parseRoute(`#/${segments.slice(1).map(encodeURIComponent).join("/")}`, suites) : null;
     const part = inner?.mode === "table" ? inner : null;
-    return { ...landing, mode: "plan", scope: part?.scope ?? ALL_SCOPE, target: part?.target ?? null, query: "", tags: [] };
+    return { ...landing, mode: "plan", scope: part?.scope ?? ALL_SCOPE, target: part?.target ?? null, query: "", tags: [], layers: [], methods: [], statuses: [] };
   }
 
   if (segments[0] === "d" && segments.length === 2) {
@@ -4499,6 +4630,8 @@ function AppHeader({
   guideOpen,
   guideAvailable,
   onToggleGuide,
+  statsHash,
+  statsShown,
 }: {
   /** Where the reader is, outermost first; the last is the page and is not a link */
   crumbs: Crumb[];
@@ -4520,6 +4653,9 @@ function AppHeader({
   guideOpen: boolean;
   guideAvailable: boolean;
   onToggleGuide: () => void;
+  /** Where the statistics of the part shown are, or where leaving them goes when they are shown */
+  statsHash: string;
+  statsShown: boolean;
   navCollapsed: boolean;
   onToggleNav: () => void;
   runIndex: RunIndex;
@@ -4605,6 +4741,10 @@ function AppHeader({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>`
           : null}
+        <a class=${"header-btn stats-link" + (statsShown ? " header-btn-on" : "")} href=${statsHash} aria-current=${statsShown ? "page" : undefined} title=${t("stats.buttonTitle")}>
+          <${StatsIcon} />
+          <span class="guide-toggle-text">${t("stats.button")}</span>
+        </a>
         <button
           class=${"header-btn guide-toggle" + (guideOpen ? " header-btn-on" : "")}
           aria-pressed=${guideOpen}
@@ -4669,6 +4809,14 @@ const planEntry = (): NavEntry => ({
   hash: PLAN_HASH,
   label: t("plan.title"),
   searchText: `${t("plan.title")} plan tailoring scope select skip review`,
+});
+
+const statsEntry = (): NavEntry => ({
+  kind: "view",
+  id: STATS_HASH,
+  hash: STATS_HASH,
+  label: t("stats.title"),
+  searchText: `${t("stats.title")} statistics counts by layer suite tag status method automated manual summary`,
 });
 
 const onePageEntry = (): NavEntry => ({
@@ -4989,6 +5137,8 @@ function App() {
   const crumbs: Crumb[] =
     route.mode === "full"
       ? [{ label: t("view.onePage") }]
+      : route.mode === "stats"
+        ? [{ label: t("stats.title"), hash: resolvedScope && route.scope.kind !== "all" ? STATS_HASH : undefined }, ...(resolvedScope && route.scope.kind !== "all" ? [{ label: resolvedScope.title }] : [])]
       : route.mode === "plan"
         ? [
             { label: activeRun ? t("plan.pageTitle", { name: activeRun.name }) : t("plan.title"), hash: resolvedScope && route.scope.kind !== "all" ? PLAN_HASH : undefined },
@@ -5000,7 +5150,7 @@ function App() {
 
   return html`
     <div>
-      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} planHash=${planHashForScope(route.scope)} onCancelPlan=${planning && activeRun ? cancelPlanning : null} startAll=${startAll} onStart=${startTesting} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} guideOpen=${guidePanelOpen} guideAvailable=${guideAvailable} onToggleGuide=${() => setGuide(!guidePanelOpen)} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
+      <${AppHeader} crumbs=${crumbs} pageHeading=${route.mode !== "full"} planExitHash=${planning ? scopeHashFor(route.scope) : null} planHash=${planHashForScope(route.scope)} onCancelPlan=${planning && activeRun ? cancelPlanning : null} startAll=${startAll} onStart=${startTesting} lang=${lang} onChangeLang=${changeLang} onOpenPalette=${() => setPaletteOpen(true)} guideOpen=${guidePanelOpen} guideAvailable=${guideAvailable} onToggleGuide=${() => setGuide(!guidePanelOpen)} statsHash=${route.mode === "stats" ? scopeHashFor(route.scope) : statsHashForScope(route.scope)} statsShown=${route.mode === "stats"} navCollapsed=${navCollapsed} onToggleNav=${toggleNav} runIndex=${runIndex} activeRun=${activeRun} totalCases=${totalCases} rows=${overviewRows} runMenuOpen=${runMenuOpen} onRunMenuOpen=${setRunMenuOpen} onSelectRun=${selectRun} onStopRecording=${stopRecording} onCreateRun=${createRun} onRenameRun=${renameRun} onDeleteRun=${deleteRun} />
       <${RunContext.Provider} value=${activeRun}>
       <div
         class=${"layout" + (navCollapsed ? " layout-nav-collapsed" : "")}
@@ -5017,6 +5167,8 @@ function App() {
                     ? html`<p class="empty">${fullScopeIds ? t("filter.none") : t("scope.noFiles")}</p>`
                     : domains.map((d) => html`<${DomainSection} key=${d.domain} group=${d} />`)}
                 </${RunContext.Provider}>`
+            : route.mode === "stats"
+              ? html`<${StatsPage} route=${route} resolved=${resolvedScope} rows=${overviewRows} />`
             : route.mode === "plan"
               ? html`<${PlanPage}
                   run=${activeRun}
@@ -5054,7 +5206,7 @@ function App() {
       </${RunContext.Provider}>
       ${paletteOpen
         ? html`<${CommandPalette}
-            entries=${[allTestCasesEntry(), onePageEntry(), planEntry(), ...entries]}
+            entries=${[allTestCasesEntry(), onePageEntry(), planEntry(), statsEntry(), ...entries]}
             overviewRows=${overviewRows}
             onClose=${() => setPaletteOpen(false)}
             onJump=${navigate}

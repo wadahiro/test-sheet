@@ -33,7 +33,18 @@ const DARK_THEME_VARS = `
 
 export const STYLES = `
 .premise-heading { padding-block: .5rem; font-weight: 600; background: var(--bg-subtle); }
-.layer-summary { padding: .75rem; border-bottom: 1px solid var(--border); }
+/* Statistics: counts that lead to the list they count */
+.stats-link { text-decoration: none; }
+.stats-page { display: flex; flex-direction: column; gap: 24px; padding: 8px 0 32px; }
+.stats-block h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.stats-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.stats-table th, .stats-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: right; }
+.stats-table thead th { background: var(--bg-subtle); font-size: 0.8rem; color: var(--fg-muted); }
+.stats-table th:first-child { text-align: left; font-weight: 600; }
+.stats-table tbody th { font-weight: 500; }
+.stats-zero { color: var(--fg-muted); }
+.stats-run { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; padding: 0; list-style: none; }
+.stats-run strong { font-size: 1.25rem; margin-right: 4px; }
 .source-containers { padding: .5rem; color: var(--fg-muted); }
 
 :root {

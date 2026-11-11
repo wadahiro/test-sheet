@@ -1,7 +1,19 @@
 import type { MessageKey } from "./en";
 
 export const ja: Record<MessageKey, string> = {
-  "layer.summary": "層ごとの件数",
+  "stats.title": "統計",
+  "stats.button": "統計",
+  "stats.buttonTitle": "シートのこの範囲の件数",
+  "stats.total": "合計",
+  "stats.scope": "範囲",
+  "stats.byMethod": "方法ごと",
+  "stats.byLayer": "層ごと",
+  "stats.bySuite": "テストスイートごと",
+  "stats.byTag": "タグごと",
+  "stats.byStatus": "状態ごと",
+  "stats.run": "実行の結果: {name}",
+  "stats.openList": "これらのケースを表示",
+  "stats.empty": "ここにケースはない。",
   "layer.label": "層",
   "layer.unspecified": "未指定",
   "layer.reason": "自動化の例外理由",
