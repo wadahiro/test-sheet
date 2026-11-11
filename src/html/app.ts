@@ -1206,15 +1206,16 @@ function readSourceFile(path: string): Promise<string> | undefined {
 interface SourceView {
   path: string;
   file: string;
-  /** The lines the case's snippet covers, which the viewer marks and opens on */
+  /** The line the viewer opens on */
   start: number;
-  end: number;
+  /** The lines it marks: what the case showed, and the row of data it is made from */
+  marks: { start: number; end: number }[];
   /** The name that led here and every place it is declared, when the view was opened by following a name */
   name?: string;
   candidates?: SourceSymbol[];
 }
 
-const viewOf = (place: SourceSymbol, name: string, candidates: SourceSymbol[]): SourceView => ({ path: place.path, file: place.path, start: place.start, end: place.end, name, candidates });
+const viewOf = (place: SourceSymbol, name: string, candidates: SourceSymbol[]): SourceView => ({ path: place.path, file: place.path, start: place.start, marks: [{ start: place.start, end: place.end }], name, candidates });
 
 /** The name a click or key press landed on, if it is one of the linked names in code */
 function refAt(e: Event): string | null {
@@ -1344,7 +1345,7 @@ function SourceViewer({ initial, onClose }: { initial: SourceView; onClose: () =
             ? html`<p class="source-missing">${t("source.fileMissing")}</p>`
             : lines.map((line, i) => {
               const n = i + 1;
-              const inRange = n >= view.start && n <= view.end;
+              const inRange = view.marks.some((mark) => n >= mark.start && n <= mark.end);
               return html`<div key=${n} class=${"src-line" + (inRange ? " src-line-hit" : "") + (focused === n ? " src-line-focus" : "")} data-line=${n}>
                 <span class="src-no" aria-hidden="true">${n}</span>
                 ${line.colored !== undefined ? html`<code class="src-code" dangerouslySetInnerHTML=${{ __html: line.colored }} />` : html`<code class="src-code">${line.plain}</code>`}
@@ -1397,10 +1398,17 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
     const candidates = definitionsOf(name, fromPath);
     if (candidates.length > 0) setViewing(viewOf(candidates[0], name, candidates));
   };
-  const viewButton = (path: string, file: string, start: number, end: number) =>
-    window.__SOURCE_FILES__?.[path] === undefined || typeof DecompressionStream === "undefined"
-      ? null
-      : html`<button class="link-btn source-view" type="button" onClick=${() => setViewing({ path, file, start, end })}>${t("source.viewFile")}</button>`;
+  const canView = (path: string) => window.__SOURCE_FILES__?.[path] !== undefined && typeof DecompressionStream !== "undefined";
+  // The file opens on the test, with the row of data it runs over marked too; the other button opens on that row
+  const viewButtons = (source: SourceSnippet) => {
+    if (!canView(source.path)) return null;
+    const rows = (source.rows ?? []).map((row) => ({ start: row.startLine, end: row.endLine }));
+    const body = { start: source.startLine, end: source.endLine };
+    return html`<span class="source-view">
+      ${rows.length > 0 ? html`<button class="link-btn" type="button" onClick=${() => setViewing({ path: source.path, file: source.file, start: rows[0].start, marks: rows })}>${t("source.viewRow")}</button>` : null}
+      <button class="link-btn" type="button" onClick=${() => setViewing({ path: source.path, file: source.file, start: body.start, marks: [body, ...rows] })}>${t("source.viewFile")}</button>
+    </span>`;
+  };
   return html`<section class="case-sources">
     <h5 class="eyebrow">${t("case.source")}</h5>
     ${sources.length === 0
@@ -1411,7 +1419,7 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
             <figcaption>
               <span class="source-path" title=${source.path}>${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
-              ${viewButton(source.path, source.file, source.startLine, source.endLine)}
+              ${viewButtons(source)}
             </figcaption>
             ${source.containers?.length ? html`<div class="source-containers">${source.containers.flatMap((container, i) => [i > 0 ? " › " : null, html`<span key=${i} title=${"call" in container ? container.call : undefined}>${containerText(container)}</span>`])}</div>` : null}
             <pre

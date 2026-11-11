@@ -197,6 +197,7 @@ export const en = {
   "source.back": "Back",
   "source.otherDefinitions": "Other definitions of {name}",
   "source.candidate": "{path}:{line}",
+  "source.viewRow": "View data row",
   "source.viewFile": "View whole file",
   "source.lines": "{count} lines",
   "source.jumpCase": "Jump to a case in this file",

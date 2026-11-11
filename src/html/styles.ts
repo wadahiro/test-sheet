@@ -1806,7 +1806,7 @@ a.link-btn { text-decoration: none; }
 .src-code { flex: 1 0 auto; padding: 0 12px 0 0; background: none; font: inherit; white-space: pre; }
 .src-line-hit { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
 .src-line-focus { outline: 2px solid var(--accent); outline-offset: -2px; }
-.source-view { margin-left: auto; }
+.source-view { margin-left: auto; display: inline-flex; gap: 12px; }
 /* A name in code that leads to its definition: marked without a colour of its own, which the syntax colours already use */
 .src-ref { cursor: pointer; text-decoration: underline dotted var(--fg-muted); text-underline-offset: 2px; }
 .src-ref:hover { text-decoration-style: solid; text-decoration-color: var(--accent); }

@@ -33,14 +33,16 @@ class RotationSpec : FunSpec({
     }
 })`, ["LOGIN-001", "LOGIN-002"]);
   for (const found of [first, second]) {
-    expect(found).toHaveLength(3);
-    expect(found[1].code).toContain("checkBefore(row)");
-    expect(found[2].code).toContain("checkAfter(row)");
-    expect(found[1].containers).toEqual([{ name: "before" }]);
-    expect(found[2].containers).toEqual([{ name: "after" }]);
+    expect(found).toHaveLength(2);
+    expect(found[0].code).toContain("checkBefore(row)");
+    expect(found[1].code).toContain("checkAfter(row)");
+    expect(found[0].containers).toEqual([{ name: "before" }]);
+    expect(found[1].containers).toEqual([{ name: "after" }]);
   }
-  expect(first[0].code).toContain("LOGIN-001");
-  expect(second[0].code).toContain("LOGIN-002");
+  // The row is not part of the code: it is where the viewer opens the data, one row per case
+  expect(first[0].rows).toEqual([{ startLine: 2, endLine: 2 }]);
+  expect(second[1].rows).toEqual([{ startLine: 3, endLine: 3 }]);
+  expect(first.every((snippet) => !snippet.code.includes("LOGIN-001"))).toBe(true);
 });
 
 for (const expression of ["ROWS.filter { it.enabled }.forEach { row ->", "ROWS.sortedBy { it.days }.forEach { row ->"]) {
@@ -64,8 +66,9 @@ ROWS.filter { it.enabled }
 ROWS.forEach { row ->
     checkRow(row)
 }`);
-  expect(found).toHaveLength(2);
-  expect(found[1].code).toBe("ROWS.forEach { row ->\n    checkRow(row)\n}");
+  expect(found).toHaveLength(1);
+  expect(found[0].code).toBe("ROWS.forEach { row ->\n    checkRow(row)\n}");
+  expect(found[0].rows).toEqual([{ startLine: 1, endLine: 1 }]);
 });
 
 test("multiple references on one loop line do not duplicate the body", async () => {
@@ -75,8 +78,8 @@ class Spec {
         checkRow(row)
     }
 }`);
-  expect(found).toHaveLength(2);
-  expect(found[1].code).toContain("checkRow(row)");
+  expect(found).toHaveLength(1);
+  expect(found[0].code).toContain("checkRow(row)");
 });
 
 for (const call of [
@@ -95,10 +98,11 @@ class Spec : FreeSpec({
         checkRow(row)
     }
 })`);
-    expect(found).toHaveLength(2);
-    expect(found[0].code).toContain('Row("LOGIN-001")');
-    expect(found[1].code).toContain(call);
-    expect(found[1].code).toContain("checkRow(row)");
+    expect(found).toHaveLength(1);
+    expect(found[0].code).not.toContain('Row("LOGIN-001")');
+    expect(found[0].rows).toEqual([{ startLine: 2, endLine: 2 }]);
+    expect(found[0].code).toContain(call);
+    expect(found[0].code).toContain("checkRow(row)");
   });
 }
 
@@ -272,4 +276,57 @@ test("a name declared in too many places is dropped rather than linked everywher
   await withTree({ "Spec.kt": `${SPEC}\nval x = commonName()`, ...many }, (index) => {
     expect(index.reachable(["Spec.kt"]).symbols.commonName).toBeUndefined();
   });
+});
+
+const DATA_SPEC = (nameFn: string, row = 'Row("LOGIN-001", "expired certificate", 30)') => `private data class Row(val id: String, val title: String, val days: Int)
+private val ROWS = listOf(
+    ${row},
+)
+class Spec : FunSpec({
+    withTests<Row>(${nameFn}, ROWS) { row ->
+        checkRow(row)
+    }
+})`;
+
+for (const [form, nameFn, expected] of [
+  ["a property reference", "Row::title", "expired certificate"],
+  ["a lambda returning a property", "{ it.title }", "expired certificate"],
+  ["a lambda with its own parameter", "{ row -> row.title }", "expired certificate"],
+  ["a template over properties, without the ID it starts with", '{ "${it.id}: ${it.title} (${it.days} days)" }', "expired certificate (30 days)"],
+  ["a function it cannot read", "::leafName", undefined],
+  ["a template calling something", '{ "${describe(it)}" }', undefined],
+] as const) {
+  test(`a leaf test over data is named from its row: ${form}`, async () => {
+    const [found] = await snippets(DATA_SPEC(nameFn));
+    expect(found).toHaveLength(1);
+    expect(found[0].title).toBe(expected);
+  });
+}
+
+test("a name that is not a literal in the row is not made up", async () => {
+  const [found] = await snippets(DATA_SPEC("Row::title", 'Row("LOGIN-001", titleFor(1), 30)'));
+  expect(found[0].title).toBeUndefined();
+});
+
+test("a test that is named by the ID is its own test, not a row of data", async () => {
+  const [found] = await snippets(`class Spec : FunSpec({
+    test("LOGIN-001: can log in") { check() }
+})`);
+  expect(found).toHaveLength(1);
+  expect(found[0].rows).toBeUndefined();
+  expect(found[0].title).toBe("can log in");
+});
+
+test("a multi-line string name that heads several IDs is the test's name, not a row of data", async () => {
+  for (const lead of ["test\n", ""]) {
+    const [first, middle] = await snippets(
+      `class S : FunSpec({\n    ${lead}    ("""AAA-019, AAA-065, AAA-066: shows the total\n            |on two lines""".trimMargin()) {\n        check()\n    }\n})\n`,
+      ["AAA-019", "AAA-065"],
+    );
+    for (const found of [first[0], middle[0]]) {
+      expect(found.rows).toBeUndefined();
+      expect(found.title).toBe("shows the total on two lines");
+      expect(found.code).toContain("check()");
+    }
+  }
 });

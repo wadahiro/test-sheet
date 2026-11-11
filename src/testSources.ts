@@ -21,6 +21,11 @@ export interface SourceSnippet {
   containers?: SourceContainer[];
   /** What the test checks, as its own name says it (its @DisplayName or Kotest name, without the case ID); absent when the name cannot be read */
   title?: string;
+  /**
+   * The row(s) of data this case is made from, in the same file, when the code shown is a test that runs
+   * over data. The code is then only the test; the row is for the viewer to open and mark in its table.
+   */
+  rows?: { startLine: number; endLine: number }[];
 }
 
 /** What a test sits inside, outermost first: a named container, or a call that makes one container per element of some data */
@@ -278,64 +283,73 @@ function loopsOver(shape: FileShape, text: string, name: string, declaration: Br
   return [...blocks.values()];
 }
 
-const onlyBlankBetween = (lines: string[], from: number, to: number): boolean => lines.slice(from + 1, to).every((line) => line.trim() === "");
+/** Calls and annotations that name a test; an ID in their argument is the test's own name, not a row of data */
+const TEST_CALLS = /\b(?:x?test|it|should|then|context|describe|given|when|and|feature|scenario|expect)\s*$/;
+const DATA_ANNOTATIONS = /^\s*@(?:\w+\.)*(?:CsvSource|CsvFileSource|ValueSource|MethodSource|ArgumentsSource|EnumSource|FieldSource)\b/;
+
+/** One snippet to show: the test, and for a test over data the row the case is made from */
+interface SnippetPlan {
+  body: LineRange;
+  row?: LineRange;
+  /** The lambda that is the test body, whose call says how each row is named */
+  lambda?: BracketPair;
+  /** The row's constructor call, for reading what its columns hold */
+  element?: BracketPair;
+}
 
 /**
- * The line ranges to show for an ID at `offset`. An ID in what introduces a test (an annotation, its name,
- * a test-name string) gets that test's body. An ID in data gets its row and the test the data feeds: the
- * block right after the call (`withData(…) { }`, an annotated method), or, for data held in a variable,
- * the block that loops over it in the same file. Anything else gets a window around the hit.
+ * What to show for an ID at `offset`. An ID in what introduces a test (an annotation, its name, a test-name
+ * string) gets that test's body. An ID in data gets the test the data feeds, with the row it is in kept
+ * apart: the block right after the call (`withData(…) { }`, an annotated method), or, for data held in a
+ * variable, each block that loops over it in the same file. Anything else gets a window around the hit.
  */
-function snippetRanges(shape: FileShape, text: string, offset: number): LineRange[] {
+function snippetRanges(shape: FileShape, text: string, offset: number): SnippetPlan[] {
   const { lines, starts } = shape;
   const hitLine = lineOf(starts, offset);
-  const window = [{ start: Math.max(0, hitLine - WINDOW_LINES), end: Math.min(lines.length - 1, hitLine + WINDOW_LINES) }];
+  const window: SnippetPlan[] = [{ body: { start: Math.max(0, hitLine - WINDOW_LINES), end: Math.min(lines.length - 1, hitLine + WINDOW_LINES) } }];
 
   const data = enclosingData(shape, offset);
   if (!data) {
     const body = bodyBelow(shape, offset);
-    return body ? [withLeadIn(lines, { start: hitLine, end: lineOf(starts, body.close) })] : window;
+    return body ? [{ body: withLeadIn(lines, { start: hitLine, end: lineOf(starts, body.close) }) }] : window;
   }
 
   const dataStart = lineOf(starts, data.open);
   const dataEnd = lineOf(starts, data.close);
-  const head = withLeadIn(lines, { start: dataStart, end: dataEnd });
-  // The row is the item of the data that holds the ID, so a long list is not shown whole
-  const item = shape.all.filter((pair) => contains(pair, offset) && contains(data, pair.open)).shift();
-  const row = item ? { start: lineOf(starts, item.open), end: lineOf(starts, item.close) } : { start: hitLine, end: hitLine };
-  const joined = (body: LineRange): LineRange[] => {
-    if (body.end - head.start + 1 <= MAX_SNIPPET_LINES) return [{ start: head.start, end: body.end }];
-    return row.start >= body.start && row.end <= body.end ? [body] : [row, body];
-  };
+  // The row is the outermost call inside the data that holds the ID, so a long list is not shown whole
+  const element = shape.all.find((pair) => pair.kind === "(" && contains(pair, offset) && contains(data, pair.open) && !shape.all.some((outer) => contains(outer, pair.open) && contains(data, outer.open)));
+  const row = element ? { start: lineOf(starts, element.open), end: lineOf(starts, element.close) } : { start: hitLine, end: hitLine };
 
   // A block right after the closing parenthesis is the call's trailing lambda: the test the data feeds
   const trailing = shape.braces.find((pair) => pair.open > data.close);
-  if (trailing && /^[ \t]*\n?[ \t]*$/.test(text.slice(data.close + 1, trailing.open))) {
-    return joined({ start: lineOf(starts, data.close), end: lineOf(starts, trailing.close) });
-  }
+  const hasTrailing = !!trailing && /^[ \t]*\n?[ \t]*$/.test(text.slice(data.close + 1, trailing.open));
+  const before = text.slice(starts[dataStart], data.open);
+  // `test(` may sit on the line above, or the string stand alone: a parenthesis that opens on a string is a name, not rows
+  const namedAbove = before.trim() === "" && (TEST_CALLS.test(lines[dataStart - 1] ?? "") || text.slice(data.open + 1).trimStart().startsWith('"'));
+  const named = TEST_CALLS.test(before) || namedAbove;
+  if (hasTrailing && named) return [{ body: withLeadIn(lines, { start: dataStart, end: lineOf(starts, trailing!.close) }) }];
+  if (hasTrailing) return [{ body: { start: lineOf(starts, data.close), end: lineOf(starts, trailing!.close) }, row, lambda: trailing, element }];
 
   if (isAnnotation(lines[dataStart])) {
     const body = bodyBelow(shape, data.close + 1);
-    return body ? joined({ start: dataEnd + 1, end: lineOf(starts, body.close) }) : window;
+    if (!body) return window;
+    // @DisplayName("ID …") names the test; only the annotations that feed it values are data
+    if (!DATA_ANNOTATIONS.test(lines[dataStart])) return [{ body: withLeadIn(lines, { start: dataStart, end: lineOf(starts, body.close) }) }];
+    return [{ body: { start: dataEnd + 1, end: lineOf(starts, body.close) }, row, element }];
   }
 
   const name = declaredName(text.slice(starts[dataStart], data.open));
   if (!name) {
     // A call nobody keeps is the test itself: `it("ID", () => { })`, `t.Run("ID", func…{ })`, `test("ID").config(…) { }`
     const inside = bodyBelow(shape, offset);
-    if (inside) return [withLeadIn(lines, { start: hitLine, end: lineOf(starts, inside.close) })];
+    if (inside) return [{ body: withLeadIn(lines, { start: hitLine, end: lineOf(starts, inside.close) }) }];
     const after = bodyBelow(shape, data.close + 1);
-    return after ? joined({ start: dataEnd, end: lineOf(starts, after.close) }) : window;
+    return after ? [{ body: { start: dataEnd, end: lineOf(starts, after.close) }, row, lambda: after, element }] : window;
   }
   const loops = loopsOver(shape, text, name, data);
   if (loops.length === 0) return window;
-  const ranges = loops.map((loop) => withLeadIn(lines, { start: lineOf(starts, loop.open), end: lineOf(starts, loop.close) }));
-  if (ranges.length === 1) {
-    const loopRange = ranges[0];
-    return loopRange.start > dataEnd && onlyBlankBetween(lines, dataEnd, loopRange.start) ? joined(loopRange) : [row, loopRange];
-  }
   // The predicates are arbitrary code, so every consumer is shown rather than guessing which runs a row.
-  return [row, ...ranges];
+  return loops.map((loop) => ({ body: withLeadIn(lines, { start: lineOf(starts, loop.open), end: lineOf(starts, loop.close) }), row, lambda: loop, element }));
 }
 
 function escapeRegExp(value: string): string {
@@ -430,6 +444,25 @@ function splitArguments(text: string): string[] {
 const MAX_SHOWN_NAMES = 6;
 const withoutComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 
+const isNamedArgument = (arg: string): boolean => /^\w+\s*=(?!=)/.test(arg);
+
+/**
+ * What an element (`Plan("無料プラン", 1)`) holds for a property of its type (`name`), when it is written there
+ * as a string or number literal: by name (`name = "…"`) or by position in the type's constructor.
+ */
+function propertyValue(file: SourceFile, element: BracketPair, parameters: (string | undefined)[], property: string): string | undefined {
+  const index = parameters.indexOf(property);
+  if (index < 0) return undefined;
+  const given = splitArguments(withoutComments(file.text.slice(element.open + 1, element.close)));
+  const value = given.find((arg) => new RegExp(`^${escapeRegExp(property)}\\s*=(?!=)`).test(arg))?.replace(/^\w+\s*=\s*/, "") ?? given.filter((arg) => !isNamedArgument(arg))[index];
+  return value?.match(/^"((?:[^"\\$]|\\.)*)"$/)?.[1] ?? value?.match(/^-?\d+(?:\.\d+)?$/)?.[0];
+}
+
+/** The constructor's parameter names, in order */
+function constructorParameters(type: TypeDeclaration): (string | undefined)[] {
+  return splitArguments(withoutComments(type.file.text.slice(type.parameters.open + 1, type.parameters.close))).map((parameter) => parameter.match(/(\w+)\s*:/)?.[1]);
+}
+
 /**
  * The names the elements of `declaration` give to their containers, when each element is a constructor
  * call of `typeName` and the property that names it (`Plan::name`) is a string literal there. All or
@@ -438,9 +471,7 @@ const withoutComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\/
 function elementNames(declaration: DataDeclaration, typeName: string, property: string, files: SourceFile[], shapes: Map<SourceFile, FileShape>): string[] | undefined {
   const type = typeDeclaration(typeName, declaration.file, files, shapes);
   if (!type) return undefined;
-  const parameters = splitArguments(withoutComments(type.file.text.slice(type.parameters.open + 1, type.parameters.close)));
-  const index = parameters.findIndex((parameter) => parameter.match(/(\w+)\s*:/)?.[1] === property);
-  if (index < 0) return undefined;
+  const parameters = constructorParameters(type);
   const { file, shape, literal } = declaration;
   const elements = shape.all.filter(
     (pair) =>
@@ -452,13 +483,40 @@ function elementNames(declaration: DataDeclaration, typeName: string, property: 
   if (elements.length === 0 || elements.length > MAX_SHOWN_NAMES) return undefined;
   const names: string[] = [];
   for (const element of elements.sort((a, b) => a.open - b.open)) {
-    const given = splitArguments(withoutComments(file.text.slice(element.open + 1, element.close)));
-    const value = given.find((arg) => new RegExp(`^${escapeRegExp(property)}\\s*=(?!=)`).test(arg))?.replace(/^\w+\s*=\s*/, "") ?? given.filter((arg) => !/^\w+\s*=(?!=)/.test(arg))[index];
-    const literalText = value?.match(/^"((?:[^"\\$]|\\.)*)"$/)?.[1];
-    if (literalText === undefined) return undefined;
-    names.push(literalText);
+    const value = propertyValue(file, element, parameters, property);
+    if (value === undefined || value.includes("\\")) return undefined;
+    names.push(value);
   }
   return names;
+}
+
+interface DataCall {
+  head: string;
+  call: string;
+  /** The argument that names each element (`Plan::name`, `{ "${it.id}: …" }`), when there is one */
+  nameFunction?: string;
+  /** The argument that is the data (`PLANS`) */
+  data?: string;
+}
+
+/** `withContexts<Plan>(Plan::name, PLANS) { plan -> … }` read at its lambda, across lines if need be */
+function dataCall(file: SourceFile, shape: FileShape, lambda: BracketPair): DataCall | undefined {
+  const before = file.text.slice(0, lambda.open).trimEnd();
+  if (!before.endsWith(")")) return undefined;
+  const paren = shape.all.find((pair) => pair.kind === "(" && pair.close === before.length - 1);
+  const head = paren ? file.text.slice(0, paren.open).match(/\b(withContexts|withData|withTests)(<[^>]*>)?\s*$/) : null;
+  if (!paren || !head) return undefined;
+
+  const args = splitArguments(file.text.slice(paren.open + 1, paren.close));
+  const named = (...keys: string[]) => args.find((arg) => keys.some((key) => new RegExp(`^${key}\\s*=(?!=)`).test(arg)))?.replace(/^\w+\s*=\s*/, "");
+  const positional = args.filter((arg) => !isNamedArgument(arg));
+  const namedData = named("ts", "tests", "data");
+  return {
+    head: head[1],
+    call: `${head[1]}${head[2] ?? ""}(${args.join(", ")})`.replace(/\s+/g, " "),
+    data: namedData ?? positional.at(-1),
+    nameFunction: named("nameFn") ?? (namedData !== undefined || positional.length > 1 ? positional[0] : undefined),
+  };
 }
 
 /**
@@ -467,21 +525,9 @@ function elementNames(declaration: DataDeclaration, typeName: string, property: 
  * are read from the data only when they are written there.
  */
 function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPair, files: SourceFile[], shapes: Map<SourceFile, FileShape>): SourceContainer | undefined {
-  const before = file.text.slice(0, lambda.open).trimEnd();
-  if (!before.endsWith(")")) return undefined;
-  const paren = shape.all.find((pair) => pair.kind === "(" && pair.close === before.length - 1);
-  const head = paren ? file.text.slice(0, paren.open).match(/\b(withContexts|withData|withTests)(<[^>]*>)?\s*$/) : null;
-  if (!paren || !head) return undefined;
-
-  const args = splitArguments(file.text.slice(paren.open + 1, paren.close));
-  const call = `${head[1]}${head[2] ?? ""}(${args.join(", ")})`.replace(/\s+/g, " ");
-  const isNamed = (arg: string) => /^\w+\s*=(?!=)/.test(arg);
-  const named = (...keys: string[]) => args.find((arg) => keys.some((key) => new RegExp(`^${key}\\s*=(?!=)`).test(arg)))?.replace(/^\w+\s*=\s*/, "");
-  const positional = args.filter((arg) => !isNamed(arg));
-  const namedData = named("ts", "tests", "data");
-  const data = namedData ?? positional.at(-1);
-  const nameFunction = named("nameFn") ?? (namedData !== undefined || positional.length > 1 ? positional[0] : undefined);
-
+  const parsed = dataCall(file, shape, lambda);
+  if (!parsed) return undefined;
+  const { call, data, nameFunction } = parsed;
   const each = data?.match(/^([A-Za-z_]\w*)(?:\s*\.|$)/)?.[1];
   const reference = nameFunction?.match(/^([A-Za-z_]\w*)?::([A-Za-z_]\w*)$/);
   const declaration = each ? dataDeclaration(each, file, files, shapes) : undefined;
@@ -489,9 +535,49 @@ function dynamicContainer(file: SourceFile, shape: FileShape, lambda: BracketPai
   return { call, ...(each ? { each } : {}), ...(reference ? { by: reference[0] } : {}), ...(names ? { names } : {}) };
 }
 
+/**
+ * What the leaf test made from one row is called, when the call that runs the rows names them in a form
+ * that can be read without running it: a property (`Plan::name`, `{ it.title }`) or a string template over
+ * properties (`{ "${it.title} for ${it.plan}" }`), whose values are literals in the row. Anything else,
+ * such as `::leafName`, a function, has no name here: one is never made up.
+ */
+function dataTitle(file: SourceFile, shape: FileShape, plan: SnippetPlan, id: string, files: SourceFile[], shapes: Map<SourceFile, FileShape>): string | undefined {
+  if (!plan.lambda || !plan.element) return undefined;
+  const nameFunction = dataCall(file, shape, plan.lambda)?.nameFunction?.trim();
+  const typeName = file.text.slice(shape.starts[lineOf(shape.starts, plan.element.open)], plan.element.open).match(/\b([A-Z]\w*)\s*$/)?.[1];
+  const type = typeName ? typeDeclaration(typeName, file, files, shapes) : undefined;
+  if (!nameFunction || !typeName || !type) return undefined;
+  const parameters = constructorParameters(type);
+  const valueOf = (property: string) => propertyValue(file, plan.element!, parameters, property);
+
+  const reference = nameFunction.match(/^([A-Za-z_]\w*)::([A-Za-z_]\w*)$/);
+  let named: string | undefined;
+  if (reference) {
+    named = reference[1] === typeName ? valueOf(reference[2]) : undefined;
+  } else {
+    const lambda = nameFunction.match(/^\{\s*(?:(\w+)\s*->\s*)?([\s\S]*?)\s*\}$/);
+    if (!lambda) return undefined;
+    const parameter = lambda[1] ?? "it";
+    const body = lambda[2].trim();
+    const property = body.match(new RegExp(`^${parameter}\\.(\\w+)$`))?.[1];
+    const template = body.match(/^"((?:[^"\\]|\\.)*)"$/)?.[1];
+    if (property) named = valueOf(property);
+    else if (template !== undefined) {
+      let readable = true;
+      const filled = template.replace(/\$\{\s*(\w+)\.(\w+)\s*\}|\$\{[^}]*\}|\$\w+/g, (piece, owner: string | undefined, name: string | undefined) => {
+        const value = owner === parameter && name ? valueOf(name) : undefined;
+        if (value === undefined) readable = false;
+        return value ?? piece;
+      });
+      named = readable ? filled.replace(/\\(.)/g, "$1") : undefined;
+    }
+  }
+  return named === undefined ? undefined : withoutLeadingId(named, id);
+}
+
 function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
   let shape: FileShape | null = null;
-  const taken = new Map<string, LineRange[]>();
+  const taken = new Map<string, { range: LineRange; snippet: SourceSnippet }[]>();
 
   for (const match of file.text.matchAll(pattern)) {
     const id = match[1];
@@ -500,12 +586,16 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       shape = shapes.get(file) ?? fileShape(file.text);
       shapes.set(file, shape);
     }
-    for (const range of snippetRanges(shape, file.text, match.index!)) {
-      // Two hits in one method (annotation and name) are one snippet
+    for (const plan of snippetRanges(shape, file.text, match.index!)) {
+      const range = plan.body;
+      // Two hits in one method (annotation and name) are one snippet, and so are two rows of data feeding one test
       const seen = taken.get(id) ?? [];
-      if (seen.some((other) => range.start >= other.start && range.end <= other.end)) continue;
-      seen.push(range);
-      taken.set(id, seen);
+      const same = seen.find((other) => range.start >= other.range.start && range.end <= other.range.end);
+      if (same) {
+        const more = plan.row && { startLine: plan.row.start + 1, endLine: plan.row.end + 1 };
+        if (more && !same.snippet.rows?.some((row) => row.startLine === more.startLine && row.endLine === more.endLine)) same.snippet.rows = [...(same.snippet.rows ?? []), more];
+        continue;
+      }
 
       const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
@@ -526,7 +616,8 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
       });
       const snippet: SourceSnippet = {
         containers,
-        title: testTitle(shape.lines, range, id),
+        title: plan.row ? dataTitle(file, shape, plan, id, files, shapes) : testTitle(shape.lines, range, id),
+        ...(plan.row ? { rows: [{ startLine: plan.row.start + 1, endLine: plan.row.end + 1 }] } : {}),
         file: shown,
         path: posix.join(file.shownBase, shown),
         startLine: range.start + 1,
@@ -534,6 +625,8 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
         code: shape.lines.slice(range.start, end + 1).join("\n"),
         truncated,
       };
+      seen.push({ range, snippet });
+      taken.set(id, seen);
       into.set(id, [...(into.get(id) ?? []), snippet]);
     }
   }
@@ -544,6 +637,7 @@ const NAME_FORMS = [
   new RegExp(`@DisplayName\\s*\\(\\s*${STRING}\\s*\\)`),
   new RegExp(`^\\s*(?:x?test|it|should|then)\\s*\\(\\s*${STRING}`, "m"),
   new RegExp(`^\\s*${STRING}\\s*(?:-\\s*)?\\{`, "m"),
+  /^\s*(?:(?:x?test|it|should|then|context|describe)\s*)?\(\s*"""([\s\S]*?)"""/m,
   /\bfun\s+`([^`]+)`/,
 ];
 
@@ -557,7 +651,16 @@ function testTitle(lines: string[], range: LineRange, id: string): string | unde
   const idPattern = new RegExp(`(?<![\\w-])${escapeRegExp(id)}(?![\\w-])`);
   const named = NAME_FORMS.map((form, i) => ({ name: text.match(form)?.[1], display: i === 0 })).find((found) => found.name !== undefined && (found.display || idPattern.test(found.name)));
   if (!named?.name) return undefined;
-  const title = named.name.replace(/\\(.)/g, "$1").replace(new RegExp(`^\\s*\\[?${escapeRegExp(id)}\\]?\\s*[:：,\\-–—.]?\\s*`), "").trim();
+  const plain = named.name.replace(/\\(.)/g, "$1").replace(/^[ \t]*\|/gm, "").replace(/\s*\n\s*/g, " ");
+  return withoutLeadingId(plain, id);
+}
+
+/** A name without the case ID it starts with, which the sheet already shows; nothing when that was all it said */
+function withoutLeadingId(name: string, id: string): string | undefined {
+  // A name may head several IDs ("A-1, A-2: …"); they are all the sheet's, so none of them is the sentence
+  const run = name.match(/^\s*(?:\[?[A-Z][A-Z0-9]*-\d+\]?\s*[,、&/]?\s*)+[:：\-–—.]?\s*/);
+  if (run && new RegExp(`(?<![\\w-])${escapeRegExp(id)}(?![\\w-])`).test(run[0])) return name.slice(run[0].length).trim() || undefined;
+  const title = name.replace(new RegExp(`^\\s*\\[?${escapeRegExp(id)}\\]?\\s*[:：,\\-–—.]?\\s*`), "").trim();
   return title === "" ? undefined : title;
 }
 

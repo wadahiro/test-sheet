@@ -206,11 +206,10 @@ does not show your home directory. The ID can be in:
 - the test's name or an annotation (`"LOGIN-001: …" { }`, `@DisplayName("LOGIN-001 …")`): that
   test is shown
 - data passed straight to a test (`withData(Case("LOGIN-001", …)) { }`, `@CsvSource({"LOGIN-001, …"})`,
-  `@ValueSource(strings = ["LOGIN-001"])`): the data and the test it feeds
+  `@ValueSource(strings = ["LOGIN-001"])`): the test it feeds, with the row kept apart (see below)
 - data in a variable that a loop in the same file goes over (`val cases = listOf(Case("LOGIN-001", …))`
   and later `cases.forEach { … }`, `withTests(cases) { … }`, `withContexts(cases) { … }` or
-  `withData(cases) { … }`): the row holding the ID and every matching loop. With one
-  adjacent loop they share a snippet; otherwise the row and loops are separate snippets. Inline
+  `withData(cases) { … }`): every matching loop, each with the row holding the ID kept apart. Inline
   blocks in expressions such as `ROWS.filter { … }.forEach {` are skipped when locating the
   multiline loop body. When several loops consume the same variable, all are shown for every ID
   because their predicates cannot be evaluated statically. Kotest calls with name functions such as
@@ -225,8 +224,16 @@ about, and so is a `manual` case that some test code does mention.
 
 Each snippet starts with what the test checks, as a sentence: the test's `@DisplayName`, or the name it
 is declared with (a Kotest string such as `test("LOGIN-001: …")`, a backticked Kotlin function), without
-the case ID it starts with. A row of data, or a name built at run time, has no name that can be read, so no sentence is made
-up for it. The Markdown copy of a case carries that sentence and the code, and nothing else of the snippet.
+the case ID it starts with.
+
+A test that runs over data shows only the test. The row of data the case is made from is not part of
+the code: **View data row** opens the file with the row marked, and **View whole file** opens it on the test
+with the row marked as well. Such a test is named from its row where that can be read without running it:
+a property (`withTests(Row::title, ROWS)`, `{ it.title }`, `{ row -> row.title }`) or a string template over
+properties (`{ "${it.id}: ${it.title} (${it.days} days)" }`) whose values are written in the row as string or
+number literals, with the case ID it starts with dropped. Anything else, such as a function (`::leafName`) or a
+value that is not a literal, has no name that can be read, so no sentence is made up for it. The Markdown copy of
+a case carries the sentence and the code, and nothing else of the snippet.
 
 Finding the code behind a case is matching, so it can miss a helper or what a test calls. Each
 snippet has **View whole file**, which opens the file

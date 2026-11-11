@@ -186,6 +186,7 @@ export const ja: Record<MessageKey, string> = {
   "source.back": "戻る",
   "source.otherDefinitions": "{name} の別の定義",
   "source.candidate": "{path}:{line}",
+  "source.viewRow": "データの行を見る",
   "source.viewFile": "ファイル全体を見る",
   "source.lines": "{count} 行",
   "source.jumpCase": "ファイル内のケースへ",
