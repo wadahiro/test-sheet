@@ -689,8 +689,27 @@ body {
   gap: 8px;
 }
 
-/* Not sticky: the filter bar's height is fixed and the sticky offsets below it count on that, so these scroll away and the picker's badge keeps the filter visible */
 .filter-chips { padding: 8px 0; }
+
+/*
+ * A scope page keeps the pickers and the search together as it scrolls. The search row inside is a fixed
+ * height; the chips above it wrap, so the page measures the whole bar into --filter-h and the table
+ * head's offset is built from that.
+ */
+.scope-bar {
+  position: sticky;
+  top: var(--stick-top);
+  z-index: 12;
+  margin: 0 -32px;
+  padding: 0 32px;
+  background: var(--bg);
+}
+.scope-bar .filter-bar {
+  position: static;
+  height: var(--filter-h-min, 56px);
+  margin: 0;
+  padding: 0;
+}
 
 .plan-label {
   font-size: 0.8rem;

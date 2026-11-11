@@ -2536,6 +2536,19 @@ function ScopePage({
   const [partFilter, setPartFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [methodFilter, setMethodFilter] = useState<string[]>([]);
+  // The pickers and chips stay in view with the search; how tall they are depends on how the chips wrap,
+  // so the offsets below them (--filter-h) follow the measured height
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const measure = () => setBarHeight(bar.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [!!resolved && window.__SUITES__.length > 0]);
   const scopeHash = scopeHashFor(route.scope);
   // The parts on offer belong to the page, so a choice made on another one would only hide everything here
   useEffect(() => setPartFilter([]), [scopeHash]);
@@ -2607,9 +2620,10 @@ function ScopePage({
   };
 
   return html`
-    <section class="overview scope-page" id=${resolved.anchorId}>
+    <section class="overview scope-page" id=${resolved.anchorId} style=${{ "--filter-h": barHeight > 0 ? `${barHeight}px` : undefined }}>
       <details class="layer-summary"><summary>${t("layer.summary")}</summary><table><thead><tr><th>${t("col.suite")}</th><th>${t("layer.summary")}</th></tr></thead><tbody>${resolved.suites.map((suite) => html`<tr><th>${suite.typeName}</th><td>${layerSummary(scopeRows.filter((row) => row.idPrefix === suite.idPrefix).map((row) => row.tc), suite.layers)}</td></tr>`)}</tbody></table></details>
       <div class="scope-table-wrap">
+        <div class="scope-bar" ref=${barRef}>
         ${html`<div class="plan-range filter-chips">
               <span class="plan-label" title=${t("filter.byHelp")}>${t("filter.by")}</span>
               <${MultiPicker}
@@ -2647,6 +2661,7 @@ function ScopePage({
               getText=${() => overviewToMarkdown(visibleRows, resolved.title)}
             />
           </div>
+        </div>
         </div>
         ${visibleRows.length === 0
           ? html`<p class="empty">${t("filter.none")}</p>`
