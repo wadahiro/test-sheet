@@ -50,6 +50,8 @@ export interface SourceIndex {
    * a renamed test is noticed, a same-named method somewhere else is not told apart.
    */
   hasTest(name: string): boolean;
+  /** A file's whole text by the `path` a snippet carries, for the page to show it in full */
+  fileText(path: string): string | undefined;
 }
 
 const MAX_FILE_BYTES = 1_000_000;
@@ -446,5 +448,6 @@ export async function buildSourceIndex(patterns: string[], ids: string[]): Promi
       });
     }
   }
-  return { snippetsFor: (id) => found.get(id) ?? [], hasTest: (name) => mentionsTest(files, name) };
+  const byPath = new Map(files.map((file) => [posix.join(file.shownBase, relative(file.base, file.path).replaceAll("\\", "/")), file.text]));
+  return { snippetsFor: (id) => found.get(id) ?? [], hasTest: (name) => mentionsTest(files, name), fileText: (path) => byPath.get(path) };
 }

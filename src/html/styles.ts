@@ -1771,6 +1771,43 @@ a.link-btn { text-decoration: none; }
 .hljs-meta, .hljs-attr, .hljs-attribute, .hljs-tag, .hljs-name { color: var(--syn-annotation); }
 .hljs-meta .hljs-string { color: var(--syn-string); }
 .hljs-comment, .hljs-quote, .hljs-doctag { color: var(--fg-muted); font-style: italic; }
+/* The whole file over the page. The case card is a container-query box, so this is mounted on <body> and sized to the window */
+.source-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--overlay);
+}
+.source-viewer-frame {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+.source-viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-chrome); font-size: 0.85rem; }
+.source-viewer-bar .source-path { min-width: 0; flex: 1 1 240px; }
+.source-viewer-count { color: var(--fg-muted); white-space: nowrap; }
+.source-viewer-jump { max-width: 280px; padding: 3px 6px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
+.source-viewer-close { width: 28px; height: 28px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--bg); color: var(--fg); cursor: pointer; }
+.source-viewer-close:focus-visible, .source-viewer-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.source-viewer-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 0; font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace; }
+.src-line { display: flex; min-height: 1.5em; line-height: 1.5; }
+.src-no { flex: 0 0 4.5em; padding-right: 12px; text-align: right; color: var(--fg-muted); user-select: none; }
+.src-code { flex: 1 0 auto; padding: 0 12px 0 0; background: none; font: inherit; white-space: pre; }
+.src-line-hit { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
+.src-line-focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.source-view { margin-left: auto; }
+
 .source-missing { margin: 4px 0 0; font-size: 0.85rem; color: var(--fg-muted); }
 
 .test-case-meta {

@@ -3,6 +3,7 @@
 
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { gzipSync } from "zlib";
 import { Marked } from "marked";
 import type { TestSuiteTestCases } from "../testCases";
 import { STYLES } from "./styles";
@@ -238,6 +239,20 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
     })
   );
 
+  // Each file once, however many cases show a piece of it, and only those a case shows. gzip, then base64:
+  // the page is UTF-8 text, which cannot carry the bytes as they are, and base85-style codes save too little to be worth their own decoder
+  const sourceFiles: Record<string, string> = {};
+  for (const suite of pageSuites) {
+    for (const tc of suite.testCases) {
+      for (const snippet of tc.sources ?? []) {
+        for (const path of [snippet.path, ...(snippet.definitions ?? []).map((item) => item.path)]) {
+          const text = sources?.fileText(path);
+          if (text !== undefined) sourceFiles[path] = gzipSync(text, { level: 9 }).toString("base64");
+        }
+      }
+    }
+  }
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -260,9 +275,11 @@ export async function generateHtml(suites: TestSuiteTestCases[], options: Genera
 <div id="app"></div>
 <script type="application/json" id="test-case-data">${jsonForScript(pageSuites)}</script>
 <script type="application/json" id="locale-data">${jsonForScript(locales)}</script>
+<script type="application/json" id="source-files">${jsonForScript(sourceFiles)}</script>
 <script type="module">
 window.__SUITES__ = JSON.parse(document.getElementById("test-case-data").textContent);
 window.__LOCALES__ = JSON.parse(document.getElementById("locale-data").textContent);
+window.__SOURCE_FILES__ = JSON.parse(document.getElementById("source-files").textContent);
 window.__LIVE_RELOAD__ = ${liveReload};
 ${bundledJs}
 </script>

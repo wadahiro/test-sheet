@@ -223,6 +223,14 @@ ID built at run time (`"LOGIN-00$n"`), shows the lines around the ID, or nothing
 appears as written. A case marked `automated` or `semi` that no test code mentions is warned
 about, and so is a `manual` case that some test code does mention.
 
+Finding the code behind a case is matching, so it can miss a helper or what a test calls. Each
+snippet (and each type or data declaration under it) has **View whole file**, which opens the file
+in full over the page, with the lines the case showed marked and the view opened on them. A menu
+in its header jumps to the other cases the file mentions, and Esc closes it. The file text is
+embedded once however many cases show a piece of it, and only for files a case shows, gzipped and
+base64-encoded and unpacked when opened, so the generated page grows by those files and nothing else. Only files `--tests` read can be opened; code
+elsewhere (another module, a page object) is not in the page.
+
 For CI, `--strict` with `--out` writes the file and then exits with status 1 if anything was
 warned about, for example a suite that failed to load, a mismatch between `automation` and the
 test code, a `semi` case without `automation_note`, a missing guide file or a bad autolink rule.

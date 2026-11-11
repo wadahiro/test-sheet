@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, useContext } from "p
 import htmBind from "htm";
 import { formatPreconditions, formatTestData, preconditionText } from "./caseFormat";
 import { caseRunKey, deleteRunData, emptyPlan, planKey, readPlan, readRunIndex, recordedCaseIds, rereadRunIndex, runIndexKey, runImagePrefix, runNamespace, todayStamp, touchRun, withNewRun, withoutRun, withRenamedRun, writePlan, writeRunIndex, type Decision, type Plan, type RunIndex, type RunMeta } from "./runStore";
-import { highlightHtml } from "./highlight";
+import { highlightHtml, highlightLines } from "./highlight";
 import type { Layers } from "../testCases";
 import type { SourceSnippet } from "../testSources";
 import type { CoveredBy, Dropped } from "../coverage";
@@ -104,6 +104,8 @@ declare global {
     __LIVE_RELOAD__: boolean;
     /** Languages supplied with `--locale`, on top of the built-in ones */
     __LOCALES__?: LocaleDefinition[];
+    /** Each test file a case shows a piece of, gzipped and base64-encoded, by the path the snippet carries */
+    __SOURCE_FILES__?: Record<string, string>;
   }
 }
 
@@ -1170,8 +1172,155 @@ function HighlightedCode({ code, file }: { code: string; file: string }) {
   return colored === null ? html`<code>${code}</code>` : html`<code dangerouslySetInnerHTML=${{ __html: colored }} />`;
 }
 
+const sourceTexts = new Map<string, Promise<string>>();
+
+/** The text of an embedded test file, unpacked on first use; undefined when the page does not hold it */
+function readSourceFile(path: string): Promise<string> | undefined {
+  const packed = window.__SOURCE_FILES__?.[path];
+  if (packed === undefined) return undefined;
+  let text = sourceTexts.get(path);
+  if (!text) {
+    const bytes = Uint8Array.from(atob(packed), (char) => char.charCodeAt(0));
+    text = new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+    sourceTexts.set(path, text);
+  }
+  return text;
+}
+
+interface SourceView {
+  path: string;
+  file: string;
+  /** The lines the case's snippet covers, which the viewer marks and opens on */
+  start: number;
+  end: number;
+}
+
+/**
+ * A test file in full, with the part the case showed marked. Finding the code that belongs to a case
+ * is matching, so it can miss helpers and what a test calls; this lets the reader follow them.
+ */
+function SourceViewer({ view, onClose }: { view: SourceView; onClose: () => void }) {
+  // null while unpacking, undefined when the file cannot be shown
+  const [text, setText] = useState<string | undefined | null>(null);
+  useEffect(() => {
+    let current = true;
+    setText(null);
+    const pending = readSourceFile(view.path);
+    if (!pending) setText(undefined);
+    else pending.then((value) => current && setText(value), () => current && setText(undefined));
+    return () => {
+      current = false;
+    };
+  }, [view.path]);
+  const lines = useMemo(() => {
+    if (text === undefined || text === null) return [];
+    const colored = highlightLines(text, view.file);
+    const plain = text.split("\n");
+    // A final newline ends the last line rather than starting an empty one
+    if (plain.length > 1 && plain[plain.length - 1] === "") plain.pop();
+    return plain.map((line, i) => ({ plain: line, colored: colored?.[i] }));
+  }, [text, view.file]);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState<number | null>(null);
+
+  const goTo = (line: number) => {
+    const body = bodyRef.current;
+    const row = body?.querySelector<HTMLElement>(`[data-line="${line}"]`);
+    // Not scrollIntoView: it would move the page behind as well
+    if (body && row) body.scrollTop = row.offsetTop - body.clientHeight / 3;
+  };
+  useEffect(() => goTo(view.start), [text, view.start]);
+
+  const casesHere = useMemo(() => {
+    const { byId } = coverageIndex();
+    if (byId.size === 0) return [];
+    const alternatives = [...byId.keys()].sort((a, b) => b.length - a.length).map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    const pattern = new RegExp(`(?<![\\w-])(${alternatives})(?![\\w-])`, "g");
+    const first = new Map<string, number>();
+    lines.forEach((line, i) => {
+      for (const match of line.plain.matchAll(pattern)) if (!first.has(match[1])) first.set(match[1], i + 1);
+    });
+    return [...first].map(([id, line]) => ({ id, line, name: byId.get(id)?.name ?? "" }));
+  }, [lines]);
+
+  return html`<div class="source-viewer" role="dialog" aria-modal="true" aria-label=${view.path} onClick=${onClose}>
+    <div class="source-viewer-frame" onClick=${(e: Event) => e.stopPropagation()}>
+      <div class="source-viewer-bar">
+        <span class="source-path" title=${view.path}>${view.path}</span>
+        <span class="source-viewer-count">${t("source.lines", { count: lines.length })}</span>
+        ${casesHere.length > 0
+          ? html`<select
+              class="source-viewer-jump"
+              aria-label=${t("source.jumpCase")}
+              value=""
+              onChange=${(e: Event) => {
+                const select = e.target as HTMLSelectElement;
+                const line = Number(select.value);
+                select.value = "";
+                if (line) {
+                  goTo(line);
+                  setFocused(line);
+                }
+              }}
+            >
+              <option value="">${t("source.jumpCase")}</option>
+              ${casesHere.map((item) => html`<option key=${item.id} value=${item.line}>${t("source.jumpItem", { id: item.id, name: item.name, line: item.line })}</option>`)}
+            </select>`
+          : null}
+        <button class="source-viewer-close" type="button" title=${t("source.close")} aria-label=${t("source.closeLabel")} onClick=${onClose}>✕</button>
+      </div>
+      <div class="source-viewer-body" ref=${bodyRef}>
+        ${text === null
+          ? html`<p class="source-missing">${t("source.loading")}</p>`
+          : text === undefined
+            ? html`<p class="source-missing">${t("source.fileMissing")}</p>`
+            : lines.map((line, i) => {
+              const n = i + 1;
+              const inRange = n >= view.start && n <= view.end;
+              return html`<div key=${n} class=${"src-line" + (inRange ? " src-line-hit" : "") + (focused === n ? " src-line-focus" : "")} data-line=${n}>
+                <span class="src-no" aria-hidden="true">${n}</span>
+                ${line.colored !== undefined ? html`<code class="src-code" dangerouslySetInnerHTML=${{ __html: line.colored }} />` : html`<code class="src-code">${line.plain}</code>`}
+              </div>`;
+            })}
+      </div>
+    </div>
+  </div>`;
+}
+
+/** Mounted on <body> like the lightbox: a fixed overlay inside a case card would be pinned to the card's container-query box */
+function useSourceViewer(view: SourceView | null, onClose: () => void) {
+  useEffect(() => {
+    if (!view) return;
+    const opener = document.activeElement;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    render(html`<${SourceViewer} view=${view} onClose=${onClose} />`, host);
+    host.querySelector<HTMLElement>(".source-viewer-close")?.focus();
+    // Capture phase: the page's own shortcuts (g for the guide, ⌘K for search) must not act behind the viewer
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (!(e.key === "g" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"))) return;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      render(null, host);
+      host.remove();
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [view]);
+}
+
 /** The test code behind an automated case, or a note that none was found where it was searched */
 function CaseSources({ sources }: { sources: SourceSnippet[] }) {
+  const [viewing, setViewing] = useState<SourceView | null>(null);
+  useSourceViewer(viewing, () => setViewing(null));
+  const viewButton = (path: string, file: string, start: number, end: number) =>
+    window.__SOURCE_FILES__?.[path] === undefined || typeof DecompressionStream === "undefined"
+      ? null
+      : html`<button class="link-btn source-view" type="button" onClick=${() => setViewing({ path, file, start, end })}>${t("source.viewFile")}</button>`;
   return html`<section class="case-sources">
     <h5 class="eyebrow">${t("case.source")}</h5>
     ${sources.length === 0
@@ -1181,10 +1330,11 @@ function CaseSources({ sources }: { sources: SourceSnippet[] }) {
             <figcaption>
               <span class="source-path" title=${source.path}>${source.file}:${source.startLine}${source.endLine > source.startLine ? `–${source.endLine}` : ""}</span>
               ${source.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}
+              ${viewButton(source.path, source.file, source.startLine, source.endLine)}
             </figcaption>
             ${source.containers?.length ? html`<div class="source-containers">${source.containers.join(" › ")}</div>` : null}
             <pre><${HighlightedCode} code=${source.code} file=${source.file} /></pre>
-            ${source.definitions?.map((item) => html`<details class="source-definition"><summary>${t(item.kind === "type" ? "case.typeDefinition" : "case.dataDefinition", { name: item.name })}</summary><div class="source-path" title=${item.path}>${item.file}:${item.startLine}–${item.endLine}</div>${item.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}<pre><${HighlightedCode} code=${item.code} file=${item.file} /></pre></details>`)}
+            ${source.definitions?.map((item) => html`<details class="source-definition"><summary>${t(item.kind === "type" ? "case.typeDefinition" : "case.dataDefinition", { name: item.name })}</summary><div class="source-path" title=${item.path}>${item.file}:${item.startLine}–${item.endLine}</div>${item.truncated ? html`<span class="source-truncated">${t("case.sourceTruncated")}</span>` : null}${viewButton(item.path, item.file, item.startLine, item.endLine)}<pre><${HighlightedCode} code=${item.code} file=${item.file} /></pre></details>`)}
           </figure>`
         )}
   </section>`;
