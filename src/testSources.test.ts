@@ -4,16 +4,88 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { buildSourceIndex } from "./testSources";
 
-async function snippets(code: string, ids = ["LOGIN-001"]) {
+async function indexed(code: string, ids: string[], name = "Spec.kt") {
   const dir = mkdtempSync(join(tmpdir(), "sheet-sources-"));
   try {
-    writeFileSync(join(dir, "Spec.kt"), code);
+    writeFileSync(join(dir, name), code);
     const index = await buildSourceIndex([dir], ids);
-    return ids.map((id) => index.snippetsFor(id));
+    return ids.map((id) => ({ snippets: index.snippetsFor(id), mentions: index.mentionsOf(id) }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+async function snippets(code: string, ids = ["LOGIN-001"]) {
+  return (await indexed(code, ids)).map((found) => found.snippets);
+}
+
+test("an ID in a comment is a mention, not a test, even inside or above another case's test", async () => {
+  const [locked, unlock, shared, boundary] = await indexed(
+    `class Spec : FunSpec({
+    "LOGIN-001: a locked account cannot log in" {
+        // The unlock path (LOGIN-002) is checked by hand: it needs the help desk's approval mail.
+        check()
+    }
+
+    // Same rule as LOGIN-005, so this only checks the boundary.
+    "LOGIN-006: the 6th failed attempt locks the account" { check() }
+})`,
+    ["LOGIN-001", "LOGIN-002", "LOGIN-005", "LOGIN-006"]
+  );
+  expect(locked.snippets).toHaveLength(1);
+  expect(unlock).toEqual({ snippets: [], mentions: [{ file: "Spec.kt", path: expect.any(String), line: 3 }] });
+  expect(shared.snippets).toEqual([]);
+  expect(shared.mentions.map((mention) => mention.line)).toEqual([7]);
+  expect(boundary.snippets.map((snippet) => snippet.title)).toEqual(["the 6th failed attempt locks the account"]);
+  expect(boundary.mentions).toEqual([]);
+});
+
+test("a comment opener inside a single-quoted string does not hide the tests below it", async () => {
+  const [first, second] = await indexed(
+    `describe('login', () => {
+  beforeEach(() => cy.intercept('/api/*'))
+  it('LOGIN-001: logs in', () => { check() })
+  it('opens http://host/x (LOGIN-002)', () => { check() })
+})`,
+    ["LOGIN-001", "LOGIN-002"],
+    "login.spec.ts"
+  );
+  for (const found of [first, second]) {
+    expect(found.snippets).toHaveLength(1);
+    expect(found.mentions).toEqual([]);
+  }
+});
+
+test("a block or doc comment above a test does not make it the case's test", async () => {
+  const [found] = await indexed(
+    `class J {
+    /**
+     * See LOGIN-001 for the rule.
+     */
+    @Test
+    fun other() { check() }
+    /* LOGIN-001 */ @Test fun another() { }
+}`,
+    ["LOGIN-001"]
+  );
+  expect(found.snippets).toEqual([]);
+  expect(found.mentions.map((mention) => mention.line)).toEqual([3, 7]);
+});
+
+test("an ID in both a test's name and a comment is one test, and the comment is still noted", async () => {
+  const [found] = await indexed(
+    `class Spec : FunSpec({
+    test("LOGIN-001: logs in at https://example.com//login") {
+        // LOGIN-001 needs a fresh account
+        check()
+    }
+})`,
+    ["LOGIN-001"]
+  );
+  expect(found.snippets).toHaveLength(1);
+  expect(found.snippets[0].title).toBe("logs in at https://example.com//login");
+  expect(found.mentions.map((mention) => mention.line)).toEqual([3]);
+});
 
 test("filtered for loops show every multiline consumer for every data row", async () => {
   const [first, second] = await snippets(`private val ROWS = listOf(
@@ -202,7 +274,9 @@ class J {
 }`,
     ids
   );
-  expect(found.map((list) => list[0]?.title)).toEqual(['can log in "fast"', "session issued", "a session is issued after login", "backticked name", undefined]);
+  // LOGIN-003 is only in a comment, so it names no test
+  expect(found.map((list) => list[0]?.title)).toEqual(['can log in "fast"', "session issued", undefined, "backticked name", undefined]);
+  expect(found[2]).toEqual([]);
 });
 
 test("a data row has no name of its own, so no sentence is made up for it", async () => {

@@ -231,9 +231,10 @@ export const ja: Record<MessageKey, string> = {
   "col.check": "確認項目",
   "col.coveredBy": "任せ先",
   "case.automationNote": "人が確かめること",
-  "case.sourceMissing": "自動化と記されていますが、このケースに触れているテストコードが見つかりません。",
+  "case.sourceMissing": "自動化と記されていますが、このケースの ID を持つテストが見つかりません。",
   "case.sourceTruncated": "冒頭のみ",
-  "case.sourceUnexpected": "手動と記されていますが、テストコードに記述があります: {where}",
+  "case.sourceUnexpected": "手動と記されていますが、この ID を持つテストがあります: {where}",
+  "case.sourceMentioned": "テストコードのコメントで言及されています: {where}",
 
   "step.action": "操作",
   "step.expected": "期待結果",

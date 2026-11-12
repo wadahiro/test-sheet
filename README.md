@@ -219,8 +219,27 @@ does not show your home directory. The ID can be in:
 
 Anything else, such as data in a different file from its loop, a language without braces, or an
 ID built at run time (`"LOGIN-00$n"`), shows the lines around the ID, or nothing when the ID never
-appears as written. A case marked `automated` or `semi` that no test code mentions is warned
-about, and so is a `manual` case that some test code does mention.
+appears as written.
+
+An ID that is only in a comment (`// …` or `/* … */`, doc comments included) is a mention, not a test.
+This holds even for a comment right above a test or on its line: a comment can say which other case
+shares a rule, or which case is left to a person. To refer to a case without claiming to test it,
+write its ID as it is in such a comment; there is no need to spell it differently to get past the check:
+
+```kotlin
+"LOGIN-001: a locked account cannot log in" {
+    // The unlock path (LOGIN-002) is checked by hand: it needs the help desk's approval mail.
+    ...
+}
+```
+
+Other comment styles, such as `#`, are not recognized, so an ID in one is read like any other text.
+How the code and the declaration are checked against each other:
+
+| Case | A test carries the ID | Only comments mention it | Neither |
+|---|---|---|---|
+| `automated` / `semi` | the test is shown | warned about; the page lists the comments | warned about |
+| `manual` | warned about (is `automation` out of date?) | the page lists the comments | — |
 
 Each snippet starts with what the test checks, as a sentence: the test's `@DisplayName`, or the name it
 is declared with (a Kotest string such as `test("LOGIN-001: …")`, a backticked Kotlin function), without

@@ -1,5 +1,6 @@
 // Finds the automated test code behind a test case: the files named by `--tests` are searched for the
-// case's ID, and the test method around each hit is cut out so the page can show it.
+// case's ID, and the test method around each hit is cut out so the page can show it. An ID that is only
+// in a comment is a mention, not a test: code names cases it leaves to someone else, or a rule it shares.
 
 import { readFileSync, statSync } from "fs";
 import { isAbsolute, posix, relative, resolve } from "path";
@@ -59,12 +60,21 @@ export interface SourceIndex {
    * a renamed test is noticed, a same-named method somewhere else is not told apart.
    */
   hasTest(name: string): boolean;
+  /** Where a comment names the case; these hits are never taken for its test */
+  mentionsOf(id: string): SourceMention[];
   /**
    * What the page needs to let a reader follow names out of the given files (by the `path` a snippet
    * carries): those files, every file that declares a name they use, and so on, with where each name is
    * declared. Files nothing links to are left out, so the page does not grow with the whole test tree.
    */
   reachable(paths: string[]): { files: Record<string, string>; symbols: Record<string, SourceSymbol[]> };
+}
+
+/** A comment that names a case, as `file:line` for the reader and the `--tests` path for a tooltip */
+export interface SourceMention {
+  file: string;
+  path: string;
+  line: number;
 }
 
 /** Where a name is declared: the lines (1-based, inclusive) to show, from its annotations or comment to the end of its body */
@@ -78,7 +88,7 @@ export interface SourceSymbol {
 
 const MAX_FILE_BYTES = 1_000_000;
 const MAX_SNIPPET_LINES = 80;
-/** Lines kept around a hit that no method could be found for (a language without braces, an ID in a loose comment) */
+/** Lines kept around a hit that no method could be found for (a language without braces, data in another file from its loop) */
 const WINDOW_LINES = 12;
 /** How far below an ID its method's opening brace may sit (annotations, a long signature) */
 const HEADER_LOOKAHEAD_LINES = 8;
@@ -134,12 +144,19 @@ interface BracketPair {
 
 const CLOSERS: Record<string, BracketPair["kind"]> = { "}": "{", ")": "(", "]": "[" };
 
+interface Span {
+  start: number;
+  end: number;
+}
+
 /**
- * Every bracket pair outside strings and comments. Strings are skipped whole, so a Kotlin template such
- * as "${x}" does not count; a nested quote inside a template is rare enough not to be worth parsing.
+ * Every bracket pair outside strings and comments, and where the comments are. Strings are skipped whole,
+ * so a Kotlin template such as "${x}" does not count; a nested quote inside a template is rare enough not
+ * to be worth parsing. Only line and block comments in the C style count: `#` is an attribute in Rust (`#[test]`).
  */
-function bracketPairs(text: string): BracketPair[] {
+function scanBrackets(text: string): { pairs: BracketPair[]; comments: Span[] } {
   const pairs: BracketPair[] = [];
+  const comments: Span[] = [];
   const stack: { at: number; kind: BracketPair["kind"] }[] = [];
   let i = 0;
   while (i < text.length) {
@@ -147,10 +164,14 @@ function bracketPairs(text: string): BracketPair[] {
     const next = text[i + 1];
     if (ch === "/" && next === "/") {
       const end = text.indexOf("\n", i);
-      i = end === -1 ? text.length : end;
+      const stop = end === -1 ? text.length : end;
+      comments.push({ start: i, end: stop });
+      i = stop;
     } else if (ch === "/" && next === "*") {
       const end = text.indexOf("*/", i + 2);
-      i = end === -1 ? text.length : end + 2;
+      const stop = end === -1 ? text.length : end + 2;
+      comments.push({ start: i, end: stop });
+      i = stop;
     } else if (ch === '"' && text.startsWith('"""', i)) {
       const end = text.indexOf('"""', i + 3);
       i = end === -1 ? text.length : end + 3;
@@ -160,9 +181,12 @@ function bracketPairs(text: string): BracketPair[] {
       while (j < text.length && text[j] !== ch && !(ch === '"' && text[j] === "\n")) j += text[j] === "\\" ? 2 : 1;
       i = j + 1;
     } else if (ch === "'") {
-      // A character literal is short; anything longer is an apostrophe (a lifetime, a comment word), not a string
+      // A character literal is short; anything longer is an apostrophe (a lifetime, a comment word), not a string.
+      // A single-quoted string that holds a comment opener (`'/api/*'`, a URL) is skipped whole all the same,
+      // or the "comment" would swallow the tests below it and turn their IDs into mentions.
       const close = text.indexOf("'", i + 1);
-      i = close !== -1 && close - i <= 4 && !text.slice(i, close).includes("\n") ? close + 1 : i + 1;
+      const quoted = close === -1 ? "" : text.slice(i, close);
+      i = close !== -1 && !quoted.includes("\n") && (close - i <= 4 || /\/[/*]/.test(quoted)) ? close + 1 : i + 1;
     } else if (ch === "{" || ch === "(" || ch === "[") {
       stack.push({ at: i, kind: ch });
       i++;
@@ -177,10 +201,12 @@ function bracketPairs(text: string): BracketPair[] {
       i++;
     }
   }
-  return pairs.sort((a, b) => a.open - b.open);
+  return { pairs: pairs.sort((a, b) => a.open - b.open), comments };
 }
 
 interface FileShape {
+  /** In order of position, none overlapping */
+  comments: Span[];
   lines: string[];
   starts: number[];
   braces: BracketPair[];
@@ -189,6 +215,19 @@ interface FileShape {
 }
 
 const contains = (pair: BracketPair, position: number): boolean => pair.open < position && position < pair.close;
+
+function inComment(shape: FileShape, position: number): boolean {
+  let low = 0;
+  let high = shape.comments.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const span = shape.comments[mid];
+    if (position < span.start) high = mid - 1;
+    else if (position >= span.end) low = mid + 1;
+    else return true;
+  }
+  return false;
+}
 const braceDepthAt = (shape: FileShape, position: number): number => shape.braces.filter((pair) => contains(pair, position)).length;
 const argDepthAt = (shape: FileShape, position: number): number => shape.all.filter((pair) => pair.kind !== "{" && contains(pair, position)).length;
 
@@ -357,8 +396,8 @@ function escapeRegExp(value: string): string {
 }
 
 function fileShape(text: string): FileShape {
-  const all = bracketPairs(text);
-  return { lines: text.split("\n"), starts: lineStarts(text), all, braces: all.filter((pair) => pair.kind === "{") };
+  const { pairs: all, comments } = scanBrackets(text);
+  return { comments, lines: text.split("\n"), starts: lineStarts(text), all, braces: all.filter((pair) => pair.kind === "{") };
 }
 
 function shapeOf(file: SourceFile, shapes: Map<SourceFile, FileShape>): FileShape {
@@ -575,8 +614,10 @@ function dataTitle(file: SourceFile, shape: FileShape, plan: SnippetPlan, id: st
   return named === undefined ? undefined : withoutLeadingId(named, id);
 }
 
-function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
+function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, into: Map<string, SourceSnippet[]>, mentions: Map<string, SourceMention[]>, files: SourceFile[], shapes: Map<SourceFile, FileShape>): void {
   let shape: FileShape | null = null;
+  const shown = relative(file.base, file.path).replaceAll("\\", "/");
+  const mentionedLines = new Set<string>();
   const taken = new Map<string, { range: LineRange; snippet: SourceSnippet }[]>();
 
   for (const match of file.text.matchAll(pattern)) {
@@ -585,6 +626,15 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
     if (!shape) {
       shape = shapes.get(file) ?? fileShape(file.text);
       shapes.set(file, shape);
+    }
+    // Even a comment just above a test is not its name: it may say which other case shares a rule
+    if (inComment(shape, match.index!)) {
+      const line = lineOf(shape.starts, match.index!) + 1;
+      if (!mentionedLines.has(`${id}:${line}`)) {
+        mentionedLines.add(`${id}:${line}`);
+        mentions.set(id, [...(mentions.get(id) ?? []), { file: shown, path: posix.join(file.shownBase, shown), line }]);
+      }
+      continue;
     }
     for (const plan of snippetRanges(shape, file.text, match.index!)) {
       const range = plan.body;
@@ -599,7 +649,6 @@ function snippetsInFile(file: SourceFile, ids: Set<string>, pattern: RegExp, int
 
       const truncated = range.end - range.start + 1 > MAX_SNIPPET_LINES;
       const end = truncated ? range.start + MAX_SNIPPET_LINES - 1 : range.end;
-      const shown = relative(file.base, file.path).replaceAll("\\", "/");
       const containers = shape.braces.filter((pair) => contains(pair, shape!.starts[range.start])).flatMap((pair): SourceContainer[] => {
         const line = lineOf(shape!.starts, pair.open);
         const header = shape!.lines[line].slice(0, pair.open - shape!.starts[line]);
@@ -736,19 +785,21 @@ function mentionsTest(files: SourceFile[], name: string): boolean {
 export async function buildSourceIndex(patterns: string[], ids: string[]): Promise<SourceIndex> {
   const { files } = await readSourceFiles(patterns);
   const found = new Map<string, SourceSnippet[]>();
+  const mentions = new Map<string, SourceMention[]>();
   if (ids.length > 0) {
     // Longest first, so LOGIN-0020 is not read as LOGIN-002; the lookarounds keep an ID from matching inside a longer one
     const alternatives = [...ids].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
     const pattern = new RegExp(`(?<![\\w-])(${alternatives})(?![\\w-])`, "g");
     const idSet = new Set(ids);
     const shapes = new Map<SourceFile, FileShape>();
-    for (const file of files) snippetsInFile(file, idSet, pattern, found, files, shapes);
+    for (const file of files) snippetsInFile(file, idSet, pattern, found, mentions, files, shapes);
   }
   const byPath = new Map(files.map((file) => [posix.join(file.shownBase, relative(file.base, file.path).replaceAll("\\", "/")), file.text]));
   let symbols: Map<string, SourceSymbol[]> | undefined;
   return {
     snippetsFor: (id) => found.get(id) ?? [],
     hasTest: (name) => mentionsTest(files, name),
+    mentionsOf: (id) => mentions.get(id) ?? [],
     reachable(paths) {
       symbols ??= symbolIndex(files, new Map());
       const included = new Set(paths.filter((path) => byPath.has(path)));

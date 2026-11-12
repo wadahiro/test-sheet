@@ -242,9 +242,10 @@ export const en = {
   "col.check": "Check",
   "col.coveredBy": "Covered by",
   "case.automationNote": "Checked by hand",
-  "case.sourceMissing": "No test code mentions this case, although it is marked as automated.",
+  "case.sourceMissing": "No test carries this case's ID, although it is marked as automated.",
   "case.sourceTruncated": "start only",
-  "case.sourceUnexpected": "Marked manual, but test code mentions it: {where}",
+  "case.sourceUnexpected": "Marked manual, but a test carries its ID: {where}",
+  "case.sourceMentioned": "Mentioned in test code comments: {where}",
 
   // Steps and results
   "step.action": "Action",

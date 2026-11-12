@@ -146,19 +146,24 @@ async function renderTestData(testData: unknown, marked: Marked): Promise<string
 
 /**
  * What searching the test code found for a case. Only a case declared automated or semi carries its
- * code; a manual one that has some is flagged, since the declaration is probably stale. `sources` is
- * absent when no code was searched, so the page does not call every case's code missing.
+ * code; a manual one that has a test is flagged, since the declaration is probably stale. A comment that
+ * names the case is only a mention: it neither stands in for a missing test nor contradicts `manual`, so
+ * nobody has to misspell an ID to get past the check. `sources` is absent when no code was searched, so
+ * the page does not call every case's code missing.
  */
-function sourceFields(tc: TestSuiteTestCases["testCases"][number], index: SourceIndex | undefined): { sources?: SourceSnippet[]; unexpectedSources?: string[] } {
+function sourceFields(tc: TestSuiteTestCases["testCases"][number], index: SourceIndex | undefined): { sources?: SourceSnippet[]; unexpectedSources?: string[]; mentionedIn?: string[] } {
   if (!index) return {};
   const found = index.snippetsFor(tc._tcId ?? "");
+  const mentioned = index.mentionsOf(tc._tcId ?? "").map((mention) => `${mention.file}:${mention.line}`);
+  const mentionedIn = found.length === 0 && mentioned.length > 0 ? { mentionedIn: mentioned } : {};
   const where = (snippet: SourceSnippet) => `${snippet.file}:${snippet.startLine}`;
   if (!tc.automation || tc.automation === "manual") {
     if (found.length > 0) warn(`${tc._tcId} is manual but test code mentions it (${found.map(where).join(", ")}); is automation out of date?`);
-    return found.length > 0 ? { unexpectedSources: found.map(where) } : {};
+    return found.length > 0 ? { unexpectedSources: found.map(where) } : mentionedIn;
   }
-  if (found.length === 0) warn(`${tc._tcId} is ${tc.automation} but no test code mentions it`);
-  return { sources: found };
+  if (found.length === 0 && mentioned.length > 0) warn(`${tc._tcId} is ${tc.automation} and mentioned in comments (${mentioned.join(", ")}), but no test carries it`);
+  else if (found.length === 0) warn(`${tc._tcId} is ${tc.automation} but no test code mentions it`);
+  return { sources: found, ...mentionedIn };
 }
 
 async function renderTestCase(tc: TestSuiteTestCases["testCases"][number] & { layerLabel?: string; layerDescription?: string }, { notes: notesMarked, step: stepMarked }: CaseRenderers, sources: SourceIndex | undefined) {

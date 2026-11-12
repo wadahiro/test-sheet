@@ -59,10 +59,12 @@ interface TestCase {
   dropped?: Dropped[];
   /** `automation_note` rendered as Markdown at generation time */
   automationNoteHtml?: string;
-  /** Test code that mentions the case; only for an automated or semi case, and absent when no code was searched */
+  /** The tests that carry the case's ID; only for an automated or semi case, and absent when no code was searched */
   sources?: SourceSnippet[];
-  /** Where test code mentions a case declared manual, which suggests the declaration is out of date */
+  /** Where a test carries the ID of a case declared manual, which suggests the declaration is out of date */
   unexpectedSources?: string[];
+  /** Comments that name the case (`file:line`), when no test carries its ID */
+  mentionedIn?: string[];
 }
 
 /** status(permanent) is orthogonal to skip(temporary) — either one takes the case out of active coverage. */
@@ -1116,7 +1118,7 @@ function Handoff({ tc }: { tc: TestCase }) {
 function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null; tags?: boolean }) {
   const note = inactiveNote(tc);
   const shownTags = tags ? (tc.tags ?? []) : [];
-  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note || !!tc.unexpectedSources;
+  const hasMeta = shownTags.length > 0 || !!tc.legacy_marker || !!note || !!tc.unexpectedSources || !!tc.mentionedIn;
   const hasPreconditions = !!tc.preconditions && tc.preconditions.length > 0;
   return html`
     <div class="test-case-body">
@@ -1125,6 +1127,7 @@ function CaseBody({ tc, run, tags = true }: { tc: TestCase; run: CaseRun | null;
             ${shownTags.map((tag) => html`<a class="tag-chip" key=${tag} href=${overviewTagHash(tag)} title=${t("case.tagLink")}>${tag}</a>`)}
             ${note ? html`<span class="inactive-note">${note}</span>` : null}
             ${tc.unexpectedSources ? html`<span class="inactive-note">${t("case.sourceUnexpected", { where: tc.unexpectedSources.join(", ") })}</span>` : null}
+            ${tc.mentionedIn ? html`<span class="inactive-note">${t("case.sourceMentioned", { where: tc.mentionedIn.join(", ") })}</span>` : null}
             ${tc.legacy_marker ? html`<span class="legacy-marker">${t("case.legacyMarker", { marker: tc.legacy_marker })}</span>` : null}
           </div>`
         : null}

@@ -115,7 +115,8 @@ Options:
                          {0} is the match and {1}… are its capture groups. Applies to every suite,
                          after each suite's own metadata.autolinks; repeatable.
   --tests <dir|glob>     Search these files (relative to the working directory) for each automated
-                         case's ID and show the test method around it in the case. Repeatable.
+                         case's ID and show the test method around it in the case. An ID only in a
+                         comment is a mention, not a test. Repeatable.
   --layers-scope <all|declared>
                          Check all suites (default), or only suites with metadata.layers.
   --layers <file>        Declare project layers in a YAML mapping; suite declarations override fields.
